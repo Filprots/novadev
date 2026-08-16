@@ -1,0 +1,19 @@
+{
+  "name": "novadev",
+  "version": "0.1.0",
+  "description": "novadev — a framework/language/agent-agnostic structured development system: git-tracked todos, archive, postponed, sparks, wiki, and memories, deployed into any project with one command.",
+  "type": "module",
+  "bin": {
+    "novadev": "bin/novadev.ts"
+  },
+  "files": [
+    "bin",
+    "src",
+    "templates",
+    "README.md"
+  ],
+  "engines": {
+    "bun": ">=1.0.0"
+  },
+  "license": "MIT"
+}

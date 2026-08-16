@@ -1,0 +1,49 @@
+// `novadev archive <batch>… | --done` — move fully-recorded batches into archive/<year>/.
+import { existsSync, mkdirSync, renameSync } from 'node:fs';
+import { join } from 'node:path';
+import {
+  BATCH_RE,
+  batchIsDone,
+  fail,
+  listDirs,
+  novadevDir,
+  requireProjectRoot,
+} from './lib.ts';
+
+export function archive(args: string[]): void {
+  const root = requireProjectRoot();
+  const nd = novadevDir(root);
+  const todosDir = join(nd, 'todos');
+
+  let targets: string[];
+  if (args.includes('--done')) {
+    targets = listDirs(todosDir).filter((b) => batchIsDone(join(todosDir, b)));
+    if (targets.length === 0) {
+      console.log('no fully-recorded batches to archive.');
+      return;
+    }
+  } else if (args.length > 0) {
+    targets = args;
+  } else {
+    fail('usage: novadev archive <batch>… | --done');
+  }
+
+  for (const batch of targets!) {
+    const src = join(todosDir, batch);
+    if (!existsSync(src)) fail(`batch not found: todos/${batch}`);
+    const m = batch.match(BATCH_RE);
+    if (!m) fail(`batch name "${batch}" does not match YYYY-MM-DD_N`);
+    if (!batchIsDone(src)) {
+      fail(
+        `batch ${batch} is not fully recorded — every todo folder needs ai_completed.md or ai_failed.md (run \`novadev status\`).`,
+      );
+    }
+    const destDir = join(nd, 'archive', m![1]);
+    mkdirSync(destDir, { recursive: true });
+    const dest = join(destDir, batch);
+    if (existsSync(dest)) fail(`archive already contains ${m![1]}/${batch}`);
+    renameSync(src, dest);
+    console.log(`archived todos/${batch} → archive/${m![1]}/${batch}`);
+  }
+  console.log('remember to commit the move.');
+}

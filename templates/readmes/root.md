@@ -1,0 +1,25 @@
+# .novadev — structured development system
+
+<!-- managed by `novadev deploy` — local edits will be overwritten on the next deploy. -->
+
+This folder is the project's **novadev** root: a framework/language/agent-agnostic
+development system. Task briefs go in, work happens, exhaustive records and
+distilled knowledge come out — all **tracked in git**, so the folder itself IS the
+development history.
+
+| Folder | What lives there |
+|---|---|
+| `todos/` | Task batches (`YYYY-MM-DD_N/`) with per-todo brief folders, authored by the human |
+| `archive/` | Finished batches, moved here by year (`novadev archive --done`) |
+| `postponed/` | Deferred work with explicit `do-when` / `discard-if` triggers |
+| `sparks/` | Raw unshaped ideas — not yet tasks |
+| `wiki/` | The project pre-context agents load before working (strict page set) |
+| `memories/` | Hard-won gotchas, guides, decisions, guardrails + `INDEX.md` |
+| `skills/` | The agent playbooks that run this system (managed by deploy) |
+
+**Agents:** the rule of the house is `skills/workflow.md` — always applied.
+Start every substantive task by loading `wiki/INDEX.md` (create the wiki per
+`skills/wiki-init.md` if missing) and scanning `memories/INDEX.md`.
+
+**Humans:** drop task briefs into `todos/` (`novadev new` scaffolds a batch),
+check progress with `novadev status`, validate structure with `novadev doctor`.
