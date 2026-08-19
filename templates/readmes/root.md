@@ -9,7 +9,7 @@ development history.
 
 | Folder | What lives there |
 |---|---|
-| `todos/` | Task batches (`YYYY-MM-DD_N/`) with per-todo brief folders, authored by the human |
+| `todos/` | Task batches (`YYYY-MM-DD_N/`) with per-todo brief folders — human-authored, or filed by the agent from chat-initiated requests |
 | `archive/` | Finished batches, moved here by year (`novadev archive --done`) |
 | `postponed/` | Deferred work with explicit `do-when` / `discard-if` triggers |
 | `sparks/` | Raw unshaped ideas — not yet tasks |

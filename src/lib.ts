@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
 export const ROOT_DIR_NAME = '.novadev';
-export const NOVADEV_VERSION = '0.1.0';
+export const NOVADEV_VERSION = '0.2.0';
 
 /** Batch folder name contract: YYYY-MM-DD_N (N = same-day sequence number, 1-based). */
 export const BATCH_RE = /^(\d{4})-(\d{2})-(\d{2})_(\d+)$/;
@@ -29,7 +29,7 @@ export const SKILLS = [
     file: 'workflow.md',
     slug: 'novadev-workflow',
     description:
-      'Execute novadev todo briefs: pre-context loading (wiki, memories, postponed), doing the work, writing ai_completed/ai_failed/ai_progress records, and auto-writing memories. The always-applied core rule of the novadev system.',
+      'Execute novadev todo briefs and chat-initiated work: pre-context loading (wiki, memories, postponed), doing the work, filing chat requests as todos with transcribed briefs, writing ai_completed/ai_failed/ai_progress records, and auto-writing memories. The always-applied core rule of the novadev system.',
   },
   {
     file: 'wiki-init.md',

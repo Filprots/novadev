@@ -3,8 +3,10 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   BATCH_RE,
+  NOVADEV_VERSION,
   RECORD_COMPLETED,
   RECORD_FAILED,
+  RECORD_PROGRESS,
   SKILLS,
   WIKI_PAGES,
   listDirs,
@@ -45,6 +47,14 @@ export function doctor(): void {
       if (files.includes(RECORD_COMPLETED) && files.includes(RECORD_FAILED)) {
         problems.push(
           `todos/${batch}/${todo}: BOTH ${RECORD_COMPLETED} and ${RECORD_FAILED} present — keep one`,
+        );
+      }
+      if (
+        files.includes(RECORD_PROGRESS) &&
+        (files.includes(RECORD_COMPLETED) || files.includes(RECORD_FAILED))
+      ) {
+        problems.push(
+          `todos/${batch}/${todo}: stale ${RECORD_PROGRESS} beside a terminal record — delete it (the record replaces it)`,
         );
       }
     }
@@ -114,6 +124,27 @@ export function doctor(): void {
   }
 
   // --- skills: canonical files present + in sync with the installed novadev ---
+  // Direction matters: when the DEPLOYED novadev is newer than this install,
+  // `novadev deploy` would downgrade the project's skills — prescribe an upgrade instead.
+  const deployedIsNewer = (() => {
+    try {
+      const manifest = JSON.parse(readFileSync(join(nd, 'novadev.json'), 'utf8'));
+      if (typeof manifest.version !== 'string') return false;
+      const a = manifest.version.split('.').map(Number);
+      const b = NOVADEV_VERSION.split('.').map(Number);
+      for (let i = 0; i < 3; i++) {
+        if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) > (b[i] ?? 0);
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  })();
+  if (deployedIsNewer) {
+    problems.push(
+      `novadev.json: deployed novadev is newer than this install (${NOVADEV_VERSION}) — upgrade the install; do NOT run \`novadev deploy\` from it (that would downgrade the deployed skills)`,
+    );
+  }
   const skillsDir = join(nd, 'skills');
   const templates = join(packageDir(), 'templates', 'skills');
   for (const skill of SKILLS) {
@@ -121,6 +152,7 @@ export function doctor(): void {
     if (!existsSync(deployed)) {
       problems.push(`skills/${skill.file}: missing — run \`novadev deploy\``);
     } else if (
+      !deployedIsNewer &&
       existsSync(join(templates, skill.file)) &&
       readFileSync(deployed, 'utf8') !== readFileSync(join(templates, skill.file), 'utf8')
     ) {

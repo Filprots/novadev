@@ -8,8 +8,11 @@ export function newBatch(slugs: string[]): void {
   const todos = join(novadevDir(root), 'todos');
   const today = todayStamp();
 
+  // A same-day batch that was already archived still claims its N — recreating
+  // the name would make the new batch un-archivable (name collision in archive/).
+  const archiveYear = join(novadevDir(root), 'archive', today.slice(0, 4));
   let maxN = 0;
-  for (const name of listDirs(todos)) {
+  for (const name of [...listDirs(todos), ...listDirs(archiveYear)]) {
     const m = name.match(BATCH_RE);
     if (m && name.startsWith(today + '_')) maxN = Math.max(maxN, Number(m[4]));
   }

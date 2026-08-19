@@ -15,7 +15,7 @@ It is agent-, framework-, and language-agnostic: it only prescribes structure.
 
 ```
 .novadev/
-  todos/       task batches the human authored, waiting to be executed
+  todos/       task batches waiting to be executed — human-authored, or filed by YOU from chat requests
   archive/     finished batches, moved here by year
   postponed/   deferred work with an explicit wake-up trigger
   sparks/      raw unshaped ideas — not yet tasks
@@ -27,14 +27,18 @@ It is agent-, framework-, and language-agnostic: it only prescribes structure.
 ## Vocabulary
 
 - **Batch** — one folder `todos/YYYY-MM-DD_N/` (`N` = same-day sequence number,
-  1-based). Created by the human (or via `novadev new`).
+  1-based). Created by the human (or via `novadev new`), or by YOU when filing
+  chat-initiated work.
 - **Todo** — one folder inside a batch, e.g. `todos/2026-08-16_1/fix-login/`.
   Numbered prefixes (`01-…`, `02-…`) express intended order; a `00-program` todo,
   when present, is the batch's owner plan — read it first.
-- **Brief** — the human's task input inside a todo folder: one or more `.txt`/`.md`
-  files plus optional screenshots or other attachments.
+- **Brief** — the task input inside a todo folder: one or more `.txt`/`.md`
+  files plus optional screenshots or other attachments. Usually human-authored;
+  for a chat-initiated todo it is the `prompt.md` YOU transcribe from the chat.
 - **Record** — the file YOU write into the todo folder when work concludes
   (`ai_completed.md` / `ai_failed.md`) or is long-running (`ai_progress.md`).
+- **Chat-initiated todo** — a todo YOU create when the human asks for work in the
+  chat that no open todo covers (see "Chat-initiated work" below).
 
 ## Before ANY substantive work (the pre-context ritual)
 
@@ -97,6 +101,83 @@ concludes, replace it with `ai_completed.md` or `ai_failed.md`.
 - A later todo that refines an earlier one: cross-link both records.
 - Never claim verification you did not run. If something is skipped, failing, or
   unverified, say so in the record.
+
+## Chat-initiated work — file it as a todo (mandatory)
+
+Todos usually arrive as human-authored briefs. But when the human asks you **in
+the chat session** to implement, fix, change, or build something that no open
+todo already covers, the request itself IS a todo and MUST be documented as one.
+A match against `postponed/` or `sparks/` does NOT exempt the ask — it means the
+item's trigger fired and it graduates into the new todo (step 1). Chat
+evaporates; the todo folder is the only durable trace. Nothing project-changing
+happens off the books.
+
+**Scope.** The rule fires for any chat request whose execution changes the
+repository (code, config, docs, assets, dependencies), rewrites its history
+(reverts, squashes, release tags), or changes deployed/external state (deploys,
+migrations). It does NOT fire for pure questions, explanations, read-only
+investigation, clerical commits/pushes of work already recorded in a todo, or
+upkeep of `.novadev/` itself — filing or editing todos, postponed items, sparks,
+memories, or the wiki on request (there, the file you create or edit IS the
+durable trace; never file a todo about filing).
+
+**Before starting the work** — not after; an interrupted session must still
+leave a trace:
+
+1. **Check for an existing home first.**
+   - Matches a todo with no terminal record yet (open, or carrying
+     `ai_progress.md`) → work under THAT todo and update its record; no new
+     todo. If the chat adds constraints or decisions beyond the written brief,
+     append them to the brief as a dated addendum
+     (`**Chat addendum, <YYYY-MM-DD>:** …`).
+   - Matches a todo that already has a terminal record — still in `todos/` or
+     moved to `archive/` → do NOT reopen or rewrite the old record: file a NEW
+     chat-initiated todo and cross-link both records. Exception: an
+     `ai_failed.md` marked *deferred* whose remaining work you are now doing —
+     that is the status-flip case under Record conventions; update in place.
+   - Named in a human batch's `00-program` plan but not yet broken out → the one
+     case where you add to a human-authored batch: create the planned
+     `NN-<slug>/` there and transcribe the brief.
+   - Matches a `postponed/` item → its trigger just fired: fold the item's
+     content into the new todo's brief and delete the postponed file.
+   - Matches a `sparks/` file → the spark graduates the same way: fold it into
+     the brief and delete the spark.
+2. **Create the todo.** Reuse the batch YOU created earlier in this conversation
+   if it is still in `todos/`; otherwise create the next `todos/YYYY-MM-DD_N/`
+   (`N` = highest `N` for today across BOTH `todos/` and `archive/<year>/`,
+   plus 1 — a same-day batch already archived still claims its number; `novadev
+   new` computes this). Except for the `00-program` breakout above, never add
+   todos to a human-authored batch. Inside it, create `NN-<slug>/` (`NN` = next
+   number in the batch starting at `01`, arrival order; `00` is reserved for a
+   program todo).
+3. **Transcribe the brief** as `prompt.md` in the todo folder — the chat request
+   made durable:
+
+```markdown
+# prompt — <slug>
+
+**Source:** chat-initiated, transcribed by the agent — <YYYY-MM-DD>
+
+## Request
+<the human's ask — verbatim where short, tightly faithful where long>
+
+## Context from the conversation
+<constraints, clarifications, and decisions the human stated in chat>
+```
+
+**When the work concludes**, write the record exactly as for any other todo:
+`ai_completed.md` or `ai_failed.md`, or `ai_progress.md` if the work is still in
+flight when the session ends. A chat-initiated record carries one EXTRA section,
+because the conversation that shaped the work is not saved anywhere else:
+
+```markdown
+## Thinking
+<the approach and why; alternatives considered and rejected; decisions made
+during the conversation and their rationale; dead ends worth not repeating>
+```
+
+Several chat requests in one conversation → several todos in the same
+conversation batch, each with its own brief and record.
 
 ## Auto-writing memories (mandatory, during the work)
 

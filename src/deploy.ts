@@ -109,7 +109,7 @@ function deployClaudeAdapters(cwd: string, writeManaged: (p: string, c: string) 
       join(dir, 'SKILL.md'),
       `---
 name: ${skill.slug}
-description: ${skill.description}
+description: ${JSON.stringify(skill.description)}
 ---
 
 <!-- adapter managed by \`novadev deploy\` — the canonical playbook lives at ${canonical} -->
@@ -137,8 +137,10 @@ This project uses novadev (\`${ROOT_DIR_NAME}/\`). Always follow
 \`${ROOT_DIR_NAME}/skills/workflow.md\`. Before substantive work, load
 \`${ROOT_DIR_NAME}/wiki/INDEX.md\` (create the wiki per
 \`${ROOT_DIR_NAME}/skills/wiki-init.md\` if missing) and scan
-\`${ROOT_DIR_NAME}/memories/INDEX.md\`. Management playbooks live in
-\`${ROOT_DIR_NAME}/skills/\`.
+\`${ROOT_DIR_NAME}/memories/INDEX.md\`. Chat requests to implement/fix/change
+anything that no open todo covers must themselves be FILED as todos —
+brief transcribed as \`prompt.md\`, concluded with an ai_ record — per the
+workflow playbook. Management playbooks live in \`${ROOT_DIR_NAME}/skills/\`.
 `,
   );
 }
@@ -153,6 +155,12 @@ postponed, sparks, wiki, and memories.
 - **Always follow** \`${ROOT_DIR_NAME}/skills/workflow.md\` for any development task —
   it defines todo execution, the ai_completed/ai_failed/ai_progress records, and
   when to auto-write memories.
+- **Chat-initiated work**: when the human asks in chat to implement/fix/change
+  something that no open todo already covers, FILE it as one before starting — create
+  the todo folder, transcribe the request as its \`prompt.md\` brief, and conclude
+  it with the normal ai_ record plus a Thinking section (rules in
+  \`${ROOT_DIR_NAME}/skills/workflow.md\`). Nothing project-changing happens off
+  the books.
 - **Before substantive work**: load \`${ROOT_DIR_NAME}/wiki/INDEX.md\` (the project
   pre-context). If it is missing, FIRST create the wiki per
   \`${ROOT_DIR_NAME}/skills/wiki-init.md\`.

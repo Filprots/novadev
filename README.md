@@ -33,7 +33,7 @@ novadev doctor                        # validate structure (CI-friendly non-zero
 
 ```
 .novadev/
-  todos/       task batches YYYY-MM-DD_N/<todo>/ — human-authored briefs (.txt/.md + screenshots)
+  todos/       task batches YYYY-MM-DD_N/<todo>/ — briefs: human-authored (.txt/.md + screenshots) or agent-filed prompt.md (chat-initiated)
   archive/     finished batches by year — the browsable development history
   postponed/   deferred work with do-when / discard-if triggers
   sparks/      raw unshaped ideas
@@ -47,6 +47,16 @@ novadev doctor                        # validate structure (CI-friendly non-zero
 why) into the todo folder; long-running work carries `ai_progress.md`. One record
 per todo, updated in place if status changes.
 
+**Chat-initiated work.** When the human asks an agent in chat to
+implement/fix/change something that no open todo already covers, the agent must
+file it as a todo itself, before starting (a matching postponed item or spark
+graduates into that todo's brief): create the batch/todo folder, transcribe the
+request as a `prompt.md` brief, then conclude
+with the normal record — `ai_completed.md`/`ai_failed.md`, or `ai_progress.md` if
+still in flight — plus a `## Thinking` section capturing the reasoning and
+decisions that would otherwise evaporate with the chat. Nothing project-changing
+happens off the books.
+
 **Wiki.** `wiki/INDEX.md` + six mandated pages (overview, stack, architecture,
 conventions, workflows, glossary). Its absence is the signal: an agent MUST create
 it (per `skills/wiki-init.md`) before doing todo work.
@@ -59,7 +69,7 @@ indexes it — guardrails that stop future time-wasting.
 
 | Playbook | Purpose |
 |---|---|
-| `workflow.md` | The always-applied core rule: pre-context ritual, todo execution, records, auto-memories, postponing |
+| `workflow.md` | The always-applied core rule: pre-context ritual, todo execution, chat-initiated filing, records, auto-memories, postponing |
 | `wiki-init.md` | Create the wiki with the strict page structure (investigate, don't guess) |
 | `wiki-update.md` | Keep the wiki true after landed work; full audit on request |
 | `wiki-compact.md` | Shrink the wiki; keep pre-context cheap to load |
