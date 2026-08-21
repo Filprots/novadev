@@ -8,9 +8,19 @@ history.
 
 ## Install
 
+Requires [Bun](https://bun.sh) (>= 1.0).
+
 ```sh
+git clone https://github.com/Filprots/novadev.git
 cd novadev
 bun link          # registers the `novadev` CLI globally
+```
+
+The CLI runs straight from the clone, so upgrading is just:
+
+```sh
+cd novadev
+git pull          # then re-run `novadev deploy` in each project to refresh it
 ```
 
 ## Use
