@@ -53,6 +53,27 @@ It is agent-, framework-, and language-agnostic: it only prescribes structure.
    `.novadev/postponed/*.md` header and report: trigger met → surface it; obsolete →
    recommend deletion; still waiting → say it is parked.
 
+## Batch kickoff (multi-todo batches — the strategic-plan ritual)
+
+When a batch holds SEVERAL todos, do not pick them off one by one blind. First:
+
+1. **Read every brief in the batch** (all files, all screenshots) before starting any.
+2. **Build a strategic plan**: group the todos into waves (quick fixes first — they ship
+   while the big ones are still being designed), spot cross-todo overlaps (two briefs
+   touching one seam get ONE design), and order by dependency, not folder order.
+3. **Settle the open decisions with the human up front** — one batched round of concrete
+   options (recommend one each), never mid-implementation stalls. Record the answers in
+   the batch's `ai_progress.md` header; they govern the whole batch.
+4. **Recon before code where the plan needs it**: read the relevant modules (or fan out
+   read-only investigations) so every wave starts from exact file/line routes instead of
+   guesses. Keep the recon notes — they become the record's evidence.
+5. **Keep `ai_progress.md` at the batch root current** (done / remaining / owed) — a
+   compaction or session handoff must be able to resume from it alone.
+
+This ritual exists because batches are where scope is won or lost: the 2026-08-21_3
+batch (11 todos) shipped in one day precisely because the plan, the user decisions, and
+the recon all happened before the first feature commit.
+
 ## Executing a todo
 
 1. Read the entire brief (all files, look at the screenshots).
