@@ -13,7 +13,7 @@ import {
 const MARK_BEGIN = '<!-- novadev:begin -->';
 const MARK_END = '<!-- novadev:end -->';
 
-const USER_FOLDERS = ['todos', 'archive', 'postponed', 'sparks', 'wiki', 'memories'];
+const USER_FOLDERS = ['todos', 'archive', 'postponed', 'sparks', 'wiki', 'memories', 'features'];
 
 export function deploy(cwd: string = process.cwd()): void {
   const root = join(cwd, ROOT_DIR_NAME);
@@ -58,8 +58,8 @@ export function deploy(cwd: string = process.cwd()): void {
     writeFileSync(memIndex, '# Memories index\n\n(no memories yet)\n');
     created.push(`${ROOT_DIR_NAME}/memories/INDEX.md`);
   }
-  // wiki/INDEX.md is deliberately NOT created: its absence is the signal that an
-  // agent must build the wiki via skills/wiki-init.md.
+  // wiki/INDEX.md and features/INDEX.md are deliberately NOT created: their absence
+  // is the signal that an agent must build them (skills/wiki-init.md, feature-init.md).
 
   // 2. Canonical skill playbooks (framework-owned, always refreshed).
   const skillsDir = join(root, 'skills');
@@ -140,7 +140,10 @@ This project uses novadev (\`${ROOT_DIR_NAME}/\`). Always follow
 \`${ROOT_DIR_NAME}/memories/INDEX.md\`. Chat requests to implement/fix/change
 anything that no open todo covers must themselves be FILED as todos —
 brief transcribed as \`prompt.md\`, concluded with an ai_ record — per the
-workflow playbook. Management playbooks live in \`${ROOT_DIR_NAME}/skills/\`.
+workflow playbook. Check \`${ROOT_DIR_NAME}/features/INDEX.md\` before designing
+anything new (duplicate/overlap/conflict), link each record to its feature with
+\`**Feature:** FEAT-NNNN\`, and run \`novadev links --fix\` afterwards. Management
+playbooks live in \`${ROOT_DIR_NAME}/skills/\`.
 `,
   );
 }
@@ -150,7 +153,7 @@ function managedSection(): string {
 ## novadev — structured development system (managed by \`novadev deploy\`, do not edit inside markers)
 
 This project uses **novadev** (\`${ROOT_DIR_NAME}/\`): git-tracked todos, archive,
-postponed, sparks, wiki, and memories.
+postponed, sparks, wiki, memories, and a features registry.
 
 - **Always follow** \`${ROOT_DIR_NAME}/skills/workflow.md\` for any development task —
   it defines todo execution, the ai_completed/ai_failed/ai_progress records, and
@@ -165,8 +168,15 @@ postponed, sparks, wiki, and memories.
   pre-context). If it is missing, FIRST create the wiki per
   \`${ROOT_DIR_NAME}/skills/wiki-init.md\`.
 - **Scan** \`${ROOT_DIR_NAME}/memories/INDEX.md\` for guardrails touching your task.
-- Management playbooks (wiki-update, wiki-compact, memories-review, debt-scan)
-  live in \`${ROOT_DIR_NAME}/skills/\`.
+- **Features**: \`${ROOT_DIR_NAME}/features/\` is the registry of what this software
+  DOES (one \`FEAT-NNNN\` file per feature). Before designing anything new, check it
+  for duplicates/overlap/conflicts (\`novadev features --touching <path>\`, playbook
+  \`${ROOT_DIR_NAME}/skills/feature-check.md\`). When work lands, link the record to
+  its feature (\`**Feature:** FEAT-0007\`) and run \`novadev links --fix\` to
+  regenerate the backlinks.
+- Management playbooks (wiki-update, wiki-compact, memories-review, debt-scan,
+  feature-init, feature-check, feature-update, links-audit) live in
+  \`${ROOT_DIR_NAME}/skills/\`.
 ${MARK_END}`;
 }
 

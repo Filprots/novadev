@@ -16,6 +16,7 @@ import {
   readFrontmatter,
   requireProjectRoot,
 } from './lib.ts';
+import { auditLinks } from './links.ts';
 
 export function doctor(): void {
   const root = requireProjectRoot();
@@ -162,8 +163,25 @@ export function doctor(): void {
     if (!existsSync(adapter)) notes.push(`.claude/skills/${skill.slug}: adapter missing — run \`novadev deploy\``);
   }
 
+  // --- features + the link graph (shared with `novadev links`) ---
+  const audit = auditLinks(root);
+  problems.push(...audit.problems);
+  notes.push(...audit.notes);
+  for (const fix of audit.fixes) {
+    problems.push(`${fix.label} — run \`novadev links --fix\``);
+  }
+
   // --- unknown top-level folders: tolerated, but surfaced ---
-  const known = new Set(['todos', 'archive', 'postponed', 'sparks', 'wiki', 'memories', 'skills']);
+  const known = new Set([
+    'todos',
+    'archive',
+    'postponed',
+    'sparks',
+    'wiki',
+    'memories',
+    'features',
+    'skills',
+  ]);
   for (const dir of listDirs(nd)) {
     if (!known.has(dir)) notes.push(`.novadev/${dir}/: not a novadev folder (tolerated)`);
   }

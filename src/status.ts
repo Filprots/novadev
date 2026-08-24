@@ -2,8 +2,10 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  FEATURE_STATUSES,
   batchIsDone,
   listDirs,
+  listFeatures,
   listFiles,
   novadevDir,
   readFrontmatter,
@@ -50,6 +52,23 @@ export function status(): void {
     (f) => f.endsWith('.md') && f !== 'INDEX.md' && f !== 'README.md',
   );
   console.log(`memories — ${memories.length} memory file(s)`);
+
+  // Features by lifecycle state.
+  const features = listFeatures(nd);
+  if (features.length === 0) {
+    console.log(
+      existsSync(join(nd, 'features', 'INDEX.md'))
+        ? 'features — 0 entries'
+        : 'features — MISSING (an agent must create it: skills/feature-init.md)',
+    );
+  } else {
+    const counts = new Map<string, number>();
+    for (const f of features) counts.set(f.status, (counts.get(f.status) ?? 0) + 1);
+    const parts = FEATURE_STATUSES.filter((s) => counts.has(s)).map((s) => `${counts.get(s)} ${s}`);
+    const unknown = features.filter((f) => !(FEATURE_STATUSES as readonly string[]).includes(f.status));
+    if (unknown.length) parts.push(`${unknown.length} unknown-status`);
+    console.log(`features — ${features.length} (${parts.join(', ')})`);
+  }
 
   const wikiIndex = join(nd, 'wiki', 'INDEX.md');
   if (existsSync(wikiIndex)) {

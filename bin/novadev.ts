@@ -11,6 +11,10 @@ usage:
   novadev new [slug…]       scaffold today's next batch (todos/YYYY-MM-DD_N/), optional todo folders
   novadev status            stock-take: open todos + record states, postponed triggers, wiki/memories
   novadev archive <batch>…  move fully-recorded batch(es) to archive/<year>/   (or: --done for all)
+  novadev features [query]  search the feature registry; --touching <path> finds overlap,
+                            --status/--area filter, --new <slug> scaffolds an entry
+  novadev links [--fix]     validate the link graph (records ↔ features ↔ commits);
+                            --fix regenerates derived backlinks and features/INDEX.md
   novadev doctor            validate structure; non-zero exit on problems
   novadev help              this help
 `;
@@ -34,6 +38,16 @@ switch (command) {
   case 'archive': {
     const { archive } = await import('../src/archive.ts');
     archive(args);
+    break;
+  }
+  case 'features': {
+    const { features } = await import('../src/features.ts');
+    features(args);
+    break;
+  }
+  case 'links': {
+    const { links } = await import('../src/links.ts');
+    links(args);
     break;
   }
   case 'doctor': {

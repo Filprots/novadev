@@ -15,6 +15,7 @@ development history.
 | `sparks/` | Raw unshaped ideas — not yet tasks |
 | `wiki/` | The project pre-context agents load before working (strict page set) |
 | `memories/` | Hard-won gotchas, guides, decisions, guardrails + `INDEX.md` |
+| `features/` | What the software DOES: one `FEAT-NNNN` file per capability, searchable, linked to the work that built it |
 | `skills/` | The agent playbooks that run this system (managed by deploy) |
 
 **Agents:** the rule of the house is `skills/workflow.md` — always applied.
@@ -22,4 +23,5 @@ Start every substantive task by loading `wiki/INDEX.md` (create the wiki per
 `skills/wiki-init.md` if missing) and scanning `memories/INDEX.md`.
 
 **Humans:** drop task briefs into `todos/` (`novadev new` scaffolds a batch),
-check progress with `novadev status`, validate structure with `novadev doctor`.
+check progress with `novadev status`, search capabilities with `novadev features`,
+validate structure and links with `novadev doctor` / `novadev links`.

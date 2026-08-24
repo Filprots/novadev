@@ -34,9 +34,11 @@ Then:
 
 ```sh
 novadev new fix-login add-dark-mode   # scaffold todos/2026-08-16_1/{01-fix-login,02-add-dark-mode}/
-novadev status                        # open todos + record states, postponed triggers, wiki health
+novadev status                        # open todos + record states, postponed triggers, wiki/features health
+novadev features --touching src/auth  # which features already own this code (conflict pre-flight)
+novadev links --fix                   # regenerate derived backlinks + features/INDEX.md
 novadev archive --done                # move fully-recorded batches to archive/<year>/
-novadev doctor                        # validate structure (CI-friendly non-zero exit)
+novadev doctor                        # validate structure + link graph (CI-friendly non-zero exit)
 ```
 
 ## The system
@@ -49,6 +51,7 @@ novadev doctor                        # validate structure (CI-friendly non-zero
   sparks/      raw unshaped ideas
   wiki/        project pre-context agents load first (strict page set; agent creates via wiki-init)
   memories/    gotchas/guides/decisions/guardrails, auto-written during work + INDEX.md
+  features/    what the software DOES — one FEAT-NNNN file per capability, searchable + linked
   skills/      the canonical agent playbooks (markdown, agent-agnostic; managed by deploy)
 ```
 
@@ -75,6 +78,23 @@ it (per `skills/wiki-init.md`) before doing todo work.
 the agent writes a memory file (frontmatter: title/created/kind/verified) and
 indexes it — guardrails that stop future time-wasting.
 
+**Features + links.** `features/` registers every capability as
+`FEAT-NNNN-<slug>.md` (status, area, tags, the code it `touches:`, and
+`depends-on`/`supersedes`/`conflicts-with` relations). Before anything new is
+designed, it is searched — `novadev features --touching src/auth` answers "what
+already owns this code?" — so duplicates and conflicts get caught at proposal
+time rather than in review.
+
+Records and features are cross-linked, and the graph is maintainable because each
+edge has **one authored direction and one derived direction**: the record names
+its feature (`**Feature:** FEAT-0007`, `**Commits:** abc1234`), and
+`novadev links --fix` regenerates the feature's `## Work` / `## Commits` sections
+and `features/INDEX.md` from it. Nothing is written twice, so backlinks cannot
+rot. All references are **stable IDs, never relative paths** (`FEAT-0007`,
+`2026-08-24_1/01-magic-link`) — archiving moves todo folders, and paths would
+break where IDs keep resolving. `novadev links` validates the whole graph;
+`novadev doctor` includes it.
+
 **Skills** (canonical markdown in `.novadev/skills/`, single source of truth):
 
 | Playbook | Purpose |
@@ -85,6 +105,10 @@ indexes it — guardrails that stop future time-wasting.
 | `wiki-compact.md` | Shrink the wiki; keep pre-context cheap to load |
 | `memories-review.md` | Verify/rewrite/prune memories; resync the index |
 | `debt-scan.md` | Sweep for tech debt and file findings as a new todo batch |
+| `feature-init.md` | Build the features registry by reverse-engineering the current capabilities |
+| `feature-check.md` | Pre-flight a proposed feature: duplicate / overlap / conflict / supersession |
+| `feature-update.md` | Keep the registry true after work lands; full audit on request |
+| `links-audit.md` | Validate and repair the whole link graph; fix what tooling cannot |
 
 ## Agent integration (canonical + adapters)
 

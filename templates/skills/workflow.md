@@ -21,6 +21,7 @@ It is agent-, framework-, and language-agnostic: it only prescribes structure.
   sparks/      raw unshaped ideas — not yet tasks
   wiki/        the project pre-context every agent loads before working
   memories/    hard-won gotchas, guides, and guardrails — read before, write during
+  features/    the registry of what this software DOES — one FEAT-NNNN file per capability
   skills/      these playbooks (managed by `novadev deploy`)
 ```
 
@@ -39,6 +40,12 @@ It is agent-, framework-, and language-agnostic: it only prescribes structure.
   (`ai_completed.md` / `ai_failed.md`) or is long-running (`ai_progress.md`).
 - **Chat-initiated todo** — a todo YOU create when the human asks for work in the
   chat that no open todo covers (see "Chat-initiated work" below).
+- **Feature** — one capability of the software, registered as
+  `features/FEAT-NNNN-<slug>.md` with a lifecycle status. Todos are the *work*;
+  features are the *result* the work accumulates into.
+- **Reference** — how the parts link to each other: always a stable ID
+  (`FEAT-0007`, `2026-08-24_1/01-magic-link`, a commit hash), never a relative
+  path — archiving moves todo folders and would break paths.
 
 ## Before ANY substantive work (the pre-context ritual)
 
@@ -52,6 +59,13 @@ It is agent-, framework-, and language-agnostic: it only prescribes structure.
    or you are about to touch an area a postponed item names), read each
    `.novadev/postponed/*.md` header and report: trigger met → surface it; obsolete →
    recommend deletion; still waiting → say it is parked.
+4. **Check the features registry.** Read `.novadev/features/INDEX.md` and open the
+   features covering your task's area — they tell you what already exists, what owns
+   the code you are about to touch (`novadev features --touching <path>`), and what
+   must not be broken. **If `features/INDEX.md` is missing, create the registry
+   first** per `.novadev/skills/feature-init.md`. Before designing a NEW capability,
+   run the full pre-flight in `.novadev/skills/feature-check.md` — building a
+   duplicate or a conflicting second version is the expensive failure this prevents.
 
 ## Batch kickoff (multi-todo batches — the strategic-plan ritual)
 
@@ -87,19 +101,27 @@ the recon all happened before the first feature commit.
 # ai_completed — <todo slug>
 
 **Date:** <absolute date>
+**Feature:** <FEAT-NNNN, comma-separated if several — or `none — <why>`>
+**Commits:** <hashes, comma-separated — omit the line if nothing was committed>
 
 ## Prompt
 <quote or tightly summarize the brief>
 
 ## What I did
-<the change, key files touched, commit hash(es) if committed>
+<the change, key files touched>
 
 ## Verification
 <tests / typecheck / build / manual checks that confirm it — actual results>
 
 ## Notes
-<follow-ups, known limitations, cross-links to related todos>
+<follow-ups, known limitations, cross-links to related todos (`<batch>/<todo>`)>
 ```
+
+The `**Feature:**` and `**Commits:**` lines are the **authored** half of the link
+graph: `novadev links --fix` reads them and regenerates each feature's `## Work` and
+`## Commits` sections from them. Write them on every record — including
+`ai_failed.md` and `ai_progress.md` — so the registry can show work in flight and
+work that was dropped, not just successes.
 
 ### `ai_failed.md` — did NOT land as a standalone completion
 
@@ -122,6 +144,29 @@ concludes, replace it with `ai_completed.md` or `ai_failed.md`.
 - A later todo that refines an earlier one: cross-link both records.
 - Never claim verification you did not run. If something is skipped, failing, or
   unverified, say so in the record.
+- **Reference by ID, never by relative path** — `2026-08-24_1/01-magic-link`, not
+  `../../todos/…`. Archiving changes folder depth and would break the path.
+
+## Features — register the capability, link the work (mandatory)
+
+Records say what was *done*; the features registry says what the software *has*.
+Both are required, and they are joined by the `**Feature:**` line.
+
+1. **Before designing a new capability**, pre-flight it against the registry —
+   `.novadev/skills/feature-check.md`. Verdict `drop` or `extend FEAT-NNNN` means
+   you do not build a new thing; that is the point.
+2. **When the work starts on a new capability**, create its file
+   (`novadev features --new <slug>`), status `planned` → `in-progress`.
+3. **On the record**, name it: `**Feature:** FEAT-0007` — or `**Feature:** none —
+   <why>` for infra chores, dependency bumps, and doc work. Saying "none" out loud
+   is required; silence is indistinguishable from forgetting.
+4. **When the capability actually works and is verified**, flip the feature to
+   `shipped`, append a dated line to its `## Progress`, and refresh `touches:` /
+   `tags:` if the code surface or vocabulary moved — those fields are what the next
+   `feature-check` searches. Full rules: `.novadev/skills/feature-update.md`.
+5. **Never hand-edit** inside `<!-- novadev:work:… -->` / `<!-- novadev:commits:… -->`
+   markers, or `features/INDEX.md` — all derived, all regenerated by
+   `novadev links --fix`.
 
 ## Chat-initiated work — file it as a todo (mandatory)
 
@@ -248,9 +293,16 @@ dies. Never let a postponed item rot unread (see the pre-context ritual).
 1. **Update the wiki** if your change altered what the wiki describes (new module,
    changed workflow, new dependency, moved boundary) — follow
    `.novadev/skills/wiki-update.md`. A wiki that lies is worse than none.
-2. **Commit** the `.novadev/` record/memory/wiki changes alongside the code.
-3. Archiving: when every todo in a batch has a terminal record, the batch may move
-   to `archive/<year>/` — `novadev archive --done` does this mechanically.
+2. **Update the feature** you touched (status, progress line, `touches:`) per
+   `.novadev/skills/feature-update.md`.
+3. **Regenerate the links**: `novadev links --fix`, then `novadev links` to confirm
+   the graph is consistent. `novadev doctor` runs the same checks.
+4. **Commit** the `.novadev/` record/memory/wiki/feature changes alongside the code,
+   then put the commit hash(es) in the record's `**Commits:**` line and re-run
+   `novadev links --fix` (the hash only exists after the commit).
+5. Archiving: when every todo in a batch has a terminal record, the batch may move
+   to `archive/<year>/` — `novadev archive --done` does this mechanically. Links
+   keep resolving because they are IDs, not paths.
 
 ## Management playbooks (invoke when asked, or when the trigger fits)
 
@@ -261,3 +313,7 @@ dies. Never let a postponed item rot unread (see the pre-context ritual).
 | `wiki-compact.md` | wiki grew fat/redundant; INDEX no longer skimmable |
 | `memories-review.md` | memories suspected stale; periodic hygiene |
 | `debt-scan.md` | human asks to find tech debt and turn it into todos |
+| `feature-init.md` | `features/INDEX.md` missing — build the registry before feature work |
+| `feature-check.md` | a NEW capability is proposed — duplicate/overlap/conflict pre-flight |
+| `feature-update.md` | work changed a capability; full registry audit on request |
+| `links-audit.md` | link graph suspect (`novadev links` complains, big rename/merge/archive sweep) |
