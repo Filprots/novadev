@@ -31,17 +31,39 @@ Judgement call: if you find yourself writing "please just double-check it works"
 you have not identified a real scenario. Either name the specific thing you could not
 observe, or drop it.
 
-## File the task
+## One living task per feature — check for it FIRST
+
+Test tasks are named after the **feature they test** (`totest/FEAT-0007-magic-link/`),
+not after the todo or the date, and there is exactly **one per feature, forever**. It
+is a living document: when new work changes that feature, you revise the existing plan
+instead of filing a second one.
 
 ```sh
-novadev totest --new <slug> --todo <batch>/<todo> --feature FEAT-NNNN --scope "<one line>"
+novadev totest --all            # does this feature already have a task?
 ```
 
-That creates `totest/YYYY-MM-DD_<slug>/` with `test-plan.md` and a `test-results/`
-folder (seeded with a short guide for the human — leave it there). Name the slug
-after the **capability being tested**, not the todo.
+**If a task already exists → revise it (this is the normal case):**
 
-Several todos in one batch needing the same pass → ONE test task covering them, with
+```sh
+novadev totest --round FEAT-0007-magic-link
+```
+
+That rotates the last round's plan snapshot and the human's results into
+`history/<stamp>/`, empties the results inbox, bumps `revision:`, and sets
+`status: awaiting-test`. Then you edit the plan — see "Revising a plan" below.
+
+**If no task exists → create it:**
+
+```sh
+novadev totest --new FEAT-0007 --todos <batch>/<todo> --scope "<one line>"
+```
+
+(`--new` takes a `FEAT-NNNN` and names the folder from the registry; a bare kebab
+slug is the fallback for work with no feature.) The CLI refuses to create a second
+task for a feature that already has one — that refusal is the rule being enforced,
+not an obstacle to route around.
+
+Several todos needing the same pass → ONE task listing them all in `todos:`, with
 every todo's `ai_needstest.md` pointing at it. Do not make the human repeat a setup.
 
 ## Write scenarios a stranger could execute
@@ -80,6 +102,37 @@ Rules that make a plan usable:
 - **`## Out of scope`** — what this round deliberately does not cover. A plan that
   silently omits things reads as "everything was checked".
 
+## Revising a plan when the feature changes (the part that matters most)
+
+A scenario describing behaviour that no longer exists is **worse than no scenario**:
+the human walks it, hits the old expectation, and reports a failure that is really
+just a stale plan — which burns their time and teaches them to distrust the folder.
+
+So when you reopen a task, go through every existing scenario and decide:
+
+| The change… | Do this |
+|---|---|
+| left the scenario valid | keep it — it must be re-walked against the new code |
+| moved what "correct" looks like | **rewrite** its Expect/Watch-for to the new truth |
+| removed the behaviour entirely | **delete** the scenario |
+| made it automatically testable | **delete** it and say which test now covers it |
+| introduced new behaviour | **add** a scenario for it |
+
+Then log it under `## Revisions`, newest last, so the human knows what is different
+since they last tested:
+
+```markdown
+- 2026-09-15 (rev 3) — TTL cut to 5 min: Scenario 2 expectations updated.
+  Scenario 4 (SMS fallback) deleted, that path was removed. New: Scenario 5
+  (rate limiting on resend).
+```
+
+Also refresh the header: what you verified automatically this time, and any setup
+that moved (new URL, new seed data, new device matrix). A plan whose setup is stale
+fails before scenario 1.
+
+Never edit a `history/` snapshot — it records what was actually tested back then.
+
 ## Gate the todo
 
 Add `ai_needstest.md` next to the `ai_completed.md` (both live in the todo folder —
@@ -89,7 +142,7 @@ the record says what you built, the gate says it is not confirmed yet):
 # ai_needstest — <todo slug>
 
 **Date:** <YYYY-MM-DD>
-**Test:** <the totest task id, e.g. 2026-08-27_magic-link>
+**Test:** <the totest task id, e.g. FEAT-0007-magic-link>
 **Feature:** <FEAT-NNNN, or `none — <why>`>
 
 ## Why a human is needed
@@ -106,9 +159,12 @@ While `ai_needstest.md` exists the todo is **not** terminal: `novadev status` sh
 it as `⧗ needstest` and `novadev archive --done` refuses to file the batch away. That
 is the point — a pending test cannot be lost.
 
+Add the todo's ref to the task's `todos:` frontmatter list at the same time — the two
+sides must name each other, and `novadev links` fails when they do not.
+
 ## Finish
 
-1. `novadev totest` — confirm the task shows up as awaiting test.
+1. `novadev totest` — confirm the task shows up as awaiting test at the new revision.
 2. `novadev links` — the gate and the task must reference each other consistently.
 3. Commit both the task and the gate.
 4. **Tell the human plainly**: what you built, what you verified, what you could not,

@@ -39,8 +39,11 @@ It is agent-, framework-, and language-agnostic: it only prescribes structure.
   for a chat-initiated todo it is the `prompt.md` YOU transcribe from the chat.
 - **Record** — the file YOU write into the todo folder when work concludes
   (`ai_completed.md` / `ai_failed.md`) or is long-running (`ai_progress.md`).
-- **Test task** — one folder in `totest/` holding a stepped `test-plan.md` and a
-  `test-results/` folder, filed when verification needs a human.
+- **Test task** — ONE living folder in `totest/` per feature, named after it
+  (`FEAT-0007-magic-link/`), holding a stepped `test-plan.md` and a `test-results/`
+  inbox. New work on that feature REVISES the existing plan and opens a new round —
+  never a second folder, and never a scenario left describing behaviour that the
+  change removed.
 - **Gate** — `ai_needstest.md` on the todo: the work landed but a person must still
   confirm it. It is NOT terminal; the batch cannot archive while it is open. The
   human's `/novadev-review-tests` replaces it with `ai_confirmed.md`.
@@ -147,7 +150,10 @@ concludes, replace it with `ai_completed.md` or `ai_failed.md`.
 Write it beside `ai_completed.md` whenever something could not be verified
 automatically — how it renders, how it feels, a real device or third-party service,
 anything behind credentials you do not hold. It names the `totest/` task holding the
-scenarios (`**Test:** <task id>`). Full rules: `.novadev/skills/test-plan.md`.
+scenarios (`**Test:** FEAT-0007-magic-link`). **Check `novadev totest --all` first:**
+if that feature already has a task, revise its plan and open a round
+(`novadev totest --round <id>`) instead of filing a second one. Full rules:
+`.novadev/skills/test-plan.md`.
 
 **This is not optional politeness.** Saying "I could not test X, please check it" in
 chat loses the hand-off the moment the conversation scrolls; the gate does not get

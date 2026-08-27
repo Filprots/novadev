@@ -178,26 +178,46 @@ export function auditLinks(root: string): Audit {
       if (!byId.has(id)) problems.push(`${where}/${TEST_PLAN_FILE}: feature ${id} does not exist`);
     }
 
-    const owner = task.todoRef ? todoByRef.get(task.todoRef) : undefined;
-    if (task.todoRef && !owner) {
-      problems.push(`${where}/${TEST_PLAN_FILE}: todo "${task.todoRef}" does not exist`);
-    } else if (owner && task.status !== 'reviewed') {
-      if (owner.state !== 'needstest') {
+    // A living task can gate several todos at once; the two sides must list each other.
+    for (const ref of task.todoRefs) {
+      const owner = todoByRef.get(ref);
+      if (!owner) {
+        problems.push(`${where}/${TEST_PLAN_FILE}: todo "${ref}" does not exist`);
+      } else if (task.status !== 'reviewed' && owner.state !== 'needstest') {
         problems.push(
-          `${where}: still awaiting-test, but ${task.todoRef} is "${owner.state}" — the gate and the task disagree`,
+          `${where}: awaiting-test and lists ${ref}, but that todo is "${owner.state}" — the gate and the task disagree`,
         );
-      } else if (owner.testRef && owner.testRef !== task.id) {
+      }
+    }
+    if (task.status !== 'reviewed') {
+      for (const gated of todos) {
+        if (gated.state === 'needstest' && gated.testRef === task.id && !task.todoRefs.includes(gated.todo.ref)) {
+          problems.push(
+            `${where}/${TEST_PLAN_FILE}: ${gated.todo.ref} is gated on this task but missing from "todos:"`,
+          );
+        }
+      }
+    }
+
+    // One living task per feature — a second folder for the same feature is the
+    // duplicate-plan mistake this model exists to prevent.
+    for (const id of task.featureIds) {
+      const twin = tasks.find(
+        (o) => o.id !== task.id && !o.archived && o.featureIds.includes(id),
+      );
+      if (twin && !task.archived && task.id < twin.id) {
         problems.push(
-          `${where}: ${task.todoRef} points at "${owner.testRef}" instead — one of the two refs is wrong`,
+          `totest/${task.id} and totest/${twin.id} both cover ${id} — keep ONE living task per feature and revise its plan`,
         );
       }
     }
 
     if (task.status !== 'reviewed') {
+      const rev = task.revision ? ` rev ${task.revision},` : '';
       notes.push(
         task.hasResults
-          ? `${where}: results are in (${task.results.join(', ')}) — run /novadev-review-tests`
-          : `${where}: waiting on a human to test it (${task.scenarios} scenario(s))`,
+          ? `${where}:${rev} results are in (${task.results.join(', ')}) — run /novadev-review-tests`
+          : `${where}:${rev} waiting on a human to test it (${task.scenarios} scenario(s))`,
       );
     }
   }

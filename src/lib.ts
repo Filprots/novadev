@@ -176,24 +176,38 @@ export function nextFeatureId(nd: string): string {
 // totest — the human-verification queue
 // ---------------------------------------------------------------------------
 
-/** Test task folder contract: YYYY-MM-DD_<kebab-slug> (usually the feature's slug). */
-export const TEST_TASK_RE = /^(\d{4})-(\d{2})-(\d{2})_[a-z0-9][a-z0-9-]*$/;
+/**
+ * One LIVING test task per feature — named after it, never date-stamped. New work on a
+ * feature revises the existing plan in place (old scenarios that the change invalidated
+ * are rewritten or dropped) rather than piling up a second folder: a plan describing
+ * behaviour that no longer exists is worse than no plan, because the human walks it,
+ * hits the old expectation, and reports a failure that is really just a stale scenario.
+ */
+export const TEST_TASK_RE = /^(FEAT-\d{4}-)?[a-z0-9][a-z0-9-]*$/;
+/** The 0.4.0 round-per-folder naming, kept only to give a useful migration error. */
+export const LEGACY_TEST_TASK_RE = /^\d{4}-\d{2}-\d{2}_/;
 export const TEST_PLAN_FILE = 'test-plan.md';
 export const TEST_RESULTS_DIR = 'test-results';
+export const TEST_HISTORY_DIR = 'history';
 export const TEST_STATUSES = ['awaiting-test', 'reviewed'] as const;
-export const TEST_PLAN_REQUIRED_KEYS = ['id', 'created', 'status', 'todo'] as const;
+export const TEST_PLAN_REQUIRED_KEYS = ['id', 'created', 'updated', 'status', 'revision'] as const;
 
 export type TestTask = {
   id: string;
   dir: string;
   planPath: string;
   status: string;
-  todoRef: string;
+  /** Todos gated on the CURRENT round — several may share one task. */
+  todoRefs: string[];
   featureIds: string[];
+  revision: number;
+  lastTested: string;
   scenarios: number;
   /** Files a human dropped in test-results/ — README.md is the seeded guide, not a result. */
   results: string[];
   hasResults: boolean;
+  /** Past rounds kept under history/<stamp>/ — plan snapshot + that round's results. */
+  rounds: string[];
   archived: boolean;
   fm: Record<string, string>;
 };
@@ -216,11 +230,14 @@ export function listTestTasks(nd: string, includeArchived = false): TestTask[] {
         dir: taskDir,
         planPath,
         status: fm.status ?? '',
-        todoRef: (fm.todo ?? '').trim(),
-        featureIds: featureIdsIn(fm.feature ?? ''),
+        todoRefs: csvList(fm.todos ?? fm.todo),
+        featureIds: featureIdsIn(`${fm.feature ?? ''} ${id}`),
+        revision: Number(fm.revision ?? '') || 0,
+        lastTested: (fm['last-tested'] ?? '').trim(),
         scenarios: (plan.match(/^##\s+Scenario\b/gim) ?? []).length,
         results,
         hasResults: results.length > 0,
+        rounds: listDirs(join(taskDir, TEST_HISTORY_DIR)),
         archived,
         fm,
       });
@@ -430,6 +447,32 @@ export function readFrontmatter(filePath: string): Record<string, string> | null
     if (m) out[m[1]] = m[2].trim();
   }
   return out;
+}
+
+/**
+ * Update frontmatter keys in place, preserving key order and the body. Keys that are
+ * absent get appended to the header. Returns the text unchanged if it has no header.
+ */
+export function setFrontmatter(text: string, updates: Record<string, string>): string {
+  if (!text.startsWith('---')) return text;
+  const end = text.indexOf('\n---', 3);
+  if (end === -1) return text;
+  const seen = new Set<string>();
+  const lines = text
+    .slice(3, end)
+    .split('\n')
+    .map((line) => {
+      const m = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
+      if (m && updates[m[1]] !== undefined) {
+        seen.add(m[1]);
+        return `${m[1]}: ${updates[m[1]]}`;
+      }
+      return line;
+    });
+  for (const [key, value] of Object.entries(updates)) {
+    if (!seen.has(key)) lines.push(`${key}: ${value}`);
+  }
+  return '---' + lines.join('\n') + text.slice(end);
 }
 
 /** Directory of the installed novadev package itself (for reading templates/). */

@@ -53,7 +53,7 @@ novadev doctor                        # validate structure + link graph (CI-frie
   wiki/        project pre-context agents load first (strict page set; agent creates via wiki-init)
   memories/    gotchas/guides/decisions/guardrails, auto-written during work + INDEX.md
   features/    what the software DOES — one FEAT-NNNN file per capability, searchable + linked
-  totest/      test tasks waiting on a HUMAN — stepped scenarios + a results folder
+  totest/      one LIVING test task per feature — stepped scenarios a human must walk
   skills/      the canonical agent playbooks (markdown, agent-agnostic; managed by deploy)
 ```
 
@@ -70,14 +70,24 @@ hand-off scrolls away. It files a task in `totest/` with a stepped `test-plan.md
 an empty `test-results/` for your notes and screenshots, and gates the todo with
 `ai_needstest.md`.
 
+There is **one living task per feature**, named after it (`totest/FEAT-0007-magic-link/`)
+— not one per round. When later work changes that feature, the agent revises the same
+plan: rewriting scenarios whose expectations moved, deleting ones the change made
+irrelevant, adding ones for the new behaviour, and logging what changed under
+`## Revisions` so you know what is different since you last tested. That rule exists
+because a scenario describing behaviour that no longer exists is worse than no
+scenario — you would walk it, hit the old expectation, and report a failure that is
+really just a stale plan. Each round's results rotate into `history/<date>/` when the
+next one opens, so `test-results/` is always just the current round.
+
 That gate is **not terminal**: `novadev archive --done` refuses to file the batch
 away while it is open, so a pending test cannot be forgotten. `novadev totest` (and
 the top of `novadev status`) shows what is waiting on you and what is ready for
 review. You test, write results into the folder, then explicitly run
 `/novadev-review-tests` — an agent reads your notes and screenshots, judges each
-scenario against its written expectation, writes `ai_confirmed.md` with the verdict,
-and files follow-up todos for whatever failed. Agents never review their own pending
-test tasks; only your explicit invocation closes the loop.
+scenario against its written expectation, writes `ai_confirmed.md` with the verdict on
+every todo the round gated, and files follow-up todos for whatever failed. Agents never
+review their own pending test tasks; only your explicit invocation closes the loop.
 
 **Chat-initiated work.** When the human asks an agent in chat to
 implement/fix/change something that no open todo already covers, the agent must
@@ -127,7 +137,7 @@ break where IDs keep resolving. `novadev links` validates the whole graph;
 | `feature-init.md` | Build the features registry by reverse-engineering the current capabilities |
 | `feature-check.md` | Pre-flight a proposed feature: duplicate / overlap / conflict / supersession |
 | `feature-update.md` | Keep the registry true after work lands; full audit on request |
-| `test-plan.md` | File a human-testing task with stepped pass/fail scenarios + gate the todo |
+| `test-plan.md` | File or REVISE a feature's human-testing plan + gate the todo |
 | `review-tests.md` | Read the human's results, close the gate, file follow-ups (`/novadev-review-tests`) |
 | `links-audit.md` | Validate and repair the whole link graph; fix what tooling cannot |
 

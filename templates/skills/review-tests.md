@@ -24,12 +24,16 @@ leave it open; do not infer a pass from silence.
 
 1. `test-plan.md` — the scenarios and, critically, what each one's pass and fail
    were defined to be. Judge against what was written, not against what you would
-   have expected.
+   have expected. Check `## Revisions` for what changed this round: a scenario whose
+   expectations moved is the one most likely to have been walked against the old
+   assumption.
 2. Every file in `test-results/` — notes, screenshots, recordings, logs, exports.
    **Look at the images**, do not skip them; a screenshot often contradicts the
    sentence next to it, and when they disagree the screenshot wins.
-3. The originating todo's `ai_completed.md` and `ai_needstest.md`, for what the code
-   was supposed to do.
+3. The originating todos' `ai_completed.md` and `ai_needstest.md` — the task's
+   `todos:` list may name several, and ALL of them are gated on this one round.
+4. `history/` when a result is confusing: what the previous round tested and found
+   often explains a note that makes no sense against the current plan alone.
 
 Human notes are informal by nature. "Kinda slow", "the second one looked weird",
 "had to click twice" are all real findings — treat them as such rather than
@@ -51,9 +55,10 @@ cause turns a vague note into a fixable todo.
 
 ## 4. Land the outcome
 
-**Always** close the gate: delete `ai_needstest.md` from the todo and write
-`ai_confirmed.md` in its place. "Confirmed" means *human verification happened and
-was reviewed* — the verdict inside says whether it worked.
+**Always** close the gate on **every todo in the task's `todos:` list**: delete each
+`ai_needstest.md` and write `ai_confirmed.md` in its place. Leaving one gated todo
+behind keeps its batch out of the archive forever. "Confirmed" means *human
+verification happened and was reviewed* — the verdict inside says whether it worked.
 
 ```markdown
 # ai_confirmed — <todo slug>
@@ -92,12 +97,18 @@ Then, by verdict:
 
 ## 5. Mark the round done
 
-1. Set `status: reviewed` in the test task's `test-plan.md` frontmatter.
-2. Update the feature: status and a dated `## Progress` line recording that human
+1. In the test task's `test-plan.md` frontmatter set `status: reviewed`,
+   `last-tested: <YYYY-MM-DD>`, and clear `todos:`.
+2. Append what the round found to `## Revisions` — one line, so the next person to
+   reopen this plan knows it was walked and what came out of it.
+3. **Leave the task in `totest/`.** It is the living plan for this feature and the
+   next change revises it (`novadev totest --round <id>`); it is not archived, and
+   the results stay in `test-results/` until that next round rotates them into
+   `history/`. Never delete the results — they are the evidence it was checked.
+4. Update the feature: status and a dated `## Progress` line recording that human
    verification happened and what it found (`feature-update.md`). A feature only
    earns `shipped` once the human verification behind it actually passed.
-3. `novadev links --fix`, then `novadev doctor`.
-4. `novadev archive --done` files reviewed test rounds into `archive/<year>/totest/`
-   — the results and screenshots stay in git as the evidence that it was checked.
-5. Commit, then report to the human: verdict per scenario, what you filed, and what
+5. `novadev links --fix`, then `novadev doctor`, then `novadev archive --done` for
+   any batch the closed gates just freed.
+6. Commit, then report to the human: verdict per scenario, what you filed, and what
    still needs them.

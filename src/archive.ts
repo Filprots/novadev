@@ -7,7 +7,6 @@ import {
   batchIsDone,
   fail,
   listDirs,
-  listTestTasks,
   novadevDir,
   requireProjectRoot,
 } from './lib.ts';
@@ -29,30 +28,12 @@ export function archive(args: string[]): void {
   const todosDir = join(nd, 'todos');
 
   let targets: string[];
-  let sweptTests = 0;
   if (args.includes('--done')) {
-    // Reviewed test tasks archive alongside the batches; an open one stays put so the
-    // human's queue keeps showing it. Done first so it still happens when no batch is ready.
-    for (const task of listTestTasks(nd)) {
-      if (task.status !== 'reviewed') continue;
-      const year = task.id.slice(0, 4);
-      const destDir = join(nd, 'archive', year, 'totest');
-      mkdirSync(destDir, { recursive: true });
-      const dest = join(destDir, task.id);
-      if (existsSync(dest)) fail(`archive already contains ${year}/totest/${task.id}`);
-      renameSync(task.dir, dest);
-      console.log(`archived totest/${task.id} → archive/${year}/totest/${task.id}`);
-      sweptTests++;
-    }
-
+    // Test tasks are NOT archived: there is one living task per feature, and it stays in
+    // totest/ so the next round revises it in place. Past rounds live in its history/.
     targets = listDirs(todosDir).filter((b) => batchIsDone(join(todosDir, b)));
     if (targets.length === 0) {
-      if (sweptTests > 0) {
-        regenerateDerived(root);
-        console.log('no fully-recorded batches to archive.\nremember to commit the move.');
-      } else {
-        console.log('no fully-recorded batches to archive.');
-      }
+      console.log('no fully-recorded batches to archive.');
       return;
     }
   } else if (args.length > 0) {

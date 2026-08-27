@@ -10,6 +10,7 @@ import {
   RECORD_NEEDSTEST,
   RECORD_PROGRESS,
   SKILLS,
+  LEGACY_TEST_TASK_RE,
   TEST_RESULTS_DIR,
   TEST_TASK_RE,
   WIKI_PAGES,
@@ -103,8 +104,12 @@ export function doctor(): void {
   // --- totest: folder shape (the link/ref checks live in auditLinks) ---
   for (const task of listDirs(join(nd, 'totest'))) {
     const taskDir = join(nd, 'totest', task);
-    if (!TEST_TASK_RE.test(task)) {
-      problems.push(`totest/${task}: name must be YYYY-MM-DD_<kebab-slug>`);
+    if (LEGACY_TEST_TASK_RE.test(task)) {
+      problems.push(
+        `totest/${task}: date-stamped names are the old per-round model — rename this folder to the feature it tests (e.g. FEAT-0007-magic-link) and keep ONE living task per feature`,
+      );
+    } else if (!TEST_TASK_RE.test(task)) {
+      problems.push(`totest/${task}: name must be <FEAT-NNNN->? <kebab-slug>, after the feature it tests`);
     }
     if (!existsSync(join(taskDir, TEST_RESULTS_DIR))) {
       problems.push(`totest/${task}: missing ${TEST_RESULTS_DIR}/ — the human has nowhere to report`);
