@@ -13,7 +13,16 @@ import {
 const MARK_BEGIN = '<!-- novadev:begin -->';
 const MARK_END = '<!-- novadev:end -->';
 
-const USER_FOLDERS = ['todos', 'archive', 'postponed', 'sparks', 'wiki', 'memories', 'features'];
+const USER_FOLDERS = [
+  'todos',
+  'archive',
+  'postponed',
+  'sparks',
+  'wiki',
+  'memories',
+  'features',
+  'totest',
+];
 
 export function deploy(cwd: string = process.cwd()): void {
   const root = join(cwd, ROOT_DIR_NAME);
@@ -153,7 +162,7 @@ function managedSection(): string {
 ## novadev — structured development system (managed by \`novadev deploy\`, do not edit inside markers)
 
 This project uses **novadev** (\`${ROOT_DIR_NAME}/\`): git-tracked todos, archive,
-postponed, sparks, wiki, memories, and a features registry.
+postponed, sparks, wiki, memories, a features registry, and a human-testing queue.
 
 - **Always follow** \`${ROOT_DIR_NAME}/skills/workflow.md\` for any development task —
   it defines todo execution, the ai_completed/ai_failed/ai_progress records, and
@@ -174,9 +183,15 @@ postponed, sparks, wiki, memories, and a features registry.
   \`${ROOT_DIR_NAME}/skills/feature-check.md\`). When work lands, link the record to
   its feature (\`**Feature:** FEAT-0007\`) and run \`novadev links --fix\` to
   regenerate the backlinks.
+- **Human testing**: anything you could NOT verify yourself (browser/device
+  rendering, visual judgement, third-party services, "feel") does not get claimed as
+  verified. File a test task in \`${ROOT_DIR_NAME}/totest/\` with a stepped
+  \`test-plan.md\` and add \`ai_needstest.md\` to the todo
+  (\`${ROOT_DIR_NAME}/skills/test-plan.md\`). The human tests, then invokes
+  \`/novadev-review-tests\` — never review your own pending test task unprompted.
 - Management playbooks (wiki-update, wiki-compact, memories-review, debt-scan,
-  feature-init, feature-check, feature-update, links-audit) live in
-  \`${ROOT_DIR_NAME}/skills/\`.
+  feature-init, feature-check, feature-update, test-plan, review-tests,
+  links-audit) live in \`${ROOT_DIR_NAME}/skills/\`.
 ${MARK_END}`;
 }
 

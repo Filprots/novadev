@@ -22,6 +22,7 @@ It is agent-, framework-, and language-agnostic: it only prescribes structure.
   wiki/        the project pre-context every agent loads before working
   memories/    hard-won gotchas, guides, and guardrails — read before, write during
   features/    the registry of what this software DOES — one FEAT-NNNN file per capability
+  totest/      test tasks waiting on a HUMAN — what you could not verify yourself
   skills/      these playbooks (managed by `novadev deploy`)
 ```
 
@@ -38,6 +39,11 @@ It is agent-, framework-, and language-agnostic: it only prescribes structure.
   for a chat-initiated todo it is the `prompt.md` YOU transcribe from the chat.
 - **Record** — the file YOU write into the todo folder when work concludes
   (`ai_completed.md` / `ai_failed.md`) or is long-running (`ai_progress.md`).
+- **Test task** — one folder in `totest/` holding a stepped `test-plan.md` and a
+  `test-results/` folder, filed when verification needs a human.
+- **Gate** — `ai_needstest.md` on the todo: the work landed but a person must still
+  confirm it. It is NOT terminal; the batch cannot archive while it is open. The
+  human's `/novadev-review-tests` replaces it with `ai_confirmed.md`.
 - **Chat-initiated todo** — a todo YOU create when the human asks for work in the
   chat that no open todo covers (see "Chat-initiated work" below).
 - **Feature** — one capability of the software, registered as
@@ -136,6 +142,26 @@ State **which case** and why:
 A dated log: what is done so far, what is next, how to resume. When the work finally
 concludes, replace it with `ai_completed.md` or `ai_failed.md`.
 
+### `ai_needstest.md` — landed, but a HUMAN still has to verify it
+
+Write it beside `ai_completed.md` whenever something could not be verified
+automatically — how it renders, how it feels, a real device or third-party service,
+anything behind credentials you do not hold. It names the `totest/` task holding the
+scenarios (`**Test:** <task id>`). Full rules: `.novadev/skills/test-plan.md`.
+
+**This is not optional politeness.** Saying "I could not test X, please check it" in
+chat loses the hand-off the moment the conversation scrolls; the gate does not get
+lost. While it exists the todo is NOT terminal and its batch cannot be archived.
+
+### `ai_confirmed.md` — the human tested it and the results were reviewed
+
+Written ONLY by `.novadev/skills/review-tests.md`, when the human explicitly invokes
+`/novadev-review-tests`. It replaces `ai_needstest.md` and carries the verdict
+(`passed` / `passed-with-followups` / `failed`) plus links to any follow-up todos.
+Never write it yourself, and never review your own pending test task — an unreviewed
+task is a request for the human's attention, and closing it destroys the only signal
+that a person actually looked.
+
 ### Record conventions
 
 - **One record per todo folder.** If status changes later, UPDATE — a deferred item
@@ -143,7 +169,8 @@ concludes, replace it with `ai_completed.md` or `ai_failed.md`.
 - Keep records short and factual; they are a log, not documentation.
 - A later todo that refines an earlier one: cross-link both records.
 - Never claim verification you did not run. If something is skipped, failing, or
-  unverified, say so in the record.
+  unverified, say so in the record — and if a HUMAN has to check it, file the test
+  task and the gate (`ai_needstest.md`) rather than mentioning it in chat.
 - **Reference by ID, never by relative path** — `2026-08-24_1/01-magic-link`, not
   `../../todos/…`. Archiving changes folder depth and would break the path.
 
@@ -300,9 +327,15 @@ dies. Never let a postponed item rot unread (see the pre-context ritual).
 4. **Commit** the `.novadev/` record/memory/wiki/feature changes alongside the code,
    then put the commit hash(es) in the record's `**Commits:**` line and re-run
    `novadev links --fix` (the hash only exists after the commit).
-5. Archiving: when every todo in a batch has a terminal record, the batch may move
-   to `archive/<year>/` — `novadev archive --done` does this mechanically. Links
-   keep resolving because they are IDs, not paths.
+5. **Hand back what you could not verify**: file the `totest/` task and the
+   `ai_needstest.md` gate (`.novadev/skills/test-plan.md`), then tell the human
+   plainly what is waiting for them. Do not claim a browser/device/visual check you
+   did not perform.
+6. Archiving: when every todo in a batch has a terminal record, the batch may move
+   to `archive/<year>/` — `novadev archive --done` does this mechanically. A todo
+   gated by `ai_needstest.md` is deliberately not terminal and holds its batch back
+   until the human's review lands. Links keep resolving because they are IDs, not
+   paths.
 
 ## Management playbooks (invoke when asked, or when the trigger fits)
 
@@ -316,4 +349,6 @@ dies. Never let a postponed item rot unread (see the pre-context ritual).
 | `feature-init.md` | `features/INDEX.md` missing — build the registry before feature work |
 | `feature-check.md` | a NEW capability is proposed — duplicate/overlap/conflict pre-flight |
 | `feature-update.md` | work changed a capability; full registry audit on request |
+| `test-plan.md` | work landed that a HUMAN must verify — file the totest task + gate |
+| `review-tests.md` | the human ran `/novadev-review-tests` — read their results, close the gate |
 | `links-audit.md` | link graph suspect (`novadev links` complains, big rename/merge/archive sweep) |

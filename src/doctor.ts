@@ -5,9 +5,13 @@ import {
   BATCH_RE,
   NOVADEV_VERSION,
   RECORD_COMPLETED,
+  RECORD_CONFIRMED,
   RECORD_FAILED,
+  RECORD_NEEDSTEST,
   RECORD_PROGRESS,
   SKILLS,
+  TEST_RESULTS_DIR,
+  TEST_TASK_RE,
   WIKI_PAGES,
   listDirs,
   listFiles,
@@ -58,6 +62,26 @@ export function doctor(): void {
           `todos/${batch}/${todo}: stale ${RECORD_PROGRESS} beside a terminal record — delete it (the record replaces it)`,
         );
       }
+      // The human-verification gate: open XOR closed, and never without work behind it.
+      if (files.includes(RECORD_NEEDSTEST) && files.includes(RECORD_CONFIRMED)) {
+        problems.push(
+          `todos/${batch}/${todo}: BOTH ${RECORD_NEEDSTEST} and ${RECORD_CONFIRMED} present — the review replaces the gate, delete ${RECORD_NEEDSTEST}`,
+        );
+      }
+      if (
+        files.includes(RECORD_NEEDSTEST) &&
+        !files.includes(RECORD_COMPLETED) &&
+        !files.includes(RECORD_PROGRESS)
+      ) {
+        problems.push(
+          `todos/${batch}/${todo}: ${RECORD_NEEDSTEST} with no ${RECORD_COMPLETED}/${RECORD_PROGRESS} — say what was built before asking for it to be tested`,
+        );
+      }
+      if (files.includes(RECORD_CONFIRMED) && !files.includes(RECORD_COMPLETED)) {
+        problems.push(
+          `todos/${batch}/${todo}: ${RECORD_CONFIRMED} with no ${RECORD_COMPLETED} — a confirmation needs the work record it confirms`,
+        );
+      }
     }
   }
 
@@ -69,9 +93,21 @@ export function doctor(): void {
       continue;
     }
     for (const batch of listDirs(join(archiveDir, year))) {
+      if (batch === 'totest') continue; // reviewed test tasks, archived beside the batches
       const m = batch.match(BATCH_RE);
       if (!m) notes.push(`archive/${year}/${batch}: batch name does not match YYYY-MM-DD_N`);
       else if (m[1] !== year) problems.push(`archive/${year}/${batch}: year mismatch with folder`);
+    }
+  }
+
+  // --- totest: folder shape (the link/ref checks live in auditLinks) ---
+  for (const task of listDirs(join(nd, 'totest'))) {
+    const taskDir = join(nd, 'totest', task);
+    if (!TEST_TASK_RE.test(task)) {
+      problems.push(`totest/${task}: name must be YYYY-MM-DD_<kebab-slug>`);
+    }
+    if (!existsSync(join(taskDir, TEST_RESULTS_DIR))) {
+      problems.push(`totest/${task}: missing ${TEST_RESULTS_DIR}/ — the human has nowhere to report`);
     }
   }
 
@@ -180,6 +216,7 @@ export function doctor(): void {
     'wiki',
     'memories',
     'features',
+    'totest',
     'skills',
   ]);
   for (const dir of listDirs(nd)) {

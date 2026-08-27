@@ -15,6 +15,11 @@ import {
   FEATURE_REF_KEYS,
   FEATURE_REQUIRED_KEYS,
   FEATURE_STATUSES,
+  RECORD_CONFIRMED,
+  RECORD_NEEDSTEST,
+  TEST_PLAN_FILE,
+  TEST_PLAN_REQUIRED_KEYS,
+  TEST_STATUSES,
   type TodoRef,
   blockBegin,
   blockEnd,
@@ -24,6 +29,7 @@ import {
   listAllTodos,
   listFeatures,
   listFiles,
+  listTestTasks,
   novadevDir,
   readBlock,
   readField,
@@ -44,6 +50,8 @@ type TodoLinks = {
   commits: string[];
   hasFeatureField: boolean;
   hasRecord: boolean;
+  /** The `**Test:**` ref inside ai_needstest.md / ai_confirmed.md, when present. */
+  testRef: string;
 };
 
 export function auditLinks(root: string): Audit {
@@ -130,6 +138,70 @@ export function auditLinks(root: string): Audit {
     }
   }
 
+  // --- totest: the human-verification gate must never dangle in either direction ---
+  const tasks = listTestTasks(nd, true);
+  const taskById = new Map(tasks.map((t) => [t.id, t]));
+  const todoByRef = new Map(todos.map((t) => [t.todo.ref, t]));
+
+  for (const t of todos) {
+    if (t.state !== 'needstest') continue;
+    if (!t.testRef) {
+      problems.push(
+        `${t.todo.ref}: ${RECORD_NEEDSTEST} has no **Test:** ref — name the totest/ task it is waiting on`,
+      );
+    } else if (!taskById.has(t.testRef)) {
+      problems.push(`${t.todo.ref}: **Test:** ${t.testRef} does not exist in totest/`);
+    }
+  }
+
+  for (const task of tasks) {
+    const where = task.archived ? `archive/…/totest/${task.id}` : `totest/${task.id}`;
+    if (!existsSync(task.planPath)) {
+      problems.push(`${where}: missing ${TEST_PLAN_FILE}`);
+      continue;
+    }
+    for (const key of TEST_PLAN_REQUIRED_KEYS) {
+      if (!task.fm[key]) problems.push(`${where}/${TEST_PLAN_FILE}: frontmatter missing "${key}"`);
+    }
+    if (task.fm.id && task.fm.id !== task.id) {
+      problems.push(`${where}/${TEST_PLAN_FILE}: id "${task.fm.id}" does not match the folder name`);
+    }
+    if (task.status && !(TEST_STATUSES as readonly string[]).includes(task.status)) {
+      problems.push(
+        `${where}/${TEST_PLAN_FILE}: status "${task.status}" — one of: ${TEST_STATUSES.join(', ')}`,
+      );
+    }
+    if (task.scenarios === 0) {
+      problems.push(`${where}/${TEST_PLAN_FILE}: no "## Scenario" sections — nothing to test`);
+    }
+    for (const id of task.featureIds) {
+      if (!byId.has(id)) problems.push(`${where}/${TEST_PLAN_FILE}: feature ${id} does not exist`);
+    }
+
+    const owner = task.todoRef ? todoByRef.get(task.todoRef) : undefined;
+    if (task.todoRef && !owner) {
+      problems.push(`${where}/${TEST_PLAN_FILE}: todo "${task.todoRef}" does not exist`);
+    } else if (owner && task.status !== 'reviewed') {
+      if (owner.state !== 'needstest') {
+        problems.push(
+          `${where}: still awaiting-test, but ${task.todoRef} is "${owner.state}" — the gate and the task disagree`,
+        );
+      } else if (owner.testRef && owner.testRef !== task.id) {
+        problems.push(
+          `${where}: ${task.todoRef} points at "${owner.testRef}" instead — one of the two refs is wrong`,
+        );
+      }
+    }
+
+    if (task.status !== 'reviewed') {
+      notes.push(
+        task.hasResults
+          ? `${where}: results are in (${task.results.join(', ')}) — run /novadev-review-tests`
+          : `${where}: waiting on a human to test it (${task.scenarios} scenario(s))`,
+      );
+    }
+  }
+
   // --- commits referenced by records must exist in git history ---
   const allCommits = [...new Set(todos.flatMap((t) => t.commits))];
   for (const bad of unknownCommits(root, allCommits)) {
@@ -204,6 +276,7 @@ function readTodoLinks(todo: TodoRef): TodoLinks {
   let hasFeatureField = false;
   let hasRecord = false;
   let date = '';
+  let testRef = '';
 
   for (const file of listFiles(todo.dir)) {
     if (!file.endsWith('.md') && !file.endsWith('.txt')) continue;
@@ -215,6 +288,9 @@ function readTodoLinks(todo: TodoRef): TodoLinks {
     }
     const commitField = readField(text, 'Commits');
     if (commitField !== null) commits.push(...commitHashesIn(commitField));
+    if (file === RECORD_NEEDSTEST || file === RECORD_CONFIRMED) {
+      testRef = readField(text, 'Test') ?? testRef;
+    }
     if (file.startsWith('ai_')) {
       hasRecord = true;
       date = readField(text, 'Date') ?? date;
@@ -229,6 +305,7 @@ function readTodoLinks(todo: TodoRef): TodoLinks {
     commits: [...new Set(commits)],
     hasFeatureField,
     hasRecord,
+    testRef: testRef.trim(),
   };
 }
 

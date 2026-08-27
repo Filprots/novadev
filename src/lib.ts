@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
 export const ROOT_DIR_NAME = '.novadev';
-export const NOVADEV_VERSION = '0.3.0';
+export const NOVADEV_VERSION = '0.4.0';
 
 /** Batch folder name contract: YYYY-MM-DD_N (N = same-day sequence number, 1-based). */
 export const BATCH_RE = /^(\d{4})-(\d{2})-(\d{2})_(\d+)$/;
@@ -11,6 +11,10 @@ export const BATCH_RE = /^(\d{4})-(\d{2})-(\d{2})_(\d+)$/;
 export const RECORD_COMPLETED = 'ai_completed.md';
 export const RECORD_FAILED = 'ai_failed.md';
 export const RECORD_PROGRESS = 'ai_progress.md';
+/** Human-verification gate: work landed, but a person must still test it. */
+export const RECORD_NEEDSTEST = 'ai_needstest.md';
+/** The gate, closed: a person tested it and the results were reviewed. */
+export const RECORD_CONFIRMED = 'ai_confirmed.md';
 
 /** The strict wiki page set. INDEX.md is the load-first map; the rest are the mandated pages. */
 export const WIKI_PAGES = [
@@ -78,6 +82,18 @@ export const SKILLS = [
     slug: 'novadev-feature-update',
     description:
       'Keep the novadev features registry true after work lands: flip feature status, append the progress log, author the record-to-feature links, and regenerate derived backlinks. Also runs a full registry audit on request.',
+  },
+  {
+    file: 'test-plan.md',
+    slug: 'novadev-test-plan',
+    description:
+      'Decide what a person still has to verify by hand after work lands, and file it as a novadev test task: a stepped test-plan.md with pass/fail expectations per scenario in totest/, plus the ai_needstest.md gate on the originating todo. Run when concluding work an agent could not fully verify.',
+  },
+  {
+    file: 'review-tests.md',
+    slug: 'novadev-review-tests',
+    description:
+      "Read the human's test results in a novadev totest task, judge each scenario against its expected outcome, and close the loop: write ai_confirmed.md on the original todo and file follow-up todos for whatever failed. Invoked explicitly by the human once they have finished testing.",
   },
   {
     file: 'links-audit.md',
@@ -154,6 +170,69 @@ export function nextFeatureId(nd: string): string {
     if (m) max = Math.max(max, Number(m[1]));
   }
   return `FEAT-${String(max + 1).padStart(4, '0')}`;
+}
+
+// ---------------------------------------------------------------------------
+// totest — the human-verification queue
+// ---------------------------------------------------------------------------
+
+/** Test task folder contract: YYYY-MM-DD_<kebab-slug> (usually the feature's slug). */
+export const TEST_TASK_RE = /^(\d{4})-(\d{2})-(\d{2})_[a-z0-9][a-z0-9-]*$/;
+export const TEST_PLAN_FILE = 'test-plan.md';
+export const TEST_RESULTS_DIR = 'test-results';
+export const TEST_STATUSES = ['awaiting-test', 'reviewed'] as const;
+export const TEST_PLAN_REQUIRED_KEYS = ['id', 'created', 'status', 'todo'] as const;
+
+export type TestTask = {
+  id: string;
+  dir: string;
+  planPath: string;
+  status: string;
+  todoRef: string;
+  featureIds: string[];
+  scenarios: number;
+  /** Files a human dropped in test-results/ — README.md is the seeded guide, not a result. */
+  results: string[];
+  hasResults: boolean;
+  archived: boolean;
+  fm: Record<string, string>;
+};
+
+export function totestDir(nd: string): string {
+  return join(nd, 'totest');
+}
+
+export function listTestTasks(nd: string, includeArchived = false): TestTask[] {
+  const out: TestTask[] = [];
+  const collect = (dir: string, archived: boolean) => {
+    for (const id of listDirs(dir)) {
+      const taskDir = join(dir, id);
+      const planPath = join(taskDir, TEST_PLAN_FILE);
+      const fm = existsSync(planPath) ? (readFrontmatter(planPath) ?? {}) : {};
+      const plan = existsSync(planPath) ? readFileSync(planPath, 'utf8') : '';
+      const results = listFiles(join(taskDir, TEST_RESULTS_DIR)).filter((f) => f !== 'README.md');
+      out.push({
+        id,
+        dir: taskDir,
+        planPath,
+        status: fm.status ?? '',
+        todoRef: (fm.todo ?? '').trim(),
+        featureIds: featureIdsIn(fm.feature ?? ''),
+        scenarios: (plan.match(/^##\s+Scenario\b/gim) ?? []).length,
+        results,
+        hasResults: results.length > 0,
+        archived,
+        fm,
+      });
+    }
+  };
+  collect(totestDir(nd), false);
+  if (includeArchived) {
+    for (const year of listDirs(join(nd, 'archive'))) {
+      collect(join(nd, 'archive', year, 'totest'), true);
+    }
+  }
+  return out.sort((a, b) => a.id.localeCompare(b.id));
 }
 
 // ---------------------------------------------------------------------------
@@ -299,23 +378,36 @@ export function listFiles(path: string): string[] {
     .sort();
 }
 
-export type TodoState = 'completed' | 'failed' | 'progress' | 'open';
+export type TodoState =
+  | 'needstest'
+  | 'confirmed'
+  | 'completed'
+  | 'failed'
+  | 'progress'
+  | 'open';
 
+/**
+ * `needstest` outranks everything: the gate coexists with the work record it gates,
+ * and while it is open the todo is waiting on a person, not on an agent.
+ */
 export function todoState(todoDir: string): TodoState {
+  if (existsSync(join(todoDir, RECORD_NEEDSTEST))) return 'needstest';
+  if (existsSync(join(todoDir, RECORD_CONFIRMED))) return 'confirmed';
   if (existsSync(join(todoDir, RECORD_COMPLETED))) return 'completed';
   if (existsSync(join(todoDir, RECORD_FAILED))) return 'failed';
   if (existsSync(join(todoDir, RECORD_PROGRESS))) return 'progress';
   return 'open';
 }
 
+/** States that end a todo. `needstest` is deliberately NOT one — a pending human
+ *  test must keep its batch out of the archive, or the hand-off is lost. */
+export const TERMINAL_STATES: readonly TodoState[] = ['confirmed', 'completed', 'failed'];
+
 /** A batch is archivable when every todo folder inside carries a terminal record. */
 export function batchIsDone(batchDir: string): boolean {
   const todos = listDirs(batchDir);
   if (todos.length === 0) return false;
-  return todos.every((t) => {
-    const s = todoState(join(batchDir, t));
-    return s === 'completed' || s === 'failed';
-  });
+  return todos.every((t) => TERMINAL_STATES.includes(todoState(join(batchDir, t))));
 }
 
 export function todayStamp(): string {

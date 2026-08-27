@@ -15,6 +15,8 @@ usage:
                             --status/--area filter, --new <slug> scaffolds an entry
   novadev links [--fix]     validate the link graph (records ↔ features ↔ commits);
                             --fix regenerates derived backlinks and features/INDEX.md
+  novadev totest [--all]    what still needs YOUR hands-on testing, and what is ready
+                            for review; --new <slug> scaffolds a test task
   novadev doctor            validate structure; non-zero exit on problems
   novadev help              this help
 `;
@@ -48,6 +50,11 @@ switch (command) {
   case 'links': {
     const { links } = await import('../src/links.ts');
     links(args);
+    break;
+  }
+  case 'totest': {
+    const { totest } = await import('../src/totest.ts');
+    totest(args);
     break;
   }
   case 'doctor': {
