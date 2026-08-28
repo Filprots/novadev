@@ -22,9 +22,9 @@ landed — or the human asks for a registry audit.
    at all → `**Feature:** none — <why>` (infra chore, dependency bump, docs). Say it
    explicitly; a silent omission is indistinguishable from forgetting.
 
-   This is the only direction you write by hand. The feature's `## Work` and
-   `## Commits` sections are DERIVED from these lines — never edit inside the
-   `<!-- novadev:work:… -->` / `<!-- novadev:commits:… -->` markers.
+   This is the only direction you write by hand. The feature's `work.md` (and
+   `tests.md`, from the archived test rounds) are DERIVED from these — never edit
+   inside their `<!-- novadev:*:… -->` markers.
 
 2. **Advance the status** on the feature file, and stamp `updated:`:
 

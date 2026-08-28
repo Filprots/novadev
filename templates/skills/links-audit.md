@@ -14,11 +14,13 @@ just moved things around; or periodic hygiene.
 
 Every edge has **one authored direction and one derived direction**:
 
-| Edge | Authored (by hand, in the record) | Derived (`novadev links --fix`) |
+| Edge | Authored (by hand) | Derived (`novadev links --fix`) |
 |---|---|---|
-| todo → feature | `**Feature:** FEAT-0007` | the feature's `## Work` block |
-| todo → commits | `**Commits:** abc1234` | the feature's `## Commits` block |
-| feature → registry | the file's frontmatter | `features/INDEX.md` table |
+| todo → feature | `**Feature:** FEAT-0007` in the record | the feature's `work.md` |
+| todo → commits | `**Commits:** abc1234` in the record | the `## Commits` part of `work.md` |
+| test round → feature | the round's `feature:` frontmatter | the feature's `tests.md` |
+| todo → test task | `**Test:** <task id>` in `ai_needstest.md` | the task's `todos:` list is cross-checked, not generated |
+| feature → registry | `feature.md` frontmatter | `features/INDEX.md` table |
 
 So there is no such thing as "updating both sides": you fix the authored line and
 regenerate the rest. Never hand-edit inside `<!-- novadev:*:begin/end -->` markers —

@@ -40,20 +40,31 @@ novadev features --touching src/auth  # which features already own this code (co
 novadev links --fix                   # regenerate derived backlinks + features/INDEX.md
 novadev archive --done                # move fully-recorded batches to archive/<year>/
 novadev doctor                        # validate structure + link graph (CI-friendly non-zero exit)
+novadev migrate-repo                  # upgrade an older .novadev/ layout to this version
 ```
+
+## Upgrading
+
+`.novadev/novadev.json` records the version the repo's layout is at. After pulling a
+newer novadev, run `novadev migrate-repo`: it applies every migration the repo has not
+reached yet, in order (a repo at 0.4.0 runs 0.4.0→0.5.0 then 0.5.0→0.6.0), and stamps
+the new version. `--dry-run` previews the moves; it refuses to run on a dirty working
+tree so the migration lands as a reviewable diff of its own. Then `novadev deploy` to
+refresh the playbooks and `novadev links --fix`. `novadev doctor` tells you when a repo
+is behind.
 
 ## The system
 
 ```
 .novadev/
   todos/       task batches YYYY-MM-DD_N/<todo>/ — briefs: human-authored (.txt/.md + screenshots) or agent-filed prompt.md (chat-initiated)
-  archive/     finished batches by year — the browsable development history
+  archive/     finished work by year — <year>/todos/<batch>/ and <year>/totest/<task>/<round>/
   postponed/   deferred work with do-when / discard-if triggers
   sparks/      raw unshaped ideas
   wiki/        project pre-context agents load first (strict page set; agent creates via wiki-init)
   memories/    gotchas/guides/decisions/guardrails, auto-written during work + INDEX.md
-  features/    what the software DOES — one FEAT-NNNN file per capability, searchable + linked
-  totest/      one LIVING test task per feature — stepped scenarios a human must walk
+  features/    what the software DOES — FEAT-NNNN/ folders: feature.md + derived work.md/tests.md
+  totest/      the ACTIVE queue of tests waiting on a human (rounds archive once reviewed)
   skills/      the canonical agent playbooks (markdown, agent-agnostic; managed by deploy)
 ```
 
@@ -70,15 +81,19 @@ hand-off scrolls away. It files a task in `totest/` with a stepped `test-plan.md
 an empty `test-results/` for your notes and screenshots, and gates the todo with
 `ai_needstest.md`.
 
-There is **one living task per feature**, named after it (`totest/FEAT-0007-magic-link/`)
-— not one per round. When later work changes that feature, the agent revises the same
-plan: rewriting scenarios whose expectations moved, deleting ones the change made
-irrelevant, adding ones for the new behaviour, and logging what changed under
-`## Revisions` so you know what is different since you last tested. That rule exists
-because a scenario describing behaviour that no longer exists is worse than no
-scenario — you would walk it, hit the old expectation, and report a failure that is
-really just a stale plan. Each round's results rotate into `history/<date>/` when the
-next one opens, so `test-results/` is always just the current round.
+Tasks are named after the feature (`totest/FEAT-0007-magic-link/`), one per feature,
+and `totest/` holds only **open** rounds — so everything in it is genuinely waiting on
+you. A reviewed round archives to `archive/<year>/totest/<task>/rev<N>-<date>/` with
+its plan and your evidence intact, and the feature's `tests.md` lists it with its
+verdict.
+
+When later work changes that feature, the agent revives the task from its last
+archived round and revises the plan: rewriting scenarios whose expectations moved,
+deleting ones the change made irrelevant, adding ones for the new behaviour, and
+logging what changed under `## Revisions` so you know what is different since you last
+tested. That rule exists because a scenario describing behaviour that no longer exists
+is worse than no scenario — you would walk it, hit the old expectation, and report a
+failure that is really just a stale plan.
 
 That gate is **not terminal**: `novadev archive --done` refuses to file the batch
 away while it is open, so a pending test cannot be forgotten. `novadev totest` (and
@@ -107,17 +122,18 @@ it (per `skills/wiki-init.md`) before doing todo work.
 the agent writes a memory file (frontmatter: title/created/kind/verified) and
 indexes it — guardrails that stop future time-wasting.
 
-**Features + links.** `features/` registers every capability as
-`FEAT-NNNN-<slug>.md` (status, area, tags, the code it `touches:`, and
-`depends-on`/`supersedes`/`conflicts-with` relations). Before anything new is
-designed, it is searched — `novadev features --touching src/auth` answers "what
-already owns this code?" — so duplicates and conflicts get caught at proposal
-time rather than in review.
+**Features + links.** `features/` registers every capability as a folder
+`FEAT-NNNN-<slug>/` — you write `feature.md` (status, area, tags, the code it `touches:`, and
+`depends-on`/`supersedes`/`conflicts-with` relations), and `work.md` (every todo,
+record and commit that built it) plus `tests.md` (every human test round and its
+verdict) are generated beside it. Before anything new is designed, the registry is
+searched — `novadev features --touching src/auth` answers "what already owns this
+code?" — so duplicates and conflicts get caught at proposal time rather than in review.
 
 Records and features are cross-linked, and the graph is maintainable because each
 edge has **one authored direction and one derived direction**: the record names
 its feature (`**Feature:** FEAT-0007`, `**Commits:** abc1234`), and
-`novadev links --fix` regenerates the feature's `## Work` / `## Commits` sections
+`novadev links --fix` regenerates the feature's `work.md`, `tests.md`,
 and `features/INDEX.md` from it. Nothing is written twice, so backlinks cannot
 rot. All references are **stable IDs, never relative paths** (`FEAT-0007`,
 `2026-08-24_1/01-magic-link`) — archiving moves todo folders, and paths would

@@ -2,8 +2,11 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  type Feature,
+  FEATURE_DOC,
   FEATURE_STATUSES,
+  FEATURE_TESTS,
+  FEATURE_WORK,
+  type Feature,
   fail,
   featuresDir,
   listFeatures,
@@ -106,7 +109,7 @@ function print(f: Feature, opts: Options): void {
   for (const [key, ids] of Object.entries(f.refs)) {
     if (ids.length) console.log(`      ${key}: ${ids.join(', ')}`);
   }
-  console.log(`      file: ${f.file}`);
+  console.log(`      folder: ${f.file}/`);
 }
 
 type Options = {
@@ -175,12 +178,20 @@ function scaffold(nd: string, opts: Options): void {
   const id = nextFeatureId(nd);
   const title = opts.title ?? slug.replace(/-/g, ' ').replace(/^./, (c) => c.toUpperCase());
   const today = todayStamp();
-  const path = join(dir, `${id}-${slug}.md`);
-  if (existsSync(path)) fail(`${path} already exists`);
+  const folder = `${id}-${slug}`;
+  const featureDir = join(dir, folder);
+  if (existsSync(featureDir)) fail(`features/${folder}/ already exists`);
 
-  writeFileSync(path, featureSkeleton({ id, title, today, tags: opts.tags, touches: opts.touches }));
-  console.log(`created features/${id}-${slug}.md`);
-  console.log('  fill in area/tags/touches + the body, then run `novadev links --fix` to reindex.');
+  mkdirSync(featureDir, { recursive: true });
+  writeFileSync(
+    join(featureDir, FEATURE_DOC),
+    featureSkeleton({ id, title, today, tags: opts.tags, touches: opts.touches }),
+  );
+  console.log(`created features/${folder}/${FEATURE_DOC}`);
+  console.log(
+    `  fill in area/tags/touches + the body, then \`novadev links --fix\` generates\n` +
+      `  features/${folder}/{${FEATURE_WORK},${FEATURE_TESTS}} and the index.`,
+  );
 }
 
 /** The canonical feature file. Kept here so the CLI and the playbooks cannot drift. */
@@ -221,20 +232,12 @@ conflicts-with:
 
 - ${o.today} — planned
 
-## Work
-
-<!-- novadev:work:begin -->
-(no linked todos yet)
-<!-- novadev:work:end -->
-
-## Commits
-
-<!-- novadev:commits:begin -->
-(no linked commits yet)
-<!-- novadev:commits:end -->
-
 ## Open questions
 
 <what is undecided or unverified — delete the section when empty>
+
+<!-- The work that built this feature and the human test rounds that verified it are
+     DERIVED, in ${FEATURE_WORK} and ${FEATURE_TESTS} beside this file.
+     Regenerate them with \`novadev links --fix\`. -->
 `;
 }

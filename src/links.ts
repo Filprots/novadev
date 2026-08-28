@@ -9,8 +9,8 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  type Feature,
-  FEATURE_FILE_RE,
+  FEATURE_DIR_RE,
+  FEATURE_DOC,
   FEATURE_ID_RE,
   FEATURE_REF_KEYS,
   FEATURE_REQUIRED_KEYS,
@@ -20,15 +20,20 @@ import {
   TEST_PLAN_FILE,
   TEST_PLAN_REQUIRED_KEYS,
   TEST_STATUSES,
+  type Feature,
+  type TestRound,
+  type TestTask,
   type TodoRef,
   blockBegin,
   blockEnd,
   commitHashesIn,
   featureIdsIn,
   featuresDir,
+  legacyFeatureFiles,
   listAllTodos,
   listFeatures,
   listFiles,
+  listTestRounds,
   listTestTasks,
   novadevDir,
   readBlock,
@@ -60,6 +65,14 @@ export function auditLinks(root: string): Audit {
   const notes: string[] = [];
   const fixes: Fix[] = [];
 
+  // A pre-0.6.0 tree reads as an empty registry, which would silently pass every check.
+  const stragglers = legacyFeatureFiles(nd);
+  if (stragglers.length > 0) {
+    problems.push(
+      `features/: ${stragglers.length} feature(s) still in the pre-0.6.0 flat layout (${stragglers[0]}…) — run \`novadev migrate-repo\``,
+    );
+  }
+
   const features = listFeatures(nd);
   const byId = new Map<string, Feature>();
   for (const f of features) {
@@ -72,11 +85,11 @@ export function auditLinks(root: string): Audit {
 
   // --- feature files: naming, frontmatter, cross-references ---
   for (const f of features) {
-    const m = f.file.match(FEATURE_FILE_RE);
+    const m = f.file.match(FEATURE_DIR_RE);
     if (!m) {
-      problems.push(`features/${f.file}: name must be FEAT-NNNN-<kebab-slug>.md`);
+      problems.push(`features/${f.file}: folder must be named FEAT-NNNN-<kebab-slug>`);
     } else if (f.fm.id && m[1] !== f.fm.id) {
-      problems.push(`features/${f.file}: filename id ${m[1]} does not match frontmatter id ${f.fm.id}`);
+      problems.push(`features/${f.file}: folder id ${m[1]} does not match frontmatter id ${f.fm.id}`);
     }
     if (!readFrontmatter(f.path)) {
       problems.push(`features/${f.file}: missing frontmatter header`);
@@ -139,7 +152,7 @@ export function auditLinks(root: string): Audit {
   }
 
   // --- totest: the human-verification gate must never dangle in either direction ---
-  const tasks = listTestTasks(nd, true);
+  const tasks = listTestTasks(nd);
   const taskById = new Map(tasks.map((t) => [t.id, t]));
   const todoByRef = new Map(todos.map((t) => [t.todo.ref, t]));
 
@@ -155,7 +168,7 @@ export function auditLinks(root: string): Audit {
   }
 
   for (const task of tasks) {
-    const where = task.archived ? `archive/…/totest/${task.id}` : `totest/${task.id}`;
+    const where = `totest/${task.id}`;
     if (!existsSync(task.planPath)) {
       problems.push(`${where}: missing ${TEST_PLAN_FILE}`);
       continue;
@@ -202,10 +215,8 @@ export function auditLinks(root: string): Audit {
     // One living task per feature — a second folder for the same feature is the
     // duplicate-plan mistake this model exists to prevent.
     for (const id of task.featureIds) {
-      const twin = tasks.find(
-        (o) => o.id !== task.id && !o.archived && o.featureIds.includes(id),
-      );
-      if (twin && !task.archived && task.id < twin.id) {
+      const twin = tasks.find((o) => o.id !== task.id && o.featureIds.includes(id));
+      if (twin && task.id < twin.id) {
         problems.push(
           `totest/${task.id} and totest/${twin.id} both cover ${id} — keep ONE living task per feature and revise its plan`,
         );
@@ -229,40 +240,34 @@ export function auditLinks(root: string): Audit {
     notes.push(`commit ${bad} (${owners.join(', ')}) is not in this repository's history`);
   }
 
-  // --- derived content: feature Work/Commits blocks ---
+  // --- derived content: each feature's work.md and tests.md ---
+  const rounds = listTestRounds(nd);
   for (const f of features) {
     const linked = (workByFeature.get(f.id) ?? []).sort((a, b) =>
       a.todo.ref.localeCompare(b.todo.ref),
     );
-    let next = f.text;
+    const featureRounds = rounds.filter((r) => r.featureIds.includes(f.id));
+    const openTasks = tasks.filter((t) => t.featureIds.includes(f.id));
 
-    const work = writeBlock(next, 'work', renderWork(linked));
-    if (work === null) {
-      problems.push(
-        `features/${f.file}: missing ${blockBegin('work')} … ${blockEnd('work')} block (the derived "## Work" list)`,
-      );
-    } else {
-      next = work;
-    }
-
-    const commits = writeBlock(next, 'commits', renderCommits(linked));
-    if (commits === null) {
-      problems.push(
-        `features/${f.file}: missing ${blockBegin('commits')} … ${blockEnd('commits')} block (the derived "## Commits" list)`,
-      );
-    } else {
-      next = commits;
-    }
-
-    if (next !== f.text) {
-      fixes.push({ path: f.path, label: `features/${f.file}: derived blocks are stale`, next });
-    }
+    const workNext = renderDerivedFile(f.workPath, 'work', renderWork(linked, f.id));
+    if (workNext) fixes.push(workNext);
+    const testsNext = renderDerivedFile(
+      f.testsPath,
+      'tests',
+      renderTests(featureRounds, openTasks, f.id),
+    );
+    if (testsNext) fixes.push(testsNext);
 
     if (f.status === 'shipped' && !linked.some((t) => t.state === 'completed')) {
       notes.push(`features/${f.file}: status "shipped" but no completed todo links to it`);
     }
     if (f.status === 'planned' && linked.some((t) => t.state === 'completed')) {
       notes.push(`features/${f.file}: status "planned" but completed work links to it — advance it`);
+    }
+    if (f.status === 'shipped' && featureRounds.some((r) => r.verdict === 'failed')) {
+      notes.push(
+        `features/${f.file}: status "shipped" but its latest human test round recorded a failure`,
+      );
     }
   }
 
@@ -329,26 +334,90 @@ function readTodoLinks(todo: TodoRef): TodoLinks {
   };
 }
 
-function renderWork(linked: TodoLinks[]): string {
-  if (linked.length === 0) return '(no linked todos yet)';
-  return linked
-    .map((t) => {
-      const bits = [t.state, t.date, t.todo.archived ? 'archived' : ''].filter(Boolean);
-      return `- \`${t.todo.ref}\` — ${bits.join(' · ')}`;
-    })
-    .join('\n');
+/**
+ * Rebuild one derived file, preserving anything a human wrote outside the block.
+ * Returns a Fix when the content changed (or the file does not exist yet).
+ */
+function renderDerivedFile(path: string, block: string, body: string): Fix | null {
+  const current = existsSync(path) ? readFileSync(path, 'utf8') : null;
+  const base = current ?? derivedScaffold(block);
+  const next = writeBlock(base, block, body);
+  if (next === null || next === current) return null;
+  return {
+    path,
+    label: `${path.split('/features/')[1] ?? path}: ${current === null ? 'missing' : 'out of date'}`,
+    next,
+  };
 }
 
-function renderCommits(linked: TodoLinks[]): string {
-  const rows = linked.flatMap((t) => t.commits.map((c) => `- \`${c}\` — ${t.todo.ref}`));
-  return rows.length === 0 ? '(no linked commits yet)' : rows.join('\n');
+function derivedScaffold(block: string): string {
+  const heading = block === 'work' ? 'Work' : 'Human test rounds';
+  return `# ${heading}
+
+<!-- DERIVED by \`novadev links --fix\` from the todo records and archived test rounds.
+     Do not hand-edit inside the markers; anything outside them is preserved. -->
+
+${blockBegin(block)}
+${blockEnd(block)}
+`;
+}
+
+function renderWork(linked: TodoLinks[], featureId: string): string {
+  const lines: string[] = [];
+  lines.push('## Todos');
+  if (linked.length === 0) {
+    lines.push('', '(nothing links to this feature yet)');
+  } else {
+    lines.push('');
+    for (const t of linked) {
+      const bits = [t.state, t.date, t.todo.archived ? 'archived' : ''].filter(Boolean);
+      lines.push(`- \`${t.todo.ref}\` — ${bits.join(' · ')}`);
+    }
+  }
+
+  const commits = linked.flatMap((t) => t.commits.map((c) => `- \`${c}\` — ${t.todo.ref}`));
+  lines.push('', '## Commits', '');
+  lines.push(commits.length === 0 ? '(no linked commits yet)' : commits.join('\n'));
+  lines.push('', `_Linked by \`**Feature:** ${featureId}\` in each todo's record._`);
+  return lines.join('\n');
+}
+
+function renderTests(rounds: TestRound[], open: TestTask[], featureId: string): string {
+  const lines: string[] = [];
+
+  lines.push('## Open round');
+  lines.push('');
+  if (open.length === 0) {
+    lines.push('(none — nothing is waiting on a human right now)');
+  } else {
+    for (const t of open) {
+      const state = t.hasResults ? 'results in, ready for review' : 'awaiting the human';
+      lines.push(
+        `- \`totest/${t.id}\` — rev ${t.revision || 1}, ${t.scenarios} scenario(s), ${state}`,
+      );
+    }
+  }
+
+  lines.push('', '## Completed rounds', '');
+  if (rounds.length === 0) {
+    lines.push('(no human testing has been completed for this feature yet)');
+  } else {
+    for (const r of [...rounds].reverse()) {
+      const bits = [r.verdict || 'verdict not recorded', r.date].filter(Boolean);
+      lines.push(`- \`archive/${r.year}/totest/${r.taskId}/${r.round}\` — ${bits.join(' · ')}`);
+      if (r.todoRefs.length) lines.push(`  - gated: ${r.todoRefs.map((x) => `\`${x}\``).join(', ')}`);
+      if (r.results.length) lines.push(`  - evidence: ${r.results.join(', ')}`);
+    }
+  }
+  lines.push('', `_Rounds are matched to this feature by \`${featureId}\`._`);
+  return lines.join('\n');
 }
 
 function renderIndex(features: Feature[]): string {
   const head = '| ID | Status | Area | Feature | Touches |\n|---|---|---|---|---|';
   const rows = features.map((f) => {
     const cell = (s: string) => (s ? s.replace(/\|/g, '\\|') : '—');
-    return `| [${f.id}](${f.file}) | ${cell(f.status)} | ${cell(f.area)} | ${cell(f.title)} | ${cell(f.touches.join(', '))} |`;
+    return `| [${f.id}](${f.file}/${FEATURE_DOC}) | ${cell(f.status)} | ${cell(f.area)} | ${cell(f.title)} | ${cell(f.touches.join(', '))} |`;
   });
   return [head, ...rows].join('\n');
 }

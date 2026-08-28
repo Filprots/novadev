@@ -41,9 +41,12 @@ behaviours.
 
 ## Write one file per feature
 
-`features/FEAT-NNNN-<kebab-slug>.md`, IDs assigned in the order you create them
-(`novadev features --new <slug>` scaffolds the next free ID and the exact skeleton).
-IDs are permanent and never reused — links point at them forever.
+`features/FEAT-NNNN-<kebab-slug>/feature.md`, IDs assigned in the order you create
+them (`novadev features --new <slug>` scaffolds the next free ID and the exact
+skeleton). IDs are permanent and never reused — links point at them forever.
+
+The feature is a FOLDER. You write `feature.md`; `work.md` (todos, records, commits)
+and `tests.md` (human test rounds) are generated beside it by `novadev links --fix`.
 
 ```markdown
 ---
@@ -67,19 +70,17 @@ the tooling parses. Leave a key empty rather than deleting it.
 
 Then the body, in this exact section order (the tooling rewrites two of them):
 
-| Section | Contents |
+| Section of `feature.md` | Contents |
 |---|---|
 | `## What it does` | The user-visible behaviour: what someone can do that they could not before. |
 | `## How it works` | Design, key modules/files, data flow, integration points. Link paths, don't paste code. |
 | `## Progress` | Dated log of development stages — one line per real step, newest last. |
-| `## Work` | **Derived.** Todos/records that built it, between the `novadev:work` markers. |
-| `## Commits` | **Derived.** Commit hashes, between the `novadev:commits` markers. |
 | `## Open questions` | What is undecided or unverified. Delete the section when empty. |
 
-Never hand-write inside the `<!-- novadev:work:… -->` and
-`<!-- novadev:commits:… -->` markers — `novadev links --fix` overwrites them from the
-records. To make work show up there, put `**Feature:** FEAT-NNNN` in the record (see
-`feature-update.md`).
+`work.md` and `tests.md` are **derived** — never hand-write inside their
+`<!-- novadev:*:… -->` markers, because `novadev links --fix` overwrites them. To make
+work show up in `work.md`, put `**Feature:** FEAT-NNNN` in the todo's record (see
+`feature-update.md`); test rounds land in `tests.md` when they are archived.
 
 ## `touches:` is the conflict detector — get it right
 

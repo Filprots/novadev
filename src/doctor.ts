@@ -12,8 +12,11 @@ import {
   SKILLS,
   LEGACY_TEST_TASK_RE,
   TEST_RESULTS_DIR,
+  TEST_ROUND_RE,
   TEST_TASK_RE,
   WIKI_PAGES,
+  compareVersions,
+  deployedVersion,
   listDirs,
   listFiles,
   novadevDir,
@@ -93,11 +96,29 @@ export function doctor(): void {
       problems.push(`archive/${year}: expected a YYYY year folder`);
       continue;
     }
-    for (const batch of listDirs(join(archiveDir, year))) {
-      if (batch === 'totest') continue; // reviewed test tasks, archived beside the batches
-      const m = batch.match(BATCH_RE);
-      if (!m) notes.push(`archive/${year}/${batch}: batch name does not match YYYY-MM-DD_N`);
-      else if (m[1] !== year) problems.push(`archive/${year}/${batch}: year mismatch with folder`);
+    // 0.6.0 layout: archive/<year>/{todos,totest}/…
+    for (const entry of listDirs(join(archiveDir, year))) {
+      if (entry === 'totest') continue;
+      if (entry !== 'todos') {
+        problems.push(
+          `archive/${year}/${entry}: pre-0.6.0 layout — batches belong in archive/${year}/todos/. Run \`novadev migrate-repo\``,
+        );
+        continue;
+      }
+      for (const batch of listDirs(join(archiveDir, year, 'todos'))) {
+        const m = batch.match(BATCH_RE);
+        if (!m) notes.push(`archive/${year}/todos/${batch}: batch name does not match YYYY-MM-DD_N`);
+        else if (m[1] !== year) {
+          problems.push(`archive/${year}/todos/${batch}: year mismatch with folder`);
+        }
+      }
+    }
+    for (const task of listDirs(join(archiveDir, year, 'totest'))) {
+      for (const round of listDirs(join(archiveDir, year, 'totest', task))) {
+        if (!TEST_ROUND_RE.test(round)) {
+          notes.push(`archive/${year}/totest/${task}/${round}: round name is not rev<N>-<date>`);
+        }
+      }
     }
   }
 
@@ -168,25 +189,30 @@ export function doctor(): void {
   // --- skills: canonical files present + in sync with the installed novadev ---
   // Direction matters: when the DEPLOYED novadev is newer than this install,
   // `novadev deploy` would downgrade the project's skills — prescribe an upgrade instead.
-  const deployedIsNewer = (() => {
-    try {
-      const manifest = JSON.parse(readFileSync(join(nd, 'novadev.json'), 'utf8'));
-      if (typeof manifest.version !== 'string') return false;
-      const a = manifest.version.split('.').map(Number);
-      const b = NOVADEV_VERSION.split('.').map(Number);
-      for (let i = 0; i < 3; i++) {
-        if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) > (b[i] ?? 0);
-      }
-      return false;
-    } catch {
-      return false;
-    }
-  })();
+  const deployed = deployedVersion(nd);
+  const deployedIsNewer = deployed !== null && compareVersions(deployed, NOVADEV_VERSION) > 0;
   if (deployedIsNewer) {
     problems.push(
-      `novadev.json: deployed novadev is newer than this install (${NOVADEV_VERSION}) — upgrade the install; do NOT run \`novadev deploy\` from it (that would downgrade the deployed skills)`,
+      `novadev.json: deployed novadev (${deployed}) is newer than this install (${NOVADEV_VERSION}) — upgrade the install; do NOT run \`novadev deploy\` from it (that would downgrade the deployed skills)`,
+    );
+  } else if (deployed !== null && compareVersions(deployed, NOVADEV_VERSION) < 0) {
+    problems.push(
+      `novadev.json: repo is at ${deployed}, installed novadev is ${NOVADEV_VERSION} — run \`novadev migrate-repo\` (then \`novadev deploy\`)`,
     );
   }
+  // Self-check: NOVADEV_VERSION and package.json must agree, or every deploy stamps
+  // the wrong version into novadev.json and migrations pick the wrong starting point.
+  try {
+    const pkg = JSON.parse(readFileSync(join(packageDir(), 'package.json'), 'utf8'));
+    if (pkg.version !== NOVADEV_VERSION) {
+      problems.push(
+        `installed novadev is inconsistent: package.json says ${pkg.version}, NOVADEV_VERSION says ${NOVADEV_VERSION} — fix the install`,
+      );
+    }
+  } catch {
+    /* not fatal — the package may be running from an unusual layout */
+  }
+
   const skillsDir = join(nd, 'skills');
   const templates = join(packageDir(), 'templates', 'skills');
   for (const skill of SKILLS) {

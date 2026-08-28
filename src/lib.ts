@@ -3,7 +3,28 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
 export const ROOT_DIR_NAME = '.novadev';
-export const NOVADEV_VERSION = '0.4.0';
+export const NOVADEV_VERSION = '0.6.0';
+
+/** Compare dotted versions: <0 when a is older, 0 when equal, >0 when a is newer. */
+export function compareVersions(a: string, b: string): number {
+  const pa = a.split('.').map(Number);
+  const pb = b.split('.').map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d !== 0) return d;
+  }
+  return 0;
+}
+
+/** The version recorded in the project's novadev.json, or null when absent/unreadable. */
+export function deployedVersion(nd: string): string | null {
+  try {
+    const manifest = JSON.parse(readFileSync(join(nd, 'novadev.json'), 'utf8'));
+    return typeof manifest.version === 'string' ? manifest.version : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Batch folder name contract: YYYY-MM-DD_N (N = same-day sequence number, 1-based). */
 export const BATCH_RE = /^(\d{4})-(\d{2})-(\d{2})_(\d+)$/;
@@ -107,9 +128,19 @@ export const SKILLS = [
 // Features registry
 // ---------------------------------------------------------------------------
 
-/** Feature file name contract: FEAT-NNNN-<slug>.md (the ID prefix must match frontmatter `id`). */
-export const FEATURE_FILE_RE = /^(FEAT-\d{4})-[a-z0-9][a-z0-9-]*\.md$/;
+/**
+ * A feature is a FOLDER: `features/FEAT-NNNN-<slug>/` holding the hand-written
+ * `feature.md` plus derived `work.md` (todos/records/commits) and `tests.md` (human
+ * test rounds). Splitting the derived indexes out keeps feature.md readable once a
+ * capability has accumulated twenty todos and eight test rounds.
+ */
+export const FEATURE_DIR_RE = /^(FEAT-\d{4})-[a-z0-9][a-z0-9-]*$/;
+/** Pre-0.6.0 flat layout, kept so doctor/migrate can recognise and fix it. */
+export const LEGACY_FEATURE_FILE_RE = /^(FEAT-\d{4})-[a-z0-9][a-z0-9-]*\.md$/;
 export const FEATURE_ID_RE = /^FEAT-\d{4}$/;
+export const FEATURE_DOC = 'feature.md';
+export const FEATURE_WORK = 'work.md';
+export const FEATURE_TESTS = 'tests.md';
 
 export const FEATURE_STATUSES = ['planned', 'in-progress', 'shipped', 'deprecated'] as const;
 export type FeatureStatus = (typeof FEATURE_STATUSES)[number];
@@ -120,8 +151,13 @@ export const FEATURE_REF_KEYS = ['depends-on', 'supersedes', 'superseded-by', 'c
 
 export type Feature = {
   id: string;
+  /** The folder name, e.g. FEAT-0007-magic-link — also how the feature is referenced on disk. */
   file: string;
+  dir: string;
+  /** Path to feature.md (the hand-written document). */
   path: string;
+  workPath: string;
+  testsPath: string;
   title: string;
   status: string;
   area: string;
@@ -136,19 +172,28 @@ export function featuresDir(nd: string): string {
   return join(nd, 'features');
 }
 
+/** Feature folders left over in the pre-0.6.0 flat layout (`features/FEAT-*.md`). */
+export function legacyFeatureFiles(nd: string): string[] {
+  return listFiles(featuresDir(nd)).filter((f) => LEGACY_FEATURE_FILE_RE.test(f));
+}
+
 export function listFeatures(nd: string): Feature[] {
   const dir = featuresDir(nd);
   const out: Feature[] = [];
-  for (const file of listFiles(dir)) {
-    if (!file.endsWith('.md') || file === 'INDEX.md' || file === 'README.md') continue;
-    const path = join(dir, file);
+  for (const folder of listDirs(dir)) {
+    const featureDir = join(dir, folder);
+    const path = join(featureDir, FEATURE_DOC);
+    if (!existsSync(path)) continue;
     const fm = readFrontmatter(path) ?? {};
     const refs: Record<string, string[]> = {};
     for (const key of FEATURE_REF_KEYS) refs[key] = featureIdsIn(fm[key] ?? '');
     out.push({
-      id: fm.id ?? file.match(FEATURE_FILE_RE)?.[1] ?? file.replace(/\.md$/, ''),
-      file,
+      id: fm.id ?? folder.match(FEATURE_DIR_RE)?.[1] ?? folder,
+      file: folder,
+      dir: featureDir,
       path,
+      workPath: join(featureDir, FEATURE_WORK),
+      testsPath: join(featureDir, FEATURE_TESTS),
       title: fm.title ?? '',
       status: fm.status ?? '',
       area: fm.area ?? '',
@@ -188,7 +233,10 @@ export const TEST_TASK_RE = /^(FEAT-\d{4}-)?[a-z0-9][a-z0-9-]*$/;
 export const LEGACY_TEST_TASK_RE = /^\d{4}-\d{2}-\d{2}_/;
 export const TEST_PLAN_FILE = 'test-plan.md';
 export const TEST_RESULTS_DIR = 'test-results';
+/** Pre-0.6.0 rounds lived inside the task; they now archive out. */
 export const TEST_HISTORY_DIR = 'history';
+/** Completed round folder: rev<N>-<YYYY-MM-DD>, under archive/<year>/totest/<task>/. */
+export const TEST_ROUND_RE = /^rev(\d+)-(\d{4})-(\d{2})-(\d{2})$/;
 export const TEST_STATUSES = ['awaiting-test', 'reviewed'] as const;
 export const TEST_PLAN_REQUIRED_KEYS = ['id', 'created', 'updated', 'status', 'revision'] as const;
 
@@ -206,9 +254,8 @@ export type TestTask = {
   /** Files a human dropped in test-results/ — README.md is the seeded guide, not a result. */
   results: string[];
   hasResults: boolean;
-  /** Past rounds kept under history/<stamp>/ — plan snapshot + that round's results. */
-  rounds: string[];
-  archived: boolean;
+  /** Pre-0.6.0 in-task history/ folders, if any are still lying around. */
+  legacyRounds: string[];
   fm: Record<string, string>;
 };
 
@@ -216,38 +263,80 @@ export function totestDir(nd: string): string {
   return join(nd, 'totest');
 }
 
-export function listTestTasks(nd: string, includeArchived = false): TestTask[] {
+/** One completed, archived testing round. */
+export type TestRound = {
+  taskId: string;
+  round: string;
+  revision: number;
+  date: string;
+  year: string;
+  dir: string;
+  verdict: string;
+  featureIds: string[];
+  todoRefs: string[];
+  results: string[];
+};
+
+/** Completed rounds under archive/<year>/totest/<task>/<round>/, newest last. */
+export function listTestRounds(nd: string, taskId?: string): TestRound[] {
+  const out: TestRound[] = [];
+  for (const year of listDirs(join(nd, 'archive'))) {
+    const totest = join(archiveYearDir(nd, year), 'totest');
+    for (const task of listDirs(totest)) {
+      if (taskId && task !== taskId) continue;
+      for (const round of listDirs(join(totest, task))) {
+        const dir = join(totest, task, round);
+        const planPath = join(dir, TEST_PLAN_FILE);
+        const fm = existsSync(planPath) ? (readFrontmatter(planPath) ?? {}) : {};
+        const m = round.match(TEST_ROUND_RE);
+        out.push({
+          taskId: task,
+          round,
+          revision: Number(m?.[1] ?? fm.revision ?? '') || 0,
+          date: m ? `${m[2]}-${m[3]}-${m[4]}` : (fm['last-tested'] ?? fm.updated ?? ''),
+          year,
+          dir,
+          verdict: (fm.verdict ?? '').trim(),
+          featureIds: featureIdsIn(`${fm.feature ?? ''} ${task}`),
+          todoRefs: csvList(fm.todos ?? fm.todo),
+          results: listFiles(join(dir, TEST_RESULTS_DIR)).filter((f) => f !== 'README.md'),
+        });
+      }
+    }
+  }
+  return out.sort((a, b) =>
+    a.taskId === b.taskId ? a.revision - b.revision : a.taskId.localeCompare(b.taskId),
+  );
+}
+
+/**
+ * OPEN test tasks only. `totest/` is an active queue: a task folder exists while a
+ * round is in flight and is archived on review, so anything listed here is genuinely
+ * waiting on a person. Completed rounds come from `listTestRounds`.
+ */
+export function listTestTasks(nd: string): TestTask[] {
   const out: TestTask[] = [];
-  const collect = (dir: string, archived: boolean) => {
-    for (const id of listDirs(dir)) {
-      const taskDir = join(dir, id);
-      const planPath = join(taskDir, TEST_PLAN_FILE);
-      const fm = existsSync(planPath) ? (readFrontmatter(planPath) ?? {}) : {};
-      const plan = existsSync(planPath) ? readFileSync(planPath, 'utf8') : '';
-      const results = listFiles(join(taskDir, TEST_RESULTS_DIR)).filter((f) => f !== 'README.md');
-      out.push({
-        id,
-        dir: taskDir,
-        planPath,
-        status: fm.status ?? '',
-        todoRefs: csvList(fm.todos ?? fm.todo),
-        featureIds: featureIdsIn(`${fm.feature ?? ''} ${id}`),
-        revision: Number(fm.revision ?? '') || 0,
-        lastTested: (fm['last-tested'] ?? '').trim(),
-        scenarios: (plan.match(/^##\s+Scenario\b/gim) ?? []).length,
-        results,
-        hasResults: results.length > 0,
-        rounds: listDirs(join(taskDir, TEST_HISTORY_DIR)),
-        archived,
-        fm,
-      });
-    }
-  };
-  collect(totestDir(nd), false);
-  if (includeArchived) {
-    for (const year of listDirs(join(nd, 'archive'))) {
-      collect(join(nd, 'archive', year, 'totest'), true);
-    }
+  for (const id of listDirs(totestDir(nd))) {
+    const taskDir = join(totestDir(nd), id);
+    const planPath = join(taskDir, TEST_PLAN_FILE);
+    const fm = existsSync(planPath) ? (readFrontmatter(planPath) ?? {}) : {};
+    const plan = existsSync(planPath) ? readFileSync(planPath, 'utf8') : '';
+    const results = listFiles(join(taskDir, TEST_RESULTS_DIR)).filter((f) => f !== 'README.md');
+    out.push({
+      id,
+      dir: taskDir,
+      planPath,
+      status: fm.status ?? '',
+      todoRefs: csvList(fm.todos ?? fm.todo),
+      featureIds: featureIdsIn(`${fm.feature ?? ''} ${id}`),
+      revision: Number(fm.revision ?? '') || 0,
+      lastTested: (fm['last-tested'] ?? '').trim(),
+      scenarios: (plan.match(/^##\s+Scenario\b/gim) ?? []).length,
+      results,
+      hasResults: results.length > 0,
+      legacyRounds: listDirs(join(taskDir, TEST_HISTORY_DIR)),
+      fm,
+    });
   }
   return out.sort((a, b) => a.id.localeCompare(b.id));
 }
@@ -264,11 +353,23 @@ export function listTestTasks(nd: string, includeArchived = false): TestTask[] {
  */
 export type TodoRef = { batch: string; todo: string; ref: string; dir: string; archived: boolean };
 
+/**
+ * The archive is namespaced by kind since 0.6.0: `archive/<year>/todos/<batch>/` and
+ * `archive/<year>/totest/<task>/<round>/`. Pre-0.6.0 repos put batches straight under
+ * the year, so readers tolerate both and `novadev migrate-repo` moves them.
+ */
+export const ARCHIVE_KINDS = ['todos', 'totest'] as const;
+
+export function archiveYearDir(nd: string, year: string): string {
+  return join(nd, 'archive', year);
+}
+
 /** Every todo folder in the project, in todos/ and archive/<year>/ alike. */
 export function listAllTodos(nd: string): TodoRef[] {
   const out: TodoRef[] = [];
   const collect = (batchesDir: string, archived: boolean) => {
     for (const batch of listDirs(batchesDir)) {
+      if (archived && (ARCHIVE_KINDS as readonly string[]).includes(batch)) continue;
       for (const todo of listDirs(join(batchesDir, batch))) {
         out.push({
           batch,
@@ -281,7 +382,11 @@ export function listAllTodos(nd: string): TodoRef[] {
     }
   };
   collect(join(nd, 'todos'), false);
-  for (const year of listDirs(join(nd, 'archive'))) collect(join(nd, 'archive', year), true);
+  for (const year of listDirs(join(nd, 'archive'))) {
+    const yearDir = archiveYearDir(nd, year);
+    collect(join(yearDir, 'todos'), true);
+    collect(yearDir, true); // pre-0.6.0: batches sat directly under the year
+  }
   return out;
 }
 

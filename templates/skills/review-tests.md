@@ -32,8 +32,9 @@ leave it open; do not infer a pass from silence.
    sentence next to it, and when they disagree the screenshot wins.
 3. The originating todos' `ai_completed.md` and `ai_needstest.md` — the task's
    `todos:` list may name several, and ALL of them are gated on this one round.
-4. `history/` when a result is confusing: what the previous round tested and found
-   often explains a note that makes no sense against the current plan alone.
+4. Past rounds (`archive/<year>/totest/<task>/`, indexed in the feature's `tests.md`)
+   when a result is confusing: what the previous round tested and found often explains
+   a note that makes no sense against the current plan alone.
 
 Human notes are informal by nature. "Kinda slow", "the second one looked weird",
 "had to click twice" are all real findings — treat them as such rather than
@@ -98,17 +99,19 @@ Then, by verdict:
 ## 5. Mark the round done
 
 1. In the test task's `test-plan.md` frontmatter set `status: reviewed`,
-   `last-tested: <YYYY-MM-DD>`, and clear `todos:`.
+   `verdict: <passed|passed-with-followups|failed>`, `last-tested: <YYYY-MM-DD>`, and
+   clear `todos:`. The verdict is what the feature's `tests.md` will show as this
+   round's outcome, so it must match the record you just wrote.
 2. Append what the round found to `## Revisions` — one line, so the next person to
    reopen this plan knows it was walked and what came out of it.
-3. **Leave the task in `totest/`.** It is the living plan for this feature and the
-   next change revises it (`novadev totest --round <id>`); it is not archived, and
-   the results stay in `test-results/` until that next round rotates them into
-   `history/`. Never delete the results — they are the evidence it was checked.
+3. **Archive the round**: `novadev archive --done` moves the reviewed task to
+   `archive/<year>/totest/<task>/rev<N>-<date>/`, taking the plan and the human's
+   evidence with it, and clears it from the queue. Never delete the results.
 4. Update the feature: status and a dated `## Progress` line recording that human
    verification happened and what it found (`feature-update.md`). A feature only
    earns `shipped` once the human verification behind it actually passed.
-5. `novadev links --fix`, then `novadev doctor`, then `novadev archive --done` for
-   any batch the closed gates just freed.
+5. `novadev links --fix` (this is what makes the round show up in the feature's
+   `tests.md`), then `novadev doctor`. The same `archive --done` also files away any
+   batch the closed gates just freed.
 6. Commit, then report to the human: verdict per scenario, what you filed, and what
    still needs them.

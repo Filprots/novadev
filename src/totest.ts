@@ -7,15 +7,15 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  TEST_HISTORY_DIR,
   TEST_PLAN_FILE,
   TEST_RESULTS_DIR,
   TEST_TASK_RE,
+  type TestRound,
   type TestTask,
   fail,
   featureIdsIn,
   listFeatures,
-  listFiles,
+  listTestRounds,
   listTestTasks,
   novadevDir,
   requireProjectRoot,
@@ -32,17 +32,21 @@ export function totest(args: string[]): void {
   if (opts.new) return scaffold(nd, opts);
   if (opts.round) return newRound(nd, opts.round);
 
-  const all = listTestTasks(nd, opts.all);
-  const tasks = opts.all ? all : all.filter((t) => t.status !== 'reviewed');
+  const tasks = listTestTasks(nd);
+  const rounds = listTestRounds(nd);
   if (tasks.length === 0) {
-    console.log(all.length === 0 ? 'totest — no test tasks yet.' : 'totest — nothing waiting on you. ✓');
+    console.log('totest — nothing waiting on you. ✓');
+    if (opts.all && rounds.length > 0) printRounds(rounds);
+    else if (rounds.length > 0) {
+      console.log(`  (${rounds.length} completed round(s) in the archive — \`novadev totest --all\`)`);
+    }
     return;
   }
 
-  const ready = tasks.filter((t) => t.hasResults && t.status !== 'reviewed');
-  const open = tasks.filter((t) => t.status !== 'reviewed');
-  console.log(`totest — ${open.length} awaiting you, ${ready.length} ready for review`);
+  const ready = tasks.filter((t) => t.hasResults);
+  console.log(`totest — ${tasks.length} awaiting you, ${ready.length} ready for review`);
   for (const t of tasks) print(t);
+  if (opts.all && rounds.length > 0) printRounds(rounds);
 
   if (ready.length > 0) {
     console.log(
@@ -50,7 +54,7 @@ export function totest(args: string[]): void {
         '\nreads them and closes the loop (ai_confirmed.md, or follow-up todos for the failures).',
     );
   }
-  const untested = open.filter((t) => !t.hasResults);
+  const untested = tasks.filter((t) => !t.hasResults);
   if (untested.length > 0) {
     console.log(
       `\n${untested.length} task(s) still need YOUR hands: open the ${TEST_PLAN_FILE}, walk the` +
@@ -60,20 +64,27 @@ export function totest(args: string[]): void {
 }
 
 function print(t: TestTask): void {
-  const dormant = t.status === 'reviewed';
-  const mark = dormant ? '✓' : t.hasResults ? '◆' : '○';
-  const state = dormant ? 'reviewed' : t.hasResults ? 'READY FOR REVIEW' : 'awaiting your test';
-  console.log(`  ${mark} ${t.id}  — ${state}`);
+  console.log(`  ${t.hasResults ? '◆' : '○'} ${t.id}  — ${t.hasResults ? 'READY FOR REVIEW' : 'awaiting your test'}`);
   const meta = [
     `${t.scenarios} scenario(s)`,
-    t.revision ? `rev ${t.revision}` : '',
+    `rev ${t.revision || 1}`,
     t.lastTested ? `last tested ${t.lastTested}` : 'never tested',
-    t.rounds.length ? `${t.rounds.length} past round(s)` : '',
   ].filter(Boolean);
   console.log(`      ${meta.join(' · ')}`);
   if (t.todoRefs.length) console.log(`      todos: ${t.todoRefs.join(', ')}`);
   if (t.hasResults) console.log(`      results: ${t.results.join(', ')}`);
   if (!existsSync(t.planPath)) console.log(`      ✗ missing ${TEST_PLAN_FILE}`);
+  if (t.legacyRounds.length) {
+    console.log(`      ⚠ ${t.legacyRounds.length} pre-0.6.0 history/ round(s) — run \`novadev migrate-repo\``);
+  }
+}
+
+function printRounds(rounds: TestRound[]): void {
+  console.log(`\ncompleted rounds — ${rounds.length} in the archive`);
+  for (const r of rounds) {
+    console.log(`  ✓ ${r.taskId} ${r.round}  — ${r.verdict || 'verdict not recorded'}`);
+    console.log(`      archive/${r.year}/totest/${r.taskId}/${r.round}`);
+  }
 }
 
 type Options = {
@@ -179,49 +190,66 @@ function scaffold(nd: string, opts: Options): void {
 }
 
 /**
- * Open a new testing round on an existing task: the previous round's plan snapshot and
- * results move into history/<stamp>/ so the human's inbox is empty for the new round and
- * the evidence of what was tested before survives in git.
+ * Open a new testing round. The task folder lives in totest/ only while a round is
+ * open, so this either reopens one that is already there, or brings the plan back from
+ * the newest archived round and revives it as the starting point for the new one.
  */
 function newRound(nd: string, input: string): void {
   const { id } = resolveTaskName(nd, input);
-  const task = listTestTasks(nd).find((t) => t.id === id);
-  if (!task) fail(`totest/${id} does not exist — create it with \`novadev totest --new ${input}\``);
-
-  const t = task!;
   const today = todayStamp();
-  const moved: string[] = [];
+  const open = listTestTasks(nd).find((t) => t.id === id);
+  const archived = listTestRounds(nd, id);
+  const latest = archived[archived.length - 1];
 
-  if (t.hasResults || existsSync(t.planPath)) {
-    const stamp = t.lastTested || t.fm.updated || today;
-    let dest = join(t.dir, TEST_HISTORY_DIR, stamp);
-    for (let n = 2; existsSync(dest); n++) dest = join(t.dir, TEST_HISTORY_DIR, `${stamp}-${n}`);
-    mkdirSync(dest, { recursive: true });
-
-    if (existsSync(t.planPath)) {
-      writeFileSync(join(dest, TEST_PLAN_FILE), readFileSync(t.planPath, 'utf8'));
-      moved.push(`${TEST_PLAN_FILE} (snapshot)`);
-    }
-    for (const file of listFiles(join(t.dir, TEST_RESULTS_DIR))) {
-      if (file === 'README.md') continue;
-      renameSync(join(t.dir, TEST_RESULTS_DIR, file), join(dest, file));
-      moved.push(file);
-    }
-    console.log(`archived the previous round → ${TEST_HISTORY_DIR}/${dest.split('/').pop()}/`);
-    for (const f of moved) console.log(`  ${f}`);
+  if (!open && !latest) {
+    fail(`no test task or archived round named "${id}" — create it with \`novadev totest --new ${input}\``);
   }
 
+  const dir = join(totestDir(nd), id);
+  let revision: number;
+
+  if (open) {
+    revision = (open.revision || 0) + 1;
+    if (open.hasResults) {
+      fail(
+        `totest/${id} still holds unreviewed results (${open.results.join(', ')}).\n` +
+          '  Run `/novadev-review-tests` to close that round first — starting a new one now\n' +
+          '  would bury testing the human already did.',
+      );
+    }
+    console.log(`totest/${id} is already open — reopening it at revision ${revision}.`);
+  } else {
+    // Revive from the archive: the last plan is the honest starting point for revision.
+    revision = (latest!.revision || 0) + 1;
+    mkdirSync(join(dir, TEST_RESULTS_DIR), { recursive: true });
+    const previousPlan = join(latest!.dir, TEST_PLAN_FILE);
+    writeFileSync(
+      join(dir, TEST_PLAN_FILE),
+      existsSync(previousPlan)
+        ? readFileSync(previousPlan, 'utf8')
+        : testPlanSkeleton({ id, today, feature: featureIdsIn(id)[0] }),
+    );
+    writeFileSync(join(dir, TEST_RESULTS_DIR, 'README.md'), resultsGuide(id));
+    console.log(
+      `revived totest/${id} from archive/${latest!.year}/totest/${id}/${latest!.round}` +
+        ` (rev ${latest!.revision} — ${latest!.verdict || 'verdict not recorded'}).`,
+    );
+  }
+
+  const planPath = join(dir, TEST_PLAN_FILE);
   writeFileSync(
-    t.planPath,
-    setFrontmatter(readFileSync(t.planPath, 'utf8'), {
+    planPath,
+    setFrontmatter(readFileSync(planPath, 'utf8'), {
+      id,
       updated: today,
       status: 'awaiting-test',
-      revision: String((t.revision || 0) + 1),
+      revision: String(revision),
       todos: '',
+      verdict: '',
     }),
   );
   console.log(
-    `\ntotest/${id} reopened at revision ${(t.revision || 0) + 1}.\n` +
+    `\ntotest/${id} is open at revision ${revision}.\n` +
       `Now REVISE ${TEST_PLAN_FILE} for what changed: rewrite scenarios whose expectations moved,\n` +
       'delete ones the change made irrelevant, add ones for the new behaviour, and log it under\n' +
       '"## Revisions" so the human knows what is different since they last tested.',
@@ -324,8 +352,9 @@ it down even when it feels unrelated.
 
 When you are done, run \`/novadev-review-tests\`: an agent reads this folder, judges
 each scenario against its expected outcome, writes \`ai_confirmed.md\` on the
-originating todo(s), and files follow-up todos for whatever failed. Your results then
-move into \`../${TEST_HISTORY_DIR}/\` when the next round opens, so this folder is
-always just the current round.
+originating todo(s), and files follow-up todos for whatever failed. This whole round —
+the plan you walked and the results you wrote — is then archived to
+\`archive/<year>/totest/${id}/rev<N>-<date>/\`, and the feature's \`tests.md\` links to
+it. So this folder is always just the round in front of you.
 `;
 }

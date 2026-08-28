@@ -38,19 +38,24 @@ not after the todo or the date, and there is exactly **one per feature, forever*
 is a living document: when new work changes that feature, you revise the existing plan
 instead of filing a second one.
 
+`totest/` is an active queue: the task folder is only there while a round is open, and
+archives to `archive/<year>/totest/<task>/rev<N>-<date>/` once reviewed. So check both:
+
 ```sh
-novadev totest --all            # does this feature already have a task?
+novadev totest --all            # open tasks AND completed rounds in the archive
 ```
 
-**If a task already exists → revise it (this is the normal case):**
+**If this feature has been tested before → open a new round (the normal case):**
 
 ```sh
 novadev totest --round FEAT-0007-magic-link
 ```
 
-That rotates the last round's plan snapshot and the human's results into
-`history/<stamp>/`, empties the results inbox, bumps `revision:`, and sets
-`status: awaiting-test`. Then you edit the plan — see "Revising a plan" below.
+That revives the task from its newest archived round — bringing back the plan you
+last tested against as the honest starting point — bumps `revision:`, and sets
+`status: awaiting-test` with an empty results inbox. Then you edit the plan; see
+"Revising a plan" below. (It refuses if the open round still holds unreviewed results,
+so a new round cannot bury testing the human already did.)
 
 **If no task exists → create it:**
 
@@ -131,7 +136,8 @@ Also refresh the header: what you verified automatically this time, and any setu
 that moved (new URL, new seed data, new device matrix). A plan whose setup is stale
 fails before scenario 1.
 
-Never edit a `history/` snapshot — it records what was actually tested back then.
+Never edit an archived round under `archive/<year>/totest/` — it records what was
+actually tested back then, and the feature's `tests.md` cites it as evidence.
 
 ## Gate the todo
 

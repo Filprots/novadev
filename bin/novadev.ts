@@ -17,6 +17,8 @@ usage:
                             --fix regenerates derived backlinks and features/INDEX.md
   novadev totest [--all]    what still needs YOUR hands-on testing, and what is ready
                             for review; --new <slug> scaffolds a test task
+  novadev migrate-repo      upgrade this repo's .novadev/ layout to the installed version
+                            (stepwise, version-aware; --dry-run to preview, --force if dirty)
   novadev doctor            validate structure; non-zero exit on problems
   novadev help              this help
 `;
@@ -55,6 +57,11 @@ switch (command) {
   case 'totest': {
     const { totest } = await import('../src/totest.ts');
     totest(args);
+    break;
+  }
+  case 'migrate-repo': {
+    const { migrateRepo } = await import('../src/migrations.ts');
+    migrateRepo(args);
     break;
   }
   case 'doctor': {

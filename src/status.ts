@@ -43,14 +43,14 @@ export function status(): void {
 
   // The human-verification queue comes first — it is the only thing here that is
   // blocked on the person reading this.
-  const tasks = listTestTasks(nd).filter((t) => t.status !== 'reviewed');
+  const tasks = listTestTasks(nd);
   if (tasks.length > 0) {
     const ready = tasks.filter((t) => t.hasResults);
     console.log(`\ntotest — ${tasks.length} awaiting YOU (${ready.length} ready for review)`);
     for (const t of tasks) {
       const state = t.hasResults ? 'READY FOR REVIEW' : 'needs your test';
       console.log(`  ${t.hasResults ? '◆' : '○'} ${t.id}  — ${state}, ${t.scenarios} scenario(s)`);
-      if (t.todoRef) console.log(`      todo: ${t.todoRef}`);
+      if (t.todoRefs.length) console.log(`      todos: ${t.todoRefs.join(', ')}`);
     }
     if (ready.length > 0) console.log('  → run `/novadev-review-tests` to close the loop');
   }
