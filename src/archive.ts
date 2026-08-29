@@ -18,10 +18,48 @@ import {
  * regenerate them here — otherwise every archive sweep leaves `novadev doctor` failing
  * until someone remembers to run `novadev links --fix` by hand.
  */
-function regenerateDerived(root: string): void {
+function regenerateDerived(root: string, quiet = false): void {
   const { fixes } = auditLinks(root);
   for (const fix of fixes) writeFileSync(fix.path, fix.next);
-  if (fixes.length > 0) console.log(`regenerated ${fixes.length} derived file(s).`);
+  if (fixes.length > 0 && !quiet) console.log(`regenerated ${fixes.length} derived file(s).`);
+}
+
+/**
+ * The whole `--done` sweep as a callable unit: reviewed test rounds, then every
+ * fully-recorded batch, then the derived-content regeneration the moves invalidate.
+ * `novadev sync` drives this; the CLI command is a thin wrapper that prints.
+ */
+export function sweepDone(root: string): string[] {
+  const nd = novadevDir(root);
+  const moved: string[] = [];
+  const log = (line: string) => moved.push(line);
+
+  for (const task of listTestTasks(nd)) {
+    if (task.status !== 'reviewed') continue;
+    const date = (task.lastTested || task.fm.updated || todayStamp()).slice(0, 10);
+    const year = date.slice(0, 4);
+    const round = `rev${task.revision || 1}-${date}`;
+    const dest = join(nd, 'archive', year, 'totest', task.id, round);
+    if (existsSync(dest)) fail(`archive already contains ${year}/totest/${task.id}/${round}`);
+    mkdirSync(join(dest, '..'), { recursive: true });
+    renameSync(task.dir, dest);
+    log(`totest/${task.id} → archive/${year}/totest/${task.id}/${round}`);
+  }
+
+  const todosDir = join(nd, 'todos');
+  for (const batch of listDirs(todosDir).filter((b) => batchIsDone(join(todosDir, b)))) {
+    const m = batch.match(BATCH_RE);
+    if (!m) continue;
+    const destDir = join(nd, 'archive', m[1], 'todos');
+    mkdirSync(destDir, { recursive: true });
+    const dest = join(destDir, batch);
+    if (existsSync(dest)) fail(`archive already contains ${m[1]}/todos/${batch}`);
+    renameSync(join(todosDir, batch), dest);
+    log(`todos/${batch} → archive/${m[1]}/todos/${batch}`);
+  }
+
+  if (moved.length > 0) regenerateDerived(root, true);
+  return moved;
 }
 
 /** Move every reviewed test task out of the queue and into the archive as a round. */

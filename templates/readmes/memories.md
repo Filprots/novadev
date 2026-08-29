@@ -4,11 +4,11 @@
 
 Hard-won knowledge that saves future time: gotchas, debugging recipes, decisions
 with non-obvious whys, "never do X here" guardrails. Agents WRITE memories the
-moment they stumble on such a thing (see `../skills/workflow.md`), and READ
+moment they stumble on such a thing (see `../skills/novadev.md`), and READ
 `INDEX.md` before starting related work.
 
 One file per memory, frontmatter `title` / `created` / `kind` (gotcha | guide |
 decision | guardrail) / `verified`, body = the fact + **Why:** + **How to
 apply:**. `INDEX.md` holds exactly one pointer line per memory.
 
-Periodic hygiene: `../skills/memories-review.md` (verify, rewrite, prune).
+Periodic hygiene (verify, rewrite, prune) is in `../skills/novadev.md`.

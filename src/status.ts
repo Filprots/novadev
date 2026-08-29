@@ -81,7 +81,7 @@ export function status(): void {
     console.log(
       existsSync(join(nd, 'features', 'INDEX.md'))
         ? 'features — 0 entries'
-        : 'features — MISSING (an agent must create it: skills/feature-init.md)',
+        : 'features — MISSING (an agent must create it: skills/novadev.md (phase 9))',
     );
   } else {
     const counts = new Map<string, number>();
@@ -99,7 +99,7 @@ export function status(): void {
     );
     console.log(`wiki — ${pages.length} page(s)`);
   } else {
-    console.log('wiki — MISSING (an agent must create it: skills/wiki-init.md)');
+    console.log('wiki — MISSING (an agent must create it: skills/novadev.md (phase 9))');
   }
 
   let archived = 0;

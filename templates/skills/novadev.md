@@ -1,0 +1,469 @@
+# novadev — the development loop (always applied)
+
+<!-- managed by `novadev deploy` — local edits will be overwritten on the next deploy.
+     Project-specific rules belong in the wiki (conventions page), not here. -->
+
+This project uses **novadev**: a structured development system in `.novadev/`,
+tracked in git, so the folder itself is the development history.
+
+**The division of labour is the whole point.** The human writes todo briefs and walks
+the tests only a person can walk. YOU do everything else — the work, the records, the
+feature registry, the wiki, the memories, the archiving, the checks. The human should
+never have to remember a command or wonder what happens next. If you find yourself
+about to write "you should now run…" or "don't forget to…", stop: that is your job.
+
+This is the only playbook. Everything below is one loop.
+
+## The folder map
+
+```
+.novadev/
+  todos/       task batches waiting to be executed — human-authored, or filed by YOU from chat
+  archive/     finished work by year: archive/<year>/todos/ and archive/<year>/totest/
+  postponed/   deferred work with an explicit wake-up trigger
+  sparks/      raw unshaped ideas — not yet tasks
+  wiki/        the project pre-context every agent loads before working
+  memories/    hard-won gotchas, guides, and guardrails — read before, write during
+  features/    what this software DOES — one FEAT-NNNN/ folder per capability
+  totest/      the ACTIVE queue of tests waiting on a HUMAN (archived once reviewed)
+  skills/      this playbook (managed by `novadev deploy`)
+```
+
+## Vocabulary
+
+- **Batch** — `todos/YYYY-MM-DD_N/` (`N` = same-day sequence). **Todo** — one folder
+  inside it, e.g. `todos/2026-08-29_1/01-fix-login/`; a `00-program` todo, when
+  present, is the batch's owner plan — read it first.
+- **Brief** — the task input in a todo folder (`.txt`/`.md` + screenshots). Usually
+  human-authored; for a chat-initiated todo it is the `prompt.md` YOU transcribe.
+- **Record** — what YOU write into the todo folder: `ai_completed.md` /
+  `ai_failed.md` / `ai_progress.md`, plus the gate pair `ai_needstest.md` →
+  `ai_confirmed.md`.
+- **Feature** — one capability, `features/FEAT-NNNN-<slug>/`: you write `feature.md`;
+  `work.md` and `tests.md` beside it are generated.
+- **Test task / round** — `totest/<feature-task>/` while a round of human testing is
+  open; archived to `archive/<year>/totest/<task>/rev<N>-<date>/` once reviewed.
+- **Reference** — always a stable ID (`FEAT-0007`, `2026-08-29_1/01-fix-login`, a
+  commit hash), **never a relative path**: archiving changes folder depth and would
+  break paths.
+
+---
+
+# THE LOOP
+
+Run it for every round of work — a todo, a batch, or a chat request. Phases in order;
+skip a phase only when it genuinely has nothing to do, never because it is tedious.
+
+```
+0 ORIENT   → 1 INTAKE → 2 PLAN → 3 WORK → 4 RECORD → 5 VERIFY
+→ 6 REVIEW → 7 REGISTER → 8 REMEMBER → 9 DOCUMENT → 10 CLOSE
+```
+
+Phase 10 (`novadev sync`) prints **NEXT ACTIONS**. Keep working that list until it
+comes back clean — that is what "the loop" means.
+
+## 0 · ORIENT — load pre-context (before ANY substantive work)
+
+1. **Wiki** — read `wiki/INDEX.md`, then the pages your task touches. **If
+   `wiki/INDEX.md` is missing, build the wiki first** (see *Building the wiki*).
+   Working without pre-context produces wrong work.
+2. **Memories** — read `memories/INDEX.md`; open every memory whose one-liner touches
+   your area. They exist to stop you repeating past time-wasters; ignoring one is a defect.
+3. **Features** — read `features/INDEX.md` and open the features covering your area.
+   `novadev features --touching <path>` tells you what already owns the code you are
+   about to change. **If the registry is missing, build it** (see *Building the registry*).
+4. **Queue** — run `novadev sync` at the start of a session too: it tells you what is
+   half-finished, what the human has tested, and what is waiting on them.
+5. **Postponed** — when taking stock, read each `postponed/*.md` header: trigger met →
+   surface it; obsolete → recommend deletion; otherwise say it is parked.
+
+## 1 · INTAKE — everything project-changing becomes a todo
+
+Todos usually arrive as briefs. But when the human asks **in chat** to implement, fix,
+change, or build something no open todo covers, that request IS a todo and must be
+filed as one **before you start** — an interrupted session must still leave a trace.
+Chat scrolls away; the todo folder does not.
+
+**Fires for** any request whose execution changes the repository (code, config, docs,
+assets, dependencies), rewrites history, or changes deployed state.
+**Does not fire for** questions, explanations, read-only investigation, clerical
+commits of work already recorded, or upkeep of `.novadev/` itself (there, the file you
+write IS the trace — never file a todo about filing).
+
+1. **Find an existing home first.**
+   - Todo with no terminal record (open, or `ai_progress.md`) → work under it; add any
+     new chat constraints to the brief as `**Chat addendum, <date>:** …`.
+   - Todo with a terminal record (in `todos/` or `archive/`) → file a NEW todo and
+     cross-link both records. Exception: an `ai_failed.md` marked *deferred* whose
+     remaining work you are now doing — update in place.
+   - Named in a human batch's `00-program` but not broken out → the one case where you
+     add to a human-authored batch.
+   - Matches a `postponed/` item or a `sparks/` file → its moment came: fold that
+     content into the new todo's brief and delete the original.
+2. **Create it.** Reuse the batch you created earlier in this conversation; otherwise
+   `novadev new <slug>` (it computes the next `YYYY-MM-DD_N`, counting same-day
+   batches already archived). Never add to a human-authored batch except the
+   `00-program` case. Inside, `NN-<slug>/` — `NN` from `01`, arrival order.
+3. **Transcribe the brief** as `prompt.md`:
+
+```markdown
+# prompt — <slug>
+
+**Source:** chat-initiated, transcribed by the agent — <YYYY-MM-DD>
+
+## Request
+<the ask — verbatim where short, tightly faithful where long>
+
+## Context from the conversation
+<constraints, clarifications, decisions the human stated in chat>
+```
+
+## 2 · PLAN — before you write code
+
+**Multi-todo batches**: read EVERY brief first, then group the todos into waves (quick
+fixes ship while the big ones are still being designed), spot cross-todo overlaps (two
+briefs on one seam get ONE design), and order by dependency, not folder order. Settle
+open decisions with the human in **one batched round** of concrete options (recommend
+one each) — never mid-implementation stalls. Record the answers in the batch's
+`ai_progress.md`; they govern the whole batch. Do the recon (read the real modules)
+before coding so every wave starts from exact file/line routes instead of guesses.
+
+**New capability? Pre-flight it against the registry** — building a duplicate or a
+conflicting second version is the expensive failure this prevents:
+
+| Angle | How | Catches |
+|---|---|---|
+| Name/keyword | `novadev features <term>` per synonym | the same thing under another name |
+| Code surface | `novadev features --touching <path>` | features that own the code you will change |
+| Area / lifecycle | `--area <a>`, `--status planned\|in-progress` | neighbours; someone already started it |
+| Deprecated | `--status deprecated` | capability removed on purpose — don't resurrect it blindly |
+| History | grep `archive/` records + `postponed/` + `sparks/` | rejected designs, earlier shapes of the idea |
+
+Open the candidates and READ them — frontmatter alone decides nothing. Then return one
+verdict, with the searches you actually ran as evidence:
+
+- **build** — genuinely new → new `FEAT-`, status `planned`.
+- **extend FEAT-NNNN** — belongs to an existing feature; no new ID.
+- **supersede FEAT-NNNN** — new `FEAT-` with `supersedes:`; the old one gets
+  `superseded-by:` + `status: deprecated` (both directions, or `novadev links` fails).
+- **drop** — it already exists and works; say where, don't build.
+- **blocked** — needs an unbuilt dependency or an unresolvable conflict; name it, and
+  `postponed/` it if it is waiting on a trigger.
+
+"No conflicts found" is only credible with the searches attached.
+
+## 3 · WORK
+
+Do it by the project's own standards (`wiki/conventions.md`). Read the whole brief
+first, screenshots included.
+
+## 4 · RECORD — as the work concludes, not later
+
+```markdown
+# ai_completed — <todo slug>
+
+**Date:** <YYYY-MM-DD>
+**Feature:** <FEAT-NNNN, comma-separated if several — or `none — <why>`>
+**Commits:** <hashes, comma-separated — omit if nothing was committed>
+
+## Prompt
+<quote or tightly summarize the brief>
+
+## What I did
+<the change, key files touched>
+
+## Verification
+<tests / typecheck / build / manual checks — actual results>
+
+## Notes
+<follow-ups, limitations, cross-links to related todos as `<batch>/<todo>`>
+```
+
+- **`ai_failed.md`** when it did not land: state WHICH case — *deferred* (what remains
+  + the plan), *cancelled* (what was decided), *merged into <ref>*, or *blocked/failed*.
+- **`ai_progress.md`** for long-running work: what is done, what is next, how to
+  resume. Replaced by a terminal record when it concludes.
+- **A chat-initiated record carries one extra section**, because the conversation that
+  shaped it is saved nowhere else:
+
+```markdown
+## Thinking
+<the approach and why; alternatives rejected; decisions and their rationale; dead ends>
+```
+
+**Conventions.** One record per todo, updated in place when status changes (a deferred
+item that lands flips `ai_failed.md` → `ai_completed.md`; delete the stale one). Short
+and factual. Reference by ID, never by relative path. **Never claim verification you
+did not run** — and when a human must check it, phase 5 is how you say so.
+
+The `**Feature:**` and `**Commits:**` lines are the *authored* half of the link graph;
+`novadev sync` regenerates the feature's `work.md` from them. Saying
+`none — <why>` is required when there is no feature: silence is indistinguishable from
+forgetting.
+
+## 5 · VERIFY — hand what you could not check to the human
+
+Some things an agent cannot verify: how a page renders, whether an interaction *feels*
+right, a real device, a third-party sandbox, anything behind credentials you do not
+hold. Do not claim those. Do not mention them in chat and move on. File a test task.
+
+**Do NOT file one for work you could have verified and simply did not** — write the
+test instead. A `totest/` folder full of things a unit test should have covered trains
+the human to ignore it, and that costs you the one channel that catches real
+regressions. If you are about to write "please double-check it works", you have not
+identified a scenario: name the specific thing you could not observe, or drop it.
+
+One task per feature. Check both open and archived first — `novadev totest --all`:
+
+- **Tested before** → `novadev totest --round <task-id>` revives it from its newest
+  archived round, bringing back the plan that was actually walked, and bumps `revision:`.
+- **First time** → `novadev totest --new FEAT-NNNN --todos <batch>/<todo> --scope "…"`.
+  It refuses a second task for a feature that already has one; that refusal is the rule.
+
+**Revising a plan is the part that matters most.** A scenario describing behaviour that
+no longer exists is *worse than no scenario*: the human walks it, hits the old
+expectation, and reports a failure that is really just a stale plan. So per scenario:
+still valid → keep; expectations moved → **rewrite**; behaviour removed → **delete**;
+now covered by an automated test → **delete** and say which test; new behaviour →
+**add**. Log it under `## Revisions` (`- 2026-09-15 (rev 3) — TTL cut to 5min:
+Scenario 2 updated. Scenario 4 deleted, that path was removed. New: Scenario 5.`) so
+the human knows what changed since they last tested. Refresh the setup too.
+
+Write scenarios a stranger could execute — one concrete action per step, **both**
+outcomes named:
+
+```markdown
+## Scenario 2 — Expired magic link is refused
+
+**Priority:** critical
+**Steps:**
+1. Request a login link for `demo@example.com`.
+2. Wait 20 minutes without opening it (or set `MAGIC_TTL=1m` and wait 2).
+3. Open the link.
+
+**Expect (pass):** the "link expired" screen with a working "send me a new one";
+no session cookie is set; you are still logged out afterwards.
+**Watch for (fail):** it logs you in anyway; a raw stack trace or blank page; the
+resend button does nothing; a redirect loop.
+```
+
+Observable outcomes only ("what is on screen", not "the token is validated"). Priority
+per scenario so ten minutes is enough for the important ones. Cheapest setup first,
+destructive last. The header carries **why a human is needed**, **what you already
+verified automatically** (so they don't redo machine work), and the exact **setup**.
+`## Out of scope` says what this round does not cover.
+
+Then gate the todo — `ai_needstest.md` beside `ai_completed.md`:
+
+```markdown
+# ai_needstest — <todo slug>
+
+**Date:** <YYYY-MM-DD>
+**Test:** <task id, e.g. FEAT-0007-magic-link>
+**Feature:** <FEAT-NNNN, or `none — <why>`>
+
+## Why a human is needed
+<the specific thing you could not observe>
+
+## Verified automatically already
+<tests/build/typecheck that passed — actual results>
+
+## What is riskiest
+<where you would look first if something is broken>
+```
+
+Add the todo's ref to the task's `todos:` list — both sides must name each other. While
+the gate exists the todo is NOT terminal and `novadev sync` will not archive its batch.
+Several todos can share one round; list them all.
+
+## 6 · REVIEW — read the human's results when they land
+
+`novadev sync` tells you when a task has results. **Trigger: results exist.** A task
+whose `test-results/` holds only the seeded `README.md` has NOT been tested — leave it
+open and never infer a pass from silence. But once the human has written something,
+reviewing it is your job, not theirs to request.
+
+1. Read `test-plan.md` — judge against what each scenario's pass/fail were *defined*
+   to be, not what you would expect. Check `## Revisions`: a scenario whose
+   expectations moved is the one most likely walked against the old assumption.
+2. Read **everything** in `test-results/`, images included. When a screenshot
+   contradicts the sentence next to it, the screenshot wins.
+3. Past rounds (`archive/<year>/totest/<task>/`, indexed in the feature's `tests.md`)
+   often explain a note that makes no sense against the current plan alone.
+
+Human notes are informal by nature — "kinda slow", "looked weird", "had to click
+twice" are real findings; treat them as such rather than discarding them for being
+unquantified. If a note is genuinely ambiguous about whether something passed, **ask**
+— a wrong `passed` costs far more than one question. Reproduce what you can: a
+confirmed mechanism turns a vague note into a fixable todo. Read across scenarios for
+off-script observations and environment-specific behaviour; that is usually the most
+valuable content in the folder.
+
+Then close the gate **on every todo in the task's `todos:` list** — delete each
+`ai_needstest.md`, write `ai_confirmed.md`. "Confirmed" means human verification
+happened and was reviewed; the verdict says whether it worked.
+
+```markdown
+# ai_confirmed — <todo slug>
+
+**Date:** <YYYY-MM-DD>
+**Test:** <task id>
+**Verdict:** passed | passed-with-followups | failed
+**Feature:** <FEAT-NNNN, or `none — <why>`>
+
+## What the human reported
+<per scenario: verdict + the evidence, including which files/screenshots>
+
+## Off-script findings
+<what they noticed that the plan did not ask about — or "none">
+
+## Conclusion
+<what this means for the work>
+
+## Follow-ups
+<new todo refs filed from failures, or "none">
+```
+
+Failures become a NEW batch of todos (phase 1), one per coherent problem, each brief
+carrying the scenario, the human's exact words, the evidence file, and your
+reproduction. Cross-link both ways. Never silently reopen the original todo — its
+record stays true about what it did. Anything the human could not test is not a pass:
+keep it in the next round, or `postponed/` it with the trigger that makes it testable.
+
+Finally set `status: reviewed`, `verdict: <…>`, `last-tested: <date>` in the plan's
+frontmatter, clear `todos:`, and add a line to `## Revisions`. Phase 10 archives the
+round and links it into the feature's `tests.md`.
+
+## 7 · REGISTER — keep the features registry true
+
+A registry that lags reality is a trap: the next pre-flight reads it, believes it, and
+gets the wrong verdict.
+
+- **New capability** → `novadev features --new <slug>`, then fill `area`, `tags`,
+  `touches`, and the relationships. `touches:` is what powers overlap detection —
+  list the paths the feature genuinely owns.
+- **Status**: `planned` → `in-progress` when real work starts → `shipped` when it works
+  end to end **and** the verification behind it actually passed (including the human
+  round, if there was one) → `deprecated` when removed or superseded.
+- **`## Progress`**: one dated line per real step, newest last, naming the todo ref.
+- **Refresh** `touches:` when the code surface moved and `tags:` when it gained
+  vocabulary someone would search for — stale fields cause duplicate features later.
+- **Removal**: never delete the feature file. `status: deprecated`, log it, and set
+  `superseded-by:` / `supersedes:` on both sides if something replaced it.
+- **Never hand-edit** `work.md`, `tests.md`, or `features/INDEX.md` inside their
+  `<!-- novadev:*:… -->` markers — all derived, regenerated by phase 10.
+
+## 8 · REMEMBER — write the memory while it is fresh
+
+The moment you hit something **non-obvious that cost real time or would cost the next
+agent time** — a tool quirk, a trap in the stack, a decision with a non-obvious why, a
+debugging recipe, a "never do X here" — write it immediately:
+
+```markdown
+---
+title: <one line — the claim itself>
+created: <YYYY-MM-DD>
+kind: gotcha | guide | decision | guardrail
+verified: <YYYY-MM-DD — last date this was confirmed true>
+---
+<The fact. Then **Why:** it matters. Then **How to apply:** what to actually do.>
+```
+
+Then a pointer in `memories/INDEX.md`: `- [title](<slug>.md) — <when it applies>`.
+Do NOT record what the repo already states, or what only matters to this conversation.
+A memory earns its file by saving future time.
+
+**Postponing.** Work that is real but blocked goes to `postponed/<slug>.md` — never
+silently dropped. The header is the contract:
+
+```markdown
+---
+title: <what it is, one line>
+postponed: <YYYY-MM-DD>
+do-when: <the concrete TRIGGER that makes it doable>
+discard-if: <the condition that makes it OBSOLETE>
+---
+<what the work is + where it plugs in, enough to act on later>
+```
+
+## 9 · DOCUMENT — keep the wiki true
+
+If your change altered what the wiki describes (new module, changed workflow, new
+dependency, moved boundary), update the affected pages and their `updated:` stamp, and
+keep the INDEX one-liners accurate. A wiki that lies is worse than none.
+
+**Building the wiki** (when `wiki/INDEX.md` is missing — do this BEFORE todo work).
+Exactly these pages, no others; a topic that fits nowhere goes under a heading in the
+closest one. Each starts with `---\nupdated: <YYYY-MM-DD>\n---`.
+
+| Page | Contains |
+|---|---|
+| `INDEX.md` | Load-first map: 1–3 sentence summary + one line per page. Nothing else. |
+| `overview.md` | What the system IS: purpose, users, capabilities, top-level layout. |
+| `stack.md` | Languages, frameworks, runtimes, package managers, key deps and why, version constraints. |
+| `architecture.md` | The parts and how they connect: modules, boundaries, data flow, where state lives. |
+| `conventions.md` | How code is written HERE: style, naming, patterns required and banned, review gates. |
+| `workflows.md` | Build, run, test, debug, deploy: exact commands, environments, secrets handling (where, never values), CI. |
+| `glossary.md` | The project's own terms an outsider would not know. |
+
+Investigate, don't guess: probe manifests, lockfiles, CI and deploy configs, entry
+points, existing docs; run the build or tests if obviously safe, to confirm the
+commands you document actually work; mine recent commits and `archive/` records for how
+work is really done. Where you could not verify something write `UNVERIFIED:` before
+the claim; what you could not determine at all gets `TODO(wiki): <question>`. A page is
+a briefing, not a book — well under ~150 lines, linking to files instead of quoting
+them.
+
+**Building the registry** (when `features/INDEX.md` is missing). A feature is a
+capability someone can point at ("magic-link login", "CSV export", "rate limiting") —
+not a bug fix, refactor, or internal helper. Prefer a handful of real capabilities over
+dozens of fragments; two things always changed together with one code surface are ONE
+feature. Reverse-engineer from the wiki (`overview`, `architecture`, `glossary` — use
+the project's own names), the code surface (entry points, routes, commands, screens,
+flags), and the history (`archive/` records give you the work links for free). Confirm
+each against the code before writing it down. Then `novadev features --new <slug>` per
+feature and fill it in.
+
+## 10 · CLOSE — one command, then work the list
+
+```sh
+novadev sync
+```
+
+It regenerates every derived file (`work.md`, `tests.md`, `features/INDEX.md`),
+archives finished batches and reviewed test rounds, validates the whole tree and link
+graph, and prints two lists: **NEXT ACTIONS** (yours) and **WAITING ON THE HUMAN**.
+
+**Act on every one of your NEXT ACTIONS, then run `novadev sync` again.** Repeat until
+it reports clean. That loop is the mechanism that stops work from silently rotting.
+
+Then commit `.novadev/` alongside the code, put the hash(es) in the record's
+`**Commits:**` line, and `novadev sync` once more so `work.md` picks them up.
+
+Finally, **report to the human** in plain language: what landed, what you verified,
+what is now waiting on them and where the scenarios are. That report is the only
+thing they should have to read.
+
+---
+
+## On demand (when the human asks — no command to remember)
+
+- **"find tech debt"** → sweep the code (TODO/FIXME/HACK, dead code, duplication,
+  suppressed warnings, skipped tests, deprecated APIs, convention violations), the
+  records (mentions of "follow-up", "workaround", "known limitation"), postponed items
+  whose trigger is met, the wiki's `TODO(wiki):`/`UNVERIFIED:` markers, and memories
+  describing workarounds whose real fix never happened. **Confirm each finding against
+  the current code** — a brief that sends someone to a non-existent problem is itself
+  debt. File the confirmed ones as a new batch, one todo per coherent finding, and say
+  plainly if the sweep was bounded.
+- **"is the wiki still true?" / "the memories look stale"** → audit them page by page
+  and file by file against the current code: fix what moved, delete what is dead,
+  resync the indexes. For memories, re-stamp `verified:` only on ones you actually
+  re-confirmed.
+- **"the wiki got fat"** → merge redundant content, delete stale detail, keep INDEX
+  skimmable in seconds. Pre-context must stay cheap to load.
+- **"check the links"** → `novadev links` reports what is broken. `--fix` handles only
+  derived content; the rest is judgement: unresolvable `FEAT-` refs (find what was
+  meant — never delete the line to silence the error), one-way supersession claims,
+  records with no `**Feature:**`, status contradictions, commit hashes git does not
+  know, stale `touches:` paths, and orphaned features.

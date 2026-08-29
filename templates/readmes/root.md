@@ -19,12 +19,12 @@ development history.
 | `totest/` | The active queue of tests waiting on a **human** — stepped scenarios an agent could not verify itself |
 | `skills/` | The agent playbooks that run this system (managed by deploy) |
 
-**Agents:** the rule of the house is `skills/workflow.md` — always applied.
+**Agents:** the rule of the house is `skills/novadev.md` — the single always-applied
 Start every substantive task by loading `wiki/INDEX.md` (create the wiki per
-`skills/wiki-init.md` if missing) and scanning `memories/INDEX.md`.
+playbook. It defines the loop; close every round with `novadev sync`.
 
 **Humans:** drop task briefs into `todos/` (`novadev new` scaffolds a batch),
 check progress with `novadev status`, see what needs your own testing with
-`novadev totest` (then `/novadev-review-tests` once you have written up results),
+`novadev totest` (write your results into the task folder — the agent picks them up),
 search capabilities with `novadev features`, and validate structure and links with
 `novadev doctor` / `novadev links`.

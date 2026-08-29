@@ -20,5 +20,5 @@ implement/fix/change something that no open todo covers, the agent must FILE it
 here itself — transcribe the request as `prompt.md`, do the work, record the
 outcome (plus its Thinking) — so chat-driven work is documented like any other.
 
-Record formats and all rules: `../skills/workflow.md`. When every todo in a batch
+Record formats and all rules: `../skills/novadev.md`. When every todo in a batch
 has a terminal record, `novadev archive --done` moves the batch to `../archive/`.

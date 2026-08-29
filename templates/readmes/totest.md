@@ -37,15 +37,17 @@ novadev totest --all  # also lists every completed round in the archive
 novadev status        # the same queue, at the top of the stock-take
 ```
 
-Then run **`/novadev-review-tests`** — and only then. An agent reads your results,
+Then just say you are done — or start any session. The agent runs `novadev sync`,
+sees the results, and reviews them: it reads your notes and screenshots,
 judges each scenario against its written expectation, writes `ai_confirmed.md` on the
-original todo, and files follow-up todos for whatever failed. Agents never review
-their own pending test tasks.
+original todo(s), and files follow-up todos for whatever failed. An agent never
+reviews a task you have not written results into — an empty results folder is never
+read as a pass.
 
-A todo carrying `ai_needstest.md` is deliberately **not** terminal: `novadev archive
---done` refuses to file its batch away, so a pending test cannot be forgotten. That
+A todo carrying `ai_needstest.md` is deliberately **not** terminal: `novadev sync`
+refuses to file its batch away, so a pending test cannot be forgotten. That
 same command sweeps reviewed rounds into the archive, where the notes and screenshots
 stay in git as the evidence it really was checked.
 
-Playbooks: `../skills/test-plan.md` (file a task), `../skills/review-tests.md`
-(close the loop).
+All the rules — filing a task, revising a plan, reviewing your results — are in
+`../skills/novadev.md` (loop phases 5 and 6).

@@ -1,10 +1,10 @@
 # novadev
 
 A **framework/language/IDE/agent/LLM-agnostic structured development system**.
-One command deploys a git-tracked folder tree + a set of agent playbooks into any
-project; from then on, task briefs go in, work happens, and exhaustive records +
-distilled knowledge come out — the folder itself becomes the project's development
-history.
+One command deploys a git-tracked folder tree + one agent playbook into any project.
+From then on you write task briefs; the agent runs a fixed loop that does the work,
+records it, registers the feature, hands you what only a human can test, keeps the
+wiki true, and archives what is finished. The folder becomes the development history.
 
 ## Install
 
@@ -27,19 +27,17 @@ git pull          # then re-run `novadev deploy` in each project to refresh it
 
 ```sh
 cd your-project
-novadev deploy    # creates .novadev/ + skills + agent adapters (idempotent, upgrade-safe)
+novadev deploy    # creates .novadev/ + the playbook + agent adapters (idempotent, upgrade-safe)
 ```
 
 Then:
 
 ```sh
 novadev new fix-login add-dark-mode   # scaffold todos/2026-08-16_1/{01-fix-login,02-add-dark-mode}/
-novadev status                        # open todos + record states, postponed triggers, wiki/features health
-novadev totest                        # what needs YOUR hands-on testing, what's ready for review
+novadev sync                          # the close-out: derive, archive, validate, list what's left
+novadev totest                        # what needs YOUR hands-on testing
+novadev status                        # open todos + record states, postponed triggers, health
 novadev features --touching src/auth  # which features already own this code (conflict pre-flight)
-novadev links --fix                   # regenerate derived backlinks + features/INDEX.md
-novadev archive --done                # move fully-recorded batches to archive/<year>/
-novadev doctor                        # validate structure + link graph (CI-friendly non-zero exit)
 novadev migrate-repo                  # upgrade an older .novadev/ layout to this version
 ```
 
@@ -47,11 +45,11 @@ novadev migrate-repo                  # upgrade an older .novadev/ layout to thi
 
 `.novadev/novadev.json` records the version the repo's layout is at. After pulling a
 newer novadev, run `novadev migrate-repo`: it applies every migration the repo has not
-reached yet, in order (a repo at 0.4.0 runs 0.4.0→0.5.0 then 0.5.0→0.6.0), and stamps
+reached yet, in order (a repo at 0.5.0 runs 0.5.0→0.6.0 then 0.6.0→0.7.0), and stamps
 the new version. `--dry-run` previews the moves; it refuses to run on a dirty working
 tree so the migration lands as a reviewable diff of its own. Then `novadev deploy` to
-refresh the playbooks and `novadev links --fix`. `novadev doctor` tells you when a repo
-is behind.
+refresh the playbook, and `novadev sync`. Both `sync` and `doctor` tell you when a
+repo is behind.
 
 ## The system
 
@@ -61,11 +59,11 @@ is behind.
   archive/     finished work by year — <year>/todos/<batch>/ and <year>/totest/<task>/<round>/
   postponed/   deferred work with do-when / discard-if triggers
   sparks/      raw unshaped ideas
-  wiki/        project pre-context agents load first (strict page set; agent creates via wiki-init)
+  wiki/        project pre-context agents load first (strict page set; the agent creates it)
   memories/    gotchas/guides/decisions/guardrails, auto-written during work + INDEX.md
   features/    what the software DOES — FEAT-NNNN/ folders: feature.md + derived work.md/tests.md
   totest/      the ACTIVE queue of tests waiting on a human (rounds archive once reviewed)
-  skills/      the canonical agent playbooks (markdown, agent-agnostic; managed by deploy)
+  skills/      the single canonical playbook, novadev.md (agent-agnostic; managed by deploy)
 ```
 
 **Records.** When an agent concludes a todo it writes `ai_completed.md`
@@ -95,14 +93,14 @@ tested. That rule exists because a scenario describing behaviour that no longer 
 is worse than no scenario — you would walk it, hit the old expectation, and report a
 failure that is really just a stale plan.
 
-That gate is **not terminal**: `novadev archive --done` refuses to file the batch
-away while it is open, so a pending test cannot be forgotten. `novadev totest` (and
-the top of `novadev status`) shows what is waiting on you and what is ready for
-review. You test, write results into the folder, then explicitly run
-`/novadev-review-tests` — an agent reads your notes and screenshots, judges each
-scenario against its written expectation, writes `ai_confirmed.md` with the verdict on
-every todo the round gated, and files follow-up todos for whatever failed. Agents never
-review their own pending test tasks; only your explicit invocation closes the loop.
+That gate is **not terminal**: `novadev sync` refuses to archive the batch while it is
+open, so a pending test cannot be forgotten. `novadev totest` (and the top of
+`novadev status`) shows what is waiting on you. You test and write results into the
+folder — that is your whole part. The next `novadev sync` sees them and puts the
+review on the agent's list: it reads your notes and screenshots, judges each scenario
+against its written expectation, writes `ai_confirmed.md` with the verdict on every
+todo the round gated, and files follow-up todos for whatever failed. An agent never
+reviews a task with an empty results folder — silence is never read as a pass.
 
 **Chat-initiated work.** When the human asks an agent in chat to
 implement/fix/change something that no open todo already covers, the agent must
@@ -116,7 +114,7 @@ happens off the books.
 
 **Wiki.** `wiki/INDEX.md` + six mandated pages (overview, stack, architecture,
 conventions, workflows, glossary). Its absence is the signal: an agent MUST create
-it (per `skills/wiki-init.md`) before doing todo work.
+it (loop phase 9) before doing todo work.
 
 **Memories.** The moment work stumbles on something non-obvious that cost time,
 the agent writes a memory file (frontmatter: title/created/kind/verified) and
@@ -140,29 +138,52 @@ rot. All references are **stable IDs, never relative paths** (`FEAT-0007`,
 break where IDs keep resolving. `novadev links` validates the whole graph;
 `novadev doctor` includes it.
 
-**Skills** (canonical markdown in `.novadev/skills/`, single source of truth):
+## The loop
 
-| Playbook | Purpose |
-|---|---|
-| `workflow.md` | The always-applied core rule: pre-context ritual, todo execution, chat-initiated filing, records, auto-memories, postponing |
-| `wiki-init.md` | Create the wiki with the strict page structure (investigate, don't guess) |
-| `wiki-update.md` | Keep the wiki true after landed work; full audit on request |
-| `wiki-compact.md` | Shrink the wiki; keep pre-context cheap to load |
-| `memories-review.md` | Verify/rewrite/prune memories; resync the index |
-| `debt-scan.md` | Sweep for tech debt and file findings as a new todo batch |
-| `feature-init.md` | Build the features registry by reverse-engineering the current capabilities |
-| `feature-check.md` | Pre-flight a proposed feature: duplicate / overlap / conflict / supersession |
-| `feature-update.md` | Keep the registry true after work lands; full audit on request |
-| `test-plan.md` | File or REVISE a feature's human-testing plan + gate the todo |
-| `review-tests.md` | Read the human's results, close the gate, file follow-ups (`/novadev-review-tests`) |
-| `links-audit.md` | Validate and repair the whole link graph; fix what tooling cannot |
+There is **one** playbook — `.novadev/skills/novadev.md` — and it defines a single
+loop the agent runs for every round of work:
+
+```
+0 ORIENT   load the wiki, memories, features, and the queue
+1 INTAKE   any chat request that changes the repo becomes a todo, before work starts
+2 PLAN     batch waves + decisions up front; pre-flight new capabilities for duplicates
+3 WORK     do it by the project's own conventions
+4 RECORD   ai_completed / ai_failed / ai_progress, with **Feature:** and **Commits:**
+5 VERIFY   what an agent cannot check → a totest task + the ai_needstest gate
+6 REVIEW   the human left results → judge them, close the gate, file follow-ups
+7 REGISTER feature status, progress, touches
+8 REMEMBER memories for what cost real time; postponed for what is blocked
+9 DOCUMENT the wiki, if reality moved
+10 CLOSE   `novadev sync`
+```
+
+`novadev sync` is the close-out and the engine: it regenerates every derived file,
+archives finished batches and reviewed test rounds, validates the tree and the link
+graph, and prints two lists — **NEXT ACTIONS** (the agent's) and **WAITING ON THE
+HUMAN**. The agent works its list and re-runs until it reports clean:
+
+```
+$ novadev sync
+derived: regenerated 3 file(s)
+
+NEXT ACTIONS — you (1):
+  → REVIEW totest/FEAT-0001-login — the human left results (results.md); judge them,
+    close the gate, file follow-ups (loop phase 6)
+
+WAITING ON THE HUMAN (1):
+  ⧗ totest/FEAT-0002-export — 3 scenario(s) to walk; write what happens into its test-results/
+```
+
+**You write todo briefs and walk the tests only a person can walk. That is the whole
+job.** No command to remember, no skill to pick, no archive step to run — if
+something needs doing and an agent can do it, `sync` says so and the agent does it.
 
 ## Agent integration (canonical + adapters)
 
 The playbooks are plain markdown any agent can follow. `novadev deploy`
 additionally generates thin native adapters that just route to them:
 
-- `.claude/skills/novadev-*/SKILL.md` — Claude Code slash-command skills
+- `.claude/skills/novadev/SKILL.md` — the Claude Code skill (`/novadev`)
 - `.cursor/rules/novadev.mdc` — Cursor always-applied rule
 - managed marker sections in `AGENTS.md` and `CLAUDE.md` (created if missing;
   re-deploy updates between the markers without touching your text)

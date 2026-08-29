@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
 export const ROOT_DIR_NAME = '.novadev';
-export const NOVADEV_VERSION = '0.6.0';
+export const NOVADEV_VERSION = '0.7.0';
 
 /** Compare dotted versions: <0 when a is older, 0 when equal, >0 when a is newer. */
 export function compareVersions(a: string, b: string): number {
@@ -51,77 +51,45 @@ export const WIKI_PAGES = [
 /** Canonical skill playbooks shipped into <root>/skills/. */
 export const SKILLS = [
   {
-    file: 'workflow.md',
-    slug: 'novadev-workflow',
+    file: 'novadev.md',
+    slug: 'novadev',
     description:
-      'Execute novadev todo briefs and chat-initiated work: pre-context loading (wiki, memories, postponed), doing the work, filing chat requests as todos with transcribed briefs, writing ai_completed/ai_failed/ai_progress records, and auto-writing memories. The always-applied core rule of the novadev system.',
+      'The novadev development loop — the single always-applied playbook for this project. Covers the pre-context ritual, executing todo briefs, writing ai_ records, the features registry, handing untestable work to the human via totest, reviewing their results, memories, the wiki, and the `novadev sync` close-out. Invoke it for any development work here; the human writes todo briefs and this drives everything else.',
   },
-  {
-    file: 'wiki-init.md',
-    slug: 'novadev-wiki-init',
-    description:
-      'Create the novadev project wiki from scratch with its strict page structure (INDEX, overview, stack, architecture, conventions, workflows, glossary). Mandatory before any todo work when the wiki is missing.',
-  },
-  {
-    file: 'wiki-update.md',
-    slug: 'novadev-wiki-update',
-    description:
-      'Refresh the novadev wiki after landed work changed reality: diff pages against the current project, edit only the affected pages, keep INDEX one-liners in sync.',
-  },
-  {
-    file: 'wiki-compact.md',
-    slug: 'novadev-wiki-compact',
-    description:
-      'Compact the novadev wiki: merge redundant content, delete stale detail, enforce page size budgets, keep the INDEX tight so pre-context stays cheap to load.',
-  },
-  {
-    file: 'memories-review.md',
-    slug: 'novadev-memories-review',
-    description:
-      'Actualize the novadev memories folder: verify each memory is still true against the current project, update or rewrite stale ones, delete junk and irrelevant ones, resync the INDEX.',
-  },
-  {
-    file: 'debt-scan.md',
-    slug: 'novadev-debt-scan',
-    description:
-      'Sweep the project for technical debt (code, records, postponed items) and author a new batch of novadev todo briefs out of the confirmed findings. Scan-and-file only — no fixing.',
-  },
-  {
-    file: 'feature-init.md',
-    slug: 'novadev-feature-init',
-    description:
-      'Create the novadev features registry from scratch: reverse-engineer the shipped feature set from the code, wiki, and archived records, and write one FEAT-NNNN file per feature plus the searchable INDEX. Mandatory before feature work when features/INDEX.md is missing.',
-  },
-  {
-    file: 'feature-check.md',
-    slug: 'novadev-feature-check',
-    description:
-      'Pre-flight a PROPOSED feature against the novadev features registry before building it: find duplicates, overlapping code surface, conflicting behavior, and superseded predecessors, then return a build/extend/supersede/drop verdict. Run before designing anything new.',
-  },
-  {
-    file: 'feature-update.md',
-    slug: 'novadev-feature-update',
-    description:
-      'Keep the novadev features registry true after work lands: flip feature status, append the progress log, author the record-to-feature links, and regenerate derived backlinks. Also runs a full registry audit on request.',
-  },
-  {
-    file: 'test-plan.md',
-    slug: 'novadev-test-plan',
-    description:
-      'Decide what a person still has to verify by hand after work lands, and file it as a novadev test task: a stepped test-plan.md with pass/fail expectations per scenario in totest/, plus the ai_needstest.md gate on the originating todo. Run when concluding work an agent could not fully verify.',
-  },
-  {
-    file: 'review-tests.md',
-    slug: 'novadev-review-tests',
-    description:
-      "Read the human's test results in a novadev totest task, judge each scenario against its expected outcome, and close the loop: write ai_confirmed.md on the original todo and file follow-up todos for whatever failed. Invoked explicitly by the human once they have finished testing.",
-  },
-  {
-    file: 'links-audit.md',
-    slug: 'novadev-links-audit',
-    description:
-      'Audit and repair the whole novadev link graph on demand: records to features, features to work and commits, memories, postponed items and the wiki — resolve every reference, regenerate derived backlinks, and investigate what tooling cannot fix mechanically.',
-  },
+] as const;
+
+/**
+ * The 0.6.0-and-earlier skill set, collapsed into the single gateway playbook above.
+ * Deploy and `migrate-repo` delete these so no stale slash command survives an upgrade.
+ */
+export const LEGACY_SKILL_FILES = [
+  'workflow.md',
+  'wiki-init.md',
+  'wiki-update.md',
+  'wiki-compact.md',
+  'memories-review.md',
+  'debt-scan.md',
+  'feature-init.md',
+  'feature-check.md',
+  'feature-update.md',
+  'test-plan.md',
+  'review-tests.md',
+  'links-audit.md',
+] as const;
+
+export const LEGACY_ADAPTER_SLUGS = [
+  'novadev-workflow',
+  'novadev-wiki-init',
+  'novadev-wiki-update',
+  'novadev-wiki-compact',
+  'novadev-memories-review',
+  'novadev-debt-scan',
+  'novadev-feature-init',
+  'novadev-feature-check',
+  'novadev-feature-update',
+  'novadev-test-plan',
+  'novadev-review-tests',
+  'novadev-links-audit',
 ] as const;
 
 // ---------------------------------------------------------------------------

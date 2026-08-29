@@ -1,8 +1,10 @@
 // `novadev deploy` — create/upgrade the novadev system in the current project.
 // Idempotent: framework-managed files are refreshed; user content is never touched.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  LEGACY_ADAPTER_SLUGS,
+  LEGACY_SKILL_FILES,
   NOVADEV_VERSION,
   ROOT_DIR_NAME,
   SKILLS,
@@ -67,14 +69,31 @@ export function deploy(cwd: string = process.cwd()): void {
     writeFileSync(memIndex, '# Memories index\n\n(no memories yet)\n');
     created.push(`${ROOT_DIR_NAME}/memories/INDEX.md`);
   }
-  // wiki/INDEX.md and features/INDEX.md are deliberately NOT created: their absence
-  // is the signal that an agent must build them (skills/wiki-init.md, feature-init.md).
+  // wiki/INDEX.md and features/INDEX.md are deliberately NOT created: their absence is
+  // the signal that an agent must build them, and `novadev sync` says so in NEXT ACTIONS.
 
   // 2. Canonical skill playbooks (framework-owned, always refreshed).
   const skillsDir = join(root, 'skills');
   mkdirSync(skillsDir, { recursive: true });
   for (const skill of SKILLS) {
     writeManaged(join(skillsDir, skill.file), readTemplate(templates, `skills/${skill.file}`));
+  }
+  // 2b. Remove the pre-0.7.0 playbooks and their adapters — everything they said now
+  // lives in the single gateway skill, and a stale slash command is worse than none.
+  const removed: string[] = [];
+  for (const file of LEGACY_SKILL_FILES) {
+    const path = join(skillsDir, file);
+    if (existsSync(path)) {
+      rmSync(path);
+      removed.push(`${ROOT_DIR_NAME}/skills/${file}`);
+    }
+  }
+  for (const slug of LEGACY_ADAPTER_SLUGS) {
+    const dir = join(cwd, '.claude', 'skills', slug);
+    if (existsSync(dir)) {
+      rmSync(dir, { recursive: true, force: true });
+      removed.push(`.claude/skills/${slug}/`);
+    }
   }
 
   // 3. Manifest.
@@ -98,9 +117,11 @@ export function deploy(cwd: string = process.cwd()): void {
     `novadev ${NOVADEV_VERSION} deployed into ${ROOT_DIR_NAME}/`,
     created.length ? `  created:  ${created.join(', ')}` : '',
     refreshed.length ? `  updated:  ${refreshed.join(', ')}` : '',
-    created.length + refreshed.length === 0 ? '  already up to date.' : '',
+    removed.length ? `  removed:  ${removed.join(', ')}` : '',
+    created.length + refreshed.length + removed.length === 0 ? '  already up to date.' : '',
     '',
-    'Next: commit the changes; an agent should now create the wiki (skills/wiki-init.md) if it is missing.',
+    'Next: commit the changes, then run `novadev sync` — it does the mechanical work and',
+    'tells the agent what is left (starting with building the wiki, if it is missing).',
   ].filter(Boolean);
   console.log(report.join('\n'));
 }
@@ -142,17 +163,16 @@ alwaysApply: true
 
 <!-- adapter managed by \`novadev deploy\` — canonical content lives in ${ROOT_DIR_NAME}/ -->
 
-This project uses novadev (\`${ROOT_DIR_NAME}/\`). Always follow
-\`${ROOT_DIR_NAME}/skills/workflow.md\`. Before substantive work, load
-\`${ROOT_DIR_NAME}/wiki/INDEX.md\` (create the wiki per
-\`${ROOT_DIR_NAME}/skills/wiki-init.md\` if missing) and scan
-\`${ROOT_DIR_NAME}/memories/INDEX.md\`. Chat requests to implement/fix/change
-anything that no open todo covers must themselves be FILED as todos —
-brief transcribed as \`prompt.md\`, concluded with an ai_ record — per the
-workflow playbook. Check \`${ROOT_DIR_NAME}/features/INDEX.md\` before designing
-anything new (duplicate/overlap/conflict), link each record to its feature with
-\`**Feature:** FEAT-NNNN\`, and run \`novadev links --fix\` afterwards. Management
-playbooks live in \`${ROOT_DIR_NAME}/skills/\`.
+This project uses novadev (\`${ROOT_DIR_NAME}/\`). Read
+\`${ROOT_DIR_NAME}/skills/novadev.md\` — the single playbook — and run THE LOOP it
+defines for any development work here: load pre-context (wiki + memories + features)
+→ plan → work → write the ai_ record → hand what you could not verify to the human as
+a \`totest/\` task → review their results when they land → update the feature →
+memories → wiki → close out with \`novadev sync\`.
+
+The human writes todo briefs; you do everything else. A chat request to
+implement/fix/change anything no open todo covers must itself be FILED as a todo.
+End every round with \`novadev sync\` and act on its NEXT ACTIONS until clean.
 `,
   );
 }
@@ -164,34 +184,15 @@ function managedSection(): string {
 This project uses **novadev** (\`${ROOT_DIR_NAME}/\`): git-tracked todos, archive,
 postponed, sparks, wiki, memories, a features registry, and a human-testing queue.
 
-- **Always follow** \`${ROOT_DIR_NAME}/skills/workflow.md\` for any development task —
-  it defines todo execution, the ai_completed/ai_failed/ai_progress records, and
-  when to auto-write memories.
-- **Chat-initiated work**: when the human asks in chat to implement/fix/change
-  something that no open todo already covers, FILE it as one before starting — create
-  the todo folder, transcribe the request as its \`prompt.md\` brief, and conclude
-  it with the normal ai_ record plus a Thinking section (rules in
-  \`${ROOT_DIR_NAME}/skills/workflow.md\`). Nothing project-changing happens off
-  the books.
-- **Before substantive work**: load \`${ROOT_DIR_NAME}/wiki/INDEX.md\` (the project
-  pre-context). If it is missing, FIRST create the wiki per
-  \`${ROOT_DIR_NAME}/skills/wiki-init.md\`.
-- **Scan** \`${ROOT_DIR_NAME}/memories/INDEX.md\` for guardrails touching your task.
-- **Features**: \`${ROOT_DIR_NAME}/features/\` is the registry of what this software
-  DOES (one \`FEAT-NNNN\` file per feature). Before designing anything new, check it
-  for duplicates/overlap/conflicts (\`novadev features --touching <path>\`, playbook
-  \`${ROOT_DIR_NAME}/skills/feature-check.md\`). When work lands, link the record to
-  its feature (\`**Feature:** FEAT-0007\`) and run \`novadev links --fix\` to
-  regenerate the backlinks.
-- **Human testing**: anything you could NOT verify yourself (browser/device
-  rendering, visual judgement, third-party services, "feel") does not get claimed as
-  verified. File a test task in \`${ROOT_DIR_NAME}/totest/\` with a stepped
-  \`test-plan.md\` and add \`ai_needstest.md\` to the todo
-  (\`${ROOT_DIR_NAME}/skills/test-plan.md\`). The human tests, then invokes
-  \`/novadev-review-tests\` — never review your own pending test task unprompted.
-- Management playbooks (wiki-update, wiki-compact, memories-review, debt-scan,
-  feature-init, feature-check, feature-update, test-plan, review-tests,
-  links-audit) live in \`${ROOT_DIR_NAME}/skills/\`.
+- **Always follow** \`${ROOT_DIR_NAME}/skills/novadev.md\` — the single playbook. It
+  defines THE LOOP you run for any development work here, end to end: load
+  pre-context → plan → work → write the ai_ record → hand untestable work to the
+  human → review their results → update the feature → memories → wiki → close out.
+- **The human writes todo briefs; you do everything else.** Never leave the human to
+  remember a command, an archive step, or which check to run.
+- **Close every round with \`novadev sync\`**: it regenerates derived links, archives
+  what is finished, validates the tree, and prints NEXT ACTIONS. Keep acting on that
+  list until it is clean, then report what landed and what is waiting on the human.
 ${MARK_END}`;
 }
 

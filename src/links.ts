@@ -258,10 +258,12 @@ export function auditLinks(root: string): Audit {
     );
     if (testsNext) fixes.push(testsNext);
 
-    if (f.status === 'shipped' && !linked.some((t) => t.state === 'completed')) {
+    // `confirmed` is completed work that a human additionally verified — it counts.
+    const done = (t: TodoLinks) => t.state === 'completed' || t.state === 'confirmed';
+    if (f.status === 'shipped' && !linked.some(done)) {
       notes.push(`features/${f.file}: status "shipped" but no completed todo links to it`);
     }
-    if (f.status === 'planned' && linked.some((t) => t.state === 'completed')) {
+    if (f.status === 'planned' && linked.some(done)) {
       notes.push(`features/${f.file}: status "planned" but completed work links to it — advance it`);
     }
     if (f.status === 'shipped' && featureRounds.some((r) => r.verdict === 'failed')) {
@@ -289,7 +291,7 @@ export function auditLinks(root: string): Audit {
       });
     }
   } else if (!existsSync(indexPath)) {
-    notes.push('features/: registry MISSING — an agent must create it (skills/feature-init.md)');
+    notes.push('features/: registry MISSING — an agent must create it (skills/novadev.md (phase 9))');
   }
 
   return { problems, notes, fixes };

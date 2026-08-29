@@ -39,7 +39,7 @@ export function features(args: string[]): void {
     console.log(
       existsSync(join(featuresDir(nd), 'INDEX.md'))
         ? 'features — registry is empty.'
-        : 'features — registry MISSING. An agent must create it: skills/feature-init.md',
+        : 'features — registry MISSING. An agent must create it: skills/novadev.md (phase 9)',
     );
     return;
   }

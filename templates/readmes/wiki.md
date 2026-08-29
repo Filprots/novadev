@@ -8,6 +8,5 @@ vocabulary. Strict page set: `INDEX.md` (load first) + `overview` / `stack` /
 `architecture` / `conventions` / `workflows` / `glossary`.
 
 **If `INDEX.md` is missing, the wiki does not exist yet** — an agent must create it
-first, following `../skills/wiki-init.md`, before doing any todo work. Keep it
-true with `../skills/wiki-update.md`; keep it small with
-`../skills/wiki-compact.md`.
+first, following `../skills/novadev.md`, before doing any todo work. Keep it
+true and keep it small — both are in that same playbook.

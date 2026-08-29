@@ -5,11 +5,21 @@
 // upgrading to 0.6.0 runs 0.4.0→0.5.0 then 0.5.0→0.6.0. Migrations must be safe to
 // re-run — they report "nothing to do" rather than failing when already applied.
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, renameSync, rmdirSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import {
   FEATURE_DOC,
+  LEGACY_ADAPTER_SLUGS,
   LEGACY_FEATURE_FILE_RE,
+  LEGACY_SKILL_FILES,
   LEGACY_TEST_TASK_RE,
   NOVADEV_VERSION,
   TEST_HISTORY_DIR,
@@ -47,6 +57,11 @@ export const MIGRATIONS: Migration[] = [
     to: '0.6.0',
     title: 'features become folders; archive namespaced into todos/ + totest/; test rounds archived',
     run: migrateFeatureFoldersAndArchive,
+  },
+  {
+    to: '0.7.0',
+    title: 'twelve playbooks collapse into the single novadev.md gateway skill',
+    run: migrateToSingleSkill,
   },
 ];
 
@@ -187,6 +202,26 @@ function migrateTotestNaming(ctx: MigrationContext): void {
       if (fm.todo !== undefined && fm.todos === undefined) updates.todos = fm.todo;
       writeFileSync(path, setFrontmatter(text, updates));
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 0.6.0 → 0.7.0
+// ---------------------------------------------------------------------------
+
+/** Delete the superseded playbooks and their slash-command adapters. */
+function migrateToSingleSkill(ctx: MigrationContext): void {
+  const skillsDir = join(ctx.nd, 'skills');
+  for (const file of LEGACY_SKILL_FILES) {
+    if (!existsSync(join(skillsDir, file))) continue;
+    ctx.log(`delete skills/${file} (folded into skills/novadev.md)`);
+    if (!ctx.dryRun) rmSync(join(skillsDir, file));
+  }
+  const claudeSkills = join(ctx.nd, '..', '.claude', 'skills');
+  for (const slug of LEGACY_ADAPTER_SLUGS) {
+    if (!existsSync(join(claudeSkills, slug))) continue;
+    ctx.log(`delete .claude/skills/${slug}/ (stale slash command)`);
+    if (!ctx.dryRun) rmSync(join(claudeSkills, slug), { recursive: true, force: true });
   }
 }
 

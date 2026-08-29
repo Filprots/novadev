@@ -7,7 +7,9 @@ const [command, ...args] = process.argv.slice(2);
 const HELP = `novadev ${NOVADEV_VERSION} — structured development system
 
 usage:
-  novadev deploy            create/upgrade .novadev/ + skills + agent adapters in the current project
+  novadev sync [--check]    THE close-out: regenerate derived links, archive what is finished,
+                            validate, and print what the agent + the human still have to do
+  novadev deploy            create/upgrade .novadev/ + the playbook + agent adapters
   novadev new [slug…]       scaffold today's next batch (todos/YYYY-MM-DD_N/), optional todo folders
   novadev status            stock-take: open todos + record states, postponed triggers, wiki/memories
   novadev archive <batch>…  move fully-recorded batch(es) to archive/<year>/   (or: --done for all)
@@ -57,6 +59,11 @@ switch (command) {
   case 'totest': {
     const { totest } = await import('../src/totest.ts');
     totest(args);
+    break;
+  }
+  case 'sync': {
+    const { sync } = await import('../src/sync.ts');
+    sync(args);
     break;
   }
   case 'migrate-repo': {
