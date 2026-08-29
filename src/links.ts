@@ -266,7 +266,18 @@ export function auditLinks(root: string): Audit {
     if (f.status === 'planned' && linked.some(done)) {
       notes.push(`features/${f.file}: status "planned" but completed work links to it — advance it`);
     }
-    if (f.status === 'shipped' && featureRounds.some((r) => r.verdict === 'failed')) {
+    // Only the LATEST round's verdict matters here: a historical failed round that a later
+    // round verified fixed is exactly the normal lifecycle, not a standing warning.
+    const latestRound = featureRounds.reduce<(typeof featureRounds)[number] | undefined>(
+      (best, r) =>
+        best === undefined ||
+        r.revision > best.revision ||
+        (r.revision === best.revision && r.date > best.date)
+          ? r
+          : best,
+      undefined,
+    );
+    if (f.status === 'shipped' && latestRound?.verdict === 'failed') {
       notes.push(
         `features/${f.file}: status "shipped" but its latest human test round recorded a failure`,
       );
