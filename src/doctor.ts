@@ -36,8 +36,23 @@ export function doctor(): void {
   const todosDir = join(nd, 'todos');
   for (const batch of listDirs(todosDir)) {
     const batchDir = join(todosDir, batch);
-    if (!BATCH_RE.test(batch)) {
+    const m = BATCH_RE.exec(batch);
+    if (!m) {
       problems.push(`todos/${batch}: batch name does not match YYYY-MM-DD_N`);
+    } else if (existsSync(join(nd, 'archive', m[1], 'todos', batch))) {
+      // Hand-created a batch whose number the archive already claimed — it can never
+      // be archived, and two different batches now share one reference.
+      const taken = new Set(
+        [...listDirs(todosDir), ...listDirs(join(nd, 'archive', m[1], 'todos'))]
+          .map((b) => BATCH_RE.exec(b))
+          .filter((x) => x && x[0].startsWith(`${m[1]}-${m[2]}-${m[3]}_`))
+          .map((x) => Number(x![4])),
+      );
+      let free = 1;
+      while (taken.has(free)) free++;
+      problems.push(
+        `todos/${batch}: archive/${m[1]}/todos/${batch} already exists — this name is taken. Rename it to ${m[1]}-${m[2]}-${m[3]}_${free} (\`novadev new\` picks the free number for you)`,
+      );
     }
     for (const todo of listDirs(batchDir)) {
       const todoDir = join(batchDir, todo);

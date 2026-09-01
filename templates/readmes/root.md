@@ -10,14 +10,14 @@ development history.
 | Folder | What lives there |
 |---|---|
 | `todos/` | Task batches (`YYYY-MM-DD_N/`) with per-todo brief folders — human-authored, or filed by the agent from chat-initiated requests |
-| `archive/` | Finished work by year: `<year>/todos/<batch>/` and `<year>/totest/<task>/<round>/` (`novadev archive --done`) |
+| `archive/` | Finished work by year: `<year>/todos/<batch>/` and `<year>/totest/<task>/<round>/` — batches land here after a few days' grace |
 | `postponed/` | Deferred work with explicit `do-when` / `discard-if` triggers |
 | `sparks/` | Raw unshaped ideas — not yet tasks |
 | `wiki/` | The project pre-context agents load before working (strict page set) |
 | `memories/` | Hard-won gotchas, guides, decisions, guardrails + `INDEX.md` |
 | `features/` | What the software DOES: one `FEAT-NNNN/` folder per capability (`feature.md` + derived `work.md`/`tests.md`) |
 | `totest/` | The active queue of tests waiting on a **human** — stepped scenarios an agent could not verify itself |
-| `skills/` | The agent playbooks that run this system (managed by deploy) |
+| `skills/` | The single playbook that runs this system, `novadev.md` (managed by deploy) |
 
 **Agents:** the rule of the house is `skills/novadev.md` — the single always-applied
 Start every substantive task by loading `wiki/INDEX.md` (create the wiki per

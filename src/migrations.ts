@@ -95,7 +95,16 @@ export function migrateRepo(args: string[]): void {
 
   const pending = MIGRATIONS.filter((m) => compareVersions(from, m.to) < 0);
   if (pending.length === 0) {
-    console.log(`migrate-repo: already at ${from} — nothing to migrate.`);
+    // No structural change between these versions — the layout is already current, so
+    // just advance the stamp; leaving it behind would keep `novadev sync` blocked.
+    if (compareVersions(from, NOVADEV_VERSION) < 0) {
+      if (!dryRun) stampVersion(nd);
+      console.log(
+        `migrate-repo: layout is already current; ${dryRun ? 'would stamp' : 'stamped'} ${from} → ${NOVADEV_VERSION}.`,
+      );
+    } else {
+      console.log(`migrate-repo: already at ${from} — nothing to migrate.`);
+    }
     return;
   }
 

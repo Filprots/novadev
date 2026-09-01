@@ -9,7 +9,11 @@ import { join } from 'node:path';
 import { sweepDone } from './archive.ts';
 import {
   RECORD_NEEDSTEST,
+  addDays,
+  archiveGraceDays,
+  batchCompletedOn,
   compareVersions,
+  listDirs,
   readField,
   deployedVersion,
   listAllTodos,
@@ -67,6 +71,21 @@ export function sync(args: string[]): void {
   if (audit.problems.length > 0) {
     console.log(`\nPROBLEMS (${audit.problems.length}):`);
     for (const p of audit.problems) console.log(`  ✗ ${p}`);
+  }
+
+  // Finished batches inside the grace window stay put on purpose — say so, or their
+  // presence in todos/ reads as unfinished work.
+  const grace = archiveGraceDays(nd);
+  const holding = listDirs(join(nd, 'todos'))
+    .map((b) => ({ b, on: batchCompletedOn(join(nd, 'todos', b)) }))
+    .filter((x) => x.on !== null);
+  if (holding.length > 0) {
+    console.log(
+      `\ncomplete, held in todos/ for ${grace} more day(s) so recent work stays visible:`,
+    );
+    for (const h of holding) {
+      console.log(`  ✓ ${h.b} — done ${h.on}, archives ${addDays(h.on!, grace)}`);
+    }
   }
 
   // 4. What still needs doing, split by who has to do it.

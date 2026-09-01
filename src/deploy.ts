@@ -96,11 +96,20 @@ export function deploy(cwd: string = process.cwd()): void {
     }
   }
 
-  // 3. Manifest.
+  // 3. Manifest — merge, never clobber: it carries user settings like archiveGraceDays.
+  let manifest: Record<string, unknown> = {};
+  try {
+    manifest = JSON.parse(readFileSync(join(root, 'novadev.json'), 'utf8'));
+  } catch {
+    /* first deploy, or unreadable — start fresh */
+  }
   writeManaged(
     join(root, 'novadev.json'),
-    JSON.stringify({ novadev: true, version: NOVADEV_VERSION, deployedAt: todayStamp() }, null, 2) +
-      '\n',
+    JSON.stringify(
+      { ...manifest, novadev: true, version: NOVADEV_VERSION, deployedAt: todayStamp() },
+      null,
+      2,
+    ) + '\n',
   );
 
   // 4. Native adapters — thin pointers to the canonical playbooks.
