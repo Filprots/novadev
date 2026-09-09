@@ -15,7 +15,7 @@ Splitting the derived indexes out keeps `feature.md` readable once a capability 
 accumulated twenty todos and eight test rounds.
 
 The wiki says how the project is **built**; this says what it **has**. Its absence
-is the signal that an agent must create it (`../skills/novadev.md`).
+is the signal that an agent must create it (`../skills/novadev-work.md`).
 
 **Search it before building anything new** — that is what it is for:
 
@@ -32,4 +32,4 @@ and from the archived test rounds. Never hand-edit inside the
 `<!-- novadev:*:begin/end -->` markers; anything outside them is preserved.
 
 All the rules — building the registry, pre-flighting a proposal for duplicates and
-conflicts, keeping it true after work lands — are in `../skills/novadev.md`.
+conflicts, keeping it true after work lands — are in `../skills/novadev-work.md`.

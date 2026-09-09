@@ -189,7 +189,7 @@ export function doctor(): void {
   // --- wiki: page set + index sync ---
   const wikiDir = join(nd, 'wiki');
   if (!existsSync(join(wikiDir, 'INDEX.md'))) {
-    notes.push('wiki: MISSING — an agent must create it (skills/novadev.md (phase 9)) before todo work');
+    notes.push('wiki: MISSING — an agent must create it (skills/novadev-work.md (phase 9)) before todo work');
   } else {
     for (const page of WIKI_PAGES) {
       if (!existsSync(join(wikiDir, page))) problems.push(`wiki/${page}: missing (strict page set)`);

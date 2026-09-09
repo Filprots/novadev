@@ -27,7 +27,7 @@ git pull          # then re-run `novadev deploy` in each project to refresh it
 
 ```sh
 cd your-project
-novadev deploy    # creates .novadev/ + the playbook + agent adapters (idempotent, upgrade-safe)
+novadev deploy    # creates .novadev/ + the four playbooks + agent adapters (idempotent, upgrade-safe)
 ```
 
 Then:
@@ -40,6 +40,11 @@ novadev status                        # open todos + record states, postponed tr
 novadev features --touching src/auth  # which features already own this code (conflict pre-flight)
 novadev migrate-repo                  # upgrade an older .novadev/ layout to this version
 ```
+
+Most of the time you do not type any of these — you talk to the agent, and it runs
+them. Four slash commands come with the deploy: `/novadev-work` (do the work),
+`/novadev-file-a-todo` (file what you just said), `/novadev-what-to-test` (walk the
+queue with me), `/novadev-test-review` (write up testing you already did).
 
 ## Upgrading
 
@@ -63,7 +68,7 @@ repo is behind.
   memories/    gotchas/guides/decisions/guardrails, auto-written during work + INDEX.md
   features/    what the software DOES — FEAT-NNNN/ folders: feature.md + derived work.md/tests.md
   totest/      the ACTIVE queue of tests waiting on a human (rounds archive once reviewed)
-  skills/      the single canonical playbook, novadev.md (agent-agnostic; managed by deploy)
+  skills/      the four canonical playbooks, novadev-*.md (agent-agnostic; managed by deploy)
 ```
 
 **Archiving has a grace period.** A batch whose todos are all recorded gets an
@@ -149,8 +154,8 @@ break where IDs keep resolving. `novadev links` validates the whole graph;
 
 ## The loop
 
-There is **one** playbook — `.novadev/skills/novadev.md` — and it defines a single
-loop the agent runs for every round of work:
+The playbook for the work itself is `.novadev/skills/novadev-work.md`, and it defines
+a single loop the agent runs for every round of work:
 
 ```
 0 ORIENT   load the wiki, memories, features, and the queue
@@ -187,12 +192,44 @@ WAITING ON THE HUMAN (1):
 job.** No command to remember, no skill to pick, no archive step to run — if
 something needs doing and an agent can do it, `sync` says so and the agent does it.
 
+## The three companion playbooks
+
+The loop above is what an agent runs. Three more playbooks cover the moments when YOU
+start the conversation, and each deploys as a slash command of the same name:
+
+| You say | Playbook | What it does |
+|---|---|---|
+| "file this", a bug from your phone, "we should…" | **`/novadev-file-a-todo`** | turns what you just said into real todo folders — your words verbatim, your screenshots copied in — shows you the split, and waits for a yes before writing |
+| "what should I test?" | **`/novadev-what-to-test`** | shows the queue, helps you pick, walks you through one scenario, and writes the verdict down |
+| "I tested the selection thing — 3 broke, here is a shot" | **`/novadev-test-review`** | takes a whole round of testing you already did, in any order and any words, and files it as a formed review in that task's `test-results/` with every file attached |
+
+They share the loop's mechanics rather than re-deriving them, through two commands
+that exist for exactly this:
+
+```sh
+novadev file-todo plan                  # which batch a chat request lands in, and the next number
+novadev file-todo file payload.json     # write the folders, the briefs, and the attachments
+
+novadev test-result tasks [query]       # resolve "16" / "the selection one" against the real queue
+novadev test-result write payload.json  # one scenario's verdict → scenario-<N>.txt   (APPENDS)
+novadev test-result review payload.json # a whole round → review.md                   (APPENDS)
+```
+
+Both take a JSON **file**, because the content is a person's own multi-line words and
+quoting that through a shell is how it gets mangled; both answer in JSON, so the agent
+reads the outcome instead of guessing. The rules they own are the ones prose gets
+wrong: which batch to reuse, the next `NN`, defanging a `**Feature:**` line quoted
+from an old record (an unknown id there is a hard `sync` failure), and above all
+**appending** — a second walk of a scenario must never erase the first.
+
 ## Agent integration (canonical + adapters)
 
 The playbooks are plain markdown any agent can follow. `novadev deploy`
 additionally generates thin native adapters that just route to them:
 
-- `.claude/skills/novadev/SKILL.md` — the Claude Code skill (`/novadev`)
+- `.claude/skills/novadev-{work,file-a-todo,what-to-test,test-review}/SKILL.md` — the
+  four Claude Code skills. They share the `novadev-` prefix on purpose: typing
+  `/novadev` offers the whole set
 - `.cursor/rules/novadev.mdc` — Cursor always-applied rule
 - managed marker sections in `AGENTS.md` and `CLAUDE.md` (created if missing;
   re-deploy updates between the markers without touching your text)

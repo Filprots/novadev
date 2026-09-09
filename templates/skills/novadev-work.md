@@ -1,4 +1,4 @@
-# novadev — the development loop (always applied)
+# novadev-work — the development loop (always applied)
 
 <!-- managed by `novadev deploy` — local edits will be overwritten on the next deploy.
      Project-specific rules belong in the wiki (conventions page), not here. -->
@@ -12,7 +12,7 @@ feature registry, the wiki, the memories, the archiving, the checks. The human s
 never have to remember a command or wonder what happens next. If you find yourself
 about to write "you should now run…" or "don't forget to…", stop: that is your job.
 
-This is the only playbook. Everything below is one loop.
+This is the playbook for the work itself. Everything below is one loop.
 
 ## The folder map
 
@@ -26,8 +26,22 @@ This is the only playbook. Everything below is one loop.
   memories/    hard-won gotchas, guides, and guardrails — read before, write during
   features/    what this software DOES — one FEAT-NNNN/ folder per capability
   totest/      the ACTIVE queue of tests waiting on a HUMAN (archived once reviewed)
-  skills/      this playbook (managed by `novadev deploy`)
+  skills/      this playbook and its three companions (managed by `novadev deploy`)
 ```
+
+## The four playbooks
+
+This one is the loop. Three companions cover the human's own entry points, and each is
+a slash command of the same name — use them rather than re-deriving what they say:
+
+| When | Playbook |
+|---|---|
+| doing the work — any todo, batch or chat request | **`/novadev-work`** — this file |
+| they describe work they want done later ("file this", a bug from a phone) | `/novadev-file-a-todo` |
+| they want to test: "what should I test", walking one scenario with them | `/novadev-what-to-test` |
+| they report testing they already did ("scenario 3 broke, here is a shot") | `/novadev-test-review` |
+
+Phase 1 below routes to the first; phases 5 and 6 sit either side of the other two.
 
 ## Vocabulary
 
@@ -106,23 +120,39 @@ write IS the trace — never file a todo about filing).
      add to a human-authored batch.
    - Matches a `postponed/` item or a `sparks/` file → its moment came: fold that
      content into the new todo's brief and delete the original.
-2. **Create it.** Reuse the batch you created earlier in this conversation; otherwise
-   `novadev new <slug>` (it computes the next `YYYY-MM-DD_N`, counting same-day
-   batches already archived). Never add to a human-authored batch except the
-   `00-program` case. Inside, `NN-<slug>/` — `NN` from `01`, arrival order.
-3. **Transcribe the brief** as `prompt.md`:
+2. **Create it with the command, not by hand** — `novadev file-todo` writes the folder,
+   the brief and any attachments in one call, and it owns the rules that are easy to get
+   wrong: which batch to reuse, the next `NN`, and defanging a `**Feature:**` line the
+   human quoted at you (an unknown id there is a hard `novadev sync` failure).
+
+```sh
+novadev file-todo plan                    # which batch, and the next number
+novadev file-todo file /tmp/payload.json  # { "parts": [ { slug, title, request, context?, attachments? } ] }
+```
+
+   It reuses the batch a conversation opened earlier while nobody has started work in
+   it, and never touches a human-authored batch. `novadev new <slug>` is still the way
+   to open a batch you are about to fill yourself.
+3. **What goes in the brief.** `request` is THEIR words — verbatim where short, tightly
+   faithful where long. `context` is what you know that their words do not say:
+   constraints, clarifications and decisions stated in chat. The command renders:
 
 ```markdown
 # prompt — <slug>
 
-**Source:** chat-initiated, transcribed by the agent — <YYYY-MM-DD>
+**Source:** chat-initiated, filed by the agent with /novadev-file-a-todo — <YYYY-MM-DD>
 
-## Request
-<the ask — verbatim where short, tightly faithful where long>
+## <title>
+<request>
 
 ## Context from the conversation
-<constraints, clarifications, decisions the human stated in chat>
+<context>
 ```
+
+   **Filing without doing the work is its own skill** — `/novadev-file-a-todo`. Use it
+   when the human is describing work for LATER (a bug from a phone, a "we should…");
+   it shows them the split and waits for a yes before writing anything. Here in the
+   loop you file and then keep going.
 
 ## 2 · PLAN — before you write code
 
@@ -283,6 +313,10 @@ the gate exists the todo is NOT terminal and `novadev sync` will not archive its
 Several todos can share one round; list them all.
 
 ## 6 · REVIEW — read the human's results when they land
+
+The human writes those results either by hand or through `/novadev-what-to-test` (one
+scenario at a time) and `/novadev-test-review` (a whole round at once). Reviewing them
+is this phase, and it is yours.
 
 `novadev sync` tells you when a task has results. **Trigger: results exist.** A task
 whose `test-results/` holds only the seeded `README.md` has NOT been tested — leave it

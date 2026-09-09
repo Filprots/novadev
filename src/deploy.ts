@@ -6,6 +6,8 @@ import {
   LEGACY_ADAPTER_SLUGS,
   LEGACY_SKILL_FILES,
   NOVADEV_VERSION,
+  RENAMED_ADAPTER_SLUGS,
+  RENAMED_SKILL_FILES,
   ROOT_DIR_NAME,
   SKILLS,
   packageDir,
@@ -78,17 +80,18 @@ export function deploy(cwd: string = process.cwd()): void {
   for (const skill of SKILLS) {
     writeManaged(join(skillsDir, skill.file), readTemplate(templates, `skills/${skill.file}`));
   }
-  // 2b. Remove the pre-0.7.0 playbooks and their adapters — everything they said now
-  // lives in the single gateway skill, and a stale slash command is worse than none.
+  // 2b. Remove the superseded playbooks and their adapters — the pre-0.7.0 twelve, which folded
+  // into the gateway skill, and the pre-0.9.0 `novadev.md` / `/novadev`, which was renamed to
+  // `novadev-work`. A stale slash command is worse than none: it routes to a file that is gone.
   const removed: string[] = [];
-  for (const file of LEGACY_SKILL_FILES) {
+  for (const file of [...LEGACY_SKILL_FILES, ...RENAMED_SKILL_FILES]) {
     const path = join(skillsDir, file);
     if (existsSync(path)) {
       rmSync(path);
       removed.push(`${ROOT_DIR_NAME}/skills/${file}`);
     }
   }
-  for (const slug of LEGACY_ADAPTER_SLUGS) {
+  for (const slug of [...LEGACY_ADAPTER_SLUGS, ...RENAMED_ADAPTER_SLUGS]) {
     const dir = join(cwd, '.claude', 'skills', slug);
     if (existsSync(dir)) {
       rmSync(dir, { recursive: true, force: true });
@@ -173,11 +176,16 @@ alwaysApply: true
 <!-- adapter managed by \`novadev deploy\` — canonical content lives in ${ROOT_DIR_NAME}/ -->
 
 This project uses novadev (\`${ROOT_DIR_NAME}/\`). Read
-\`${ROOT_DIR_NAME}/skills/novadev.md\` — the single playbook — and run THE LOOP it
-defines for any development work here: load pre-context (wiki + memories + features)
+\`${ROOT_DIR_NAME}/skills/novadev-work.md\` — the development playbook — and run THE LOOP
+it defines for any development work here: load pre-context (wiki + memories + features)
 → plan → work → write the ai_ record → hand what you could not verify to the human as
 a \`totest/\` task → review their results when they land → update the feature →
 memories → wiki → close out with \`novadev sync\`.
+
+Three companion playbooks sit beside it for the human's own entry points:
+\`novadev-file-a-todo.md\` (turn a chat request into a todo folder),
+\`novadev-what-to-test.md\` (walk the testing queue with them) and
+\`novadev-test-review.md\` (write up testing they already did).
 
 The human writes todo briefs; you do everything else. A chat request to
 implement/fix/change anything no open todo covers must itself be FILED as a todo.
@@ -193,10 +201,16 @@ function managedSection(): string {
 This project uses **novadev** (\`${ROOT_DIR_NAME}/\`): git-tracked todos, archive,
 postponed, sparks, wiki, memories, a features registry, and a human-testing queue.
 
-- **Always follow** \`${ROOT_DIR_NAME}/skills/novadev.md\` — the single playbook. It
-  defines THE LOOP you run for any development work here, end to end: load
-  pre-context → plan → work → write the ai_ record → hand untestable work to the
-  human → review their results → update the feature → memories → wiki → close out.
+- **Always follow** \`${ROOT_DIR_NAME}/skills/novadev-work.md\` — the development
+  playbook (\`/novadev-work\`). It defines THE LOOP you run for any development work
+  here, end to end: load pre-context → plan → work → write the ai_ record → hand
+  untestable work to the human → review their results → update the feature →
+  memories → wiki → close out.
+- **Three companion playbooks** cover the human's own entry points, and each is a
+  slash command of the same name:
+  \`/novadev-file-a-todo\` (turn what they just said into a todo folder, screenshots
+  included), \`/novadev-what-to-test\` (show the testing queue and walk one scenario
+  with them), \`/novadev-test-review\` (write up a round of testing they already did).
 - **The human writes todo briefs; you do everything else.** Never leave the human to
   remember a command, an archive step, or which check to run.
 - **Close every round with \`novadev sync\`**: it regenerates derived links, archives

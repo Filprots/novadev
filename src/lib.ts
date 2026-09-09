@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
 export const ROOT_DIR_NAME = '.novadev';
-export const NOVADEV_VERSION = '0.8.0';
+export const NOVADEV_VERSION = '0.9.0';
 
 /** Compare dotted versions: <0 when a is older, 0 when equal, >0 when a is newer. */
 export function compareVersions(a: string, b: string): number {
@@ -48,18 +48,41 @@ export const WIKI_PAGES = [
   'glossary.md',
 ] as const;
 
-/** Canonical skill playbooks shipped into <root>/skills/. */
+/**
+ * Canonical skill playbooks shipped into <root>/skills/, and the slash commands that route to them.
+ *
+ * All four are named `novadev-*` so typing `/novadev` in an agent's chat offers the whole set:
+ * `-work` is the development loop, the other three are the human's own entry points into it.
+ */
 export const SKILLS = [
   {
-    file: 'novadev.md',
-    slug: 'novadev',
+    file: 'novadev-work.md',
+    slug: 'novadev-work',
     description:
       'The novadev development loop — the single always-applied playbook for this project. Covers the pre-context ritual, executing todo briefs, writing ai_ records, the features registry, handing untestable work to the human via totest, reviewing their results, memories, the wiki, and the `novadev sync` close-out. Invoke it for any development work here; the human writes todo briefs and this drives everything else.',
+  },
+  {
+    file: 'novadev-file-a-todo.md',
+    slug: 'novadev-file-a-todo',
+    description:
+      'Turn what the user just said into a real novadev todo folder, with their screenshots and files in it. Use when they describe work they want done rather than done now — a bug, a wish, a "we should…" — and especially when they say "/novadev-file-a-todo", "file this", "make a todo of this", "note this down for later". Works in a terminal chat and through a phone-side chat plugin, where an attached photo lands in the todo folder.',
+  },
+  {
+    file: 'novadev-what-to-test.md',
+    slug: 'novadev-what-to-test',
+    description:
+      'Show the human-testing queue, help the user pick one scenario, walk them through it, and record what they found. Use when they say "/novadev-what-to-test", "what should I test", "what is waiting for me", "let\'s test something", or when they report the result of a test walk ("it worked", "scenario 2 failed"). Works in a terminal chat and through a phone-side chat plugin, where an attached screenshot lands beside the verdict.',
+  },
+  {
+    file: 'novadev-test-review.md',
+    slug: 'novadev-test-review',
+    description:
+      'Write up a round of hand-testing the user already did: they say what they tested, what passed, what broke and what they want changed, attach their screenshots, and name the feature by number or by name — this files a fully formed review into that task\'s test-results/ folder with every file attached. Use when they say "/novadev-test-review", "I tested X", "here is what I found", "passed", or hand over testing notes without walking the queue first.',
   },
 ] as const;
 
 /**
- * The 0.6.0-and-earlier skill set, collapsed into the single gateway playbook above.
+ * The 0.6.0-and-earlier skill set, collapsed into the single gateway playbook in 0.7.0.
  * Deploy and `migrate-repo` delete these so no stale slash command survives an upgrade.
  */
 export const LEGACY_SKILL_FILES = [
@@ -91,6 +114,14 @@ export const LEGACY_ADAPTER_SLUGS = [
   'novadev-review-tests',
   'novadev-links-audit',
 ] as const;
+
+/**
+ * The 0.8.0 names the 0.9.0 four-skill split replaced. Kept apart from the LEGACY_* lists above
+ * because these were not folded into anything — the playbook was RENAMED, so deploy must remove the
+ * old file and the old `/novadev` slash command or the project ends up carrying both.
+ */
+export const RENAMED_SKILL_FILES = ['novadev.md'] as const;
+export const RENAMED_ADAPTER_SLUGS = ['novadev'] as const;
 
 // ---------------------------------------------------------------------------
 // Features registry

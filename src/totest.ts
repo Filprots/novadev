@@ -50,7 +50,7 @@ export function totest(args: string[]): void {
 
   if (ready.length > 0) {
     console.log(
-      `\n${ready.length} task(s) have results waiting — run \`/novadev-review-tests\` so an agent` +
+      `\n${ready.length} task(s) have results waiting — run \`/novadev-work\` so an agent` +
         '\nreads them and closes the loop (ai_confirmed.md, or follow-up todos for the failures).',
     );
   }
@@ -58,7 +58,8 @@ export function totest(args: string[]): void {
   if (untested.length > 0) {
     console.log(
       `\n${untested.length} task(s) still need YOUR hands: open the ${TEST_PLAN_FILE}, walk the` +
-        `\nscenarios, and write what happened into that task's ${TEST_RESULTS_DIR}/ folder.`,
+        `\nscenarios, and write what happened into that task's ${TEST_RESULTS_DIR}/ folder —` +
+        '\nor just say what you found and let `/novadev-test-review` write it up for you.',
     );
   }
 }
@@ -213,7 +214,7 @@ function newRound(nd: string, input: string): void {
     if (open.hasResults) {
       fail(
         `totest/${id} still holds unreviewed results (${open.results.join(', ')}).\n` +
-          '  Run `/novadev-review-tests` to close that round first — starting a new one now\n' +
+          '  Run `/novadev-work` to close that round first — starting a new one now\n' +
           '  would bury testing the human already did.',
       );
     }
@@ -350,7 +351,12 @@ Then add anything the plan did not ask about but you noticed anyway — that
 off-script observation is usually the most valuable thing in the folder, so write
 it down even when it feels unrelated.
 
-When you are done, run \`/novadev-review-tests\`: an agent reads this folder, judges
+You do not have to write it yourself. Say what you found — "scenario 2 passed, 3 broke,
+here is a screenshot" — and \`/novadev-test-review\` writes this file for you, with your
+images copied in beside it. \`/novadev-what-to-test\` does the same one scenario at a time,
+walking you through the plan first.
+
+When you are done, run \`/novadev-work\`: an agent reads this folder, judges
 each scenario against its expected outcome, writes \`ai_confirmed.md\` on the
 originating todo(s), and files follow-up todos for whatever failed. This whole round —
 the plan you walked and the results you wrote — is then archived to

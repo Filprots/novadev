@@ -22,6 +22,8 @@ import {
   LEGACY_SKILL_FILES,
   LEGACY_TEST_TASK_RE,
   NOVADEV_VERSION,
+  RENAMED_ADAPTER_SLUGS,
+  RENAMED_SKILL_FILES,
   TEST_HISTORY_DIR,
   TEST_PLAN_FILE,
   TEST_RESULTS_DIR,
@@ -62,6 +64,11 @@ export const MIGRATIONS: Migration[] = [
     to: '0.7.0',
     title: 'twelve playbooks collapse into the single novadev.md gateway skill',
     run: migrateToSingleSkill,
+  },
+  {
+    to: '0.9.0',
+    title: 'the gateway skill becomes /novadev-work, beside three novadev-* companion skills',
+    run: migrateToFourSkills,
   },
 ];
 
@@ -223,7 +230,7 @@ function migrateToSingleSkill(ctx: MigrationContext): void {
   const skillsDir = join(ctx.nd, 'skills');
   for (const file of LEGACY_SKILL_FILES) {
     if (!existsSync(join(skillsDir, file))) continue;
-    ctx.log(`delete skills/${file} (folded into skills/novadev.md)`);
+    ctx.log(`delete skills/${file} (folded into the gateway playbook)`);
     if (!ctx.dryRun) rmSync(join(skillsDir, file));
   }
   const claudeSkills = join(ctx.nd, '..', '.claude', 'skills');
@@ -232,6 +239,31 @@ function migrateToSingleSkill(ctx: MigrationContext): void {
     ctx.log(`delete .claude/skills/${slug}/ (stale slash command)`);
     if (!ctx.dryRun) rmSync(join(claudeSkills, slug), { recursive: true, force: true });
   }
+}
+
+// ---------------------------------------------------------------------------
+// 0.8.0 → 0.9.0
+// ---------------------------------------------------------------------------
+
+/**
+ * Remove the renamed playbook and its slash command. `novadev deploy` writes the four new ones;
+ * this only clears what they replace, so a project does not end up carrying both `/novadev` (whose
+ * canonical file is gone) and `/novadev-work`.
+ */
+function migrateToFourSkills(ctx: MigrationContext): void {
+  const skillsDir = join(ctx.nd, 'skills');
+  for (const file of RENAMED_SKILL_FILES) {
+    if (!existsSync(join(skillsDir, file))) continue;
+    ctx.log(`delete skills/${file} (renamed to skills/novadev-work.md)`);
+    if (!ctx.dryRun) rmSync(join(skillsDir, file));
+  }
+  const claudeSkills = join(ctx.nd, '..', '.claude', 'skills');
+  for (const slug of RENAMED_ADAPTER_SLUGS) {
+    if (!existsSync(join(claudeSkills, slug))) continue;
+    ctx.log(`delete .claude/skills/${slug}/ (renamed to novadev-work)`);
+    if (!ctx.dryRun) rmSync(join(claudeSkills, slug), { recursive: true, force: true });
+  }
+  ctx.log('run `novadev deploy` to write the four novadev-* playbooks and their adapters');
 }
 
 function featureFolderFor(nd: string, featureId: string): string | null {

@@ -50,4 +50,4 @@ same command sweeps reviewed rounds into the archive, where the notes and screen
 stay in git as the evidence it really was checked.
 
 All the rules — filing a task, revising a plan, reviewing your results — are in
-`../skills/novadev.md` (loop phases 5 and 6).
+`../skills/novadev-work.md` (loop phases 5 and 6).

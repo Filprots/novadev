@@ -227,7 +227,7 @@ export function auditLinks(root: string): Audit {
       const rev = task.revision ? ` rev ${task.revision},` : '';
       notes.push(
         task.hasResults
-          ? `${where}:${rev} results are in (${task.results.join(', ')}) — run /novadev-review-tests`
+          ? `${where}:${rev} results are in (${task.results.join(', ')}) — run /novadev-work`
           : `${where}:${rev} waiting on a human to test it (${task.scenarios} scenario(s))`,
       );
     }
@@ -302,7 +302,7 @@ export function auditLinks(root: string): Audit {
       });
     }
   } else if (!existsSync(indexPath)) {
-    notes.push('features/: registry MISSING — an agent must create it (skills/novadev.md (phase 9))');
+    notes.push('features/: registry MISSING — an agent must create it (skills/novadev-work.md (phase 9))');
   }
 
   return { problems, notes, fixes };

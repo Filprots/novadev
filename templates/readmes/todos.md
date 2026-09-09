@@ -20,7 +20,11 @@ implement/fix/change something that no open todo covers, the agent must FILE it
 here itself — transcribe the request as `prompt.md`, do the work, record the
 outcome (plus its Thinking) — so chat-driven work is documented like any other.
 
-Record formats and all rules: `../skills/novadev.md`; `novadev sync` is what moves
+For work you want done LATER rather than now, say so and let `/novadev-file-a-todo`
+write the folder: your words go in verbatim, your screenshots are copied in beside
+them, and nothing is written until you say yes to the split it proposes.
+
+Record formats and all rules: `../skills/novadev-work.md`; `novadev sync` is what moves
 finished work along.
 
 **Finished batches stay here for a few days.** When every todo in a batch is

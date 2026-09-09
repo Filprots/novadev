@@ -19,6 +19,11 @@ usage:
                             --fix regenerates derived backlinks and features/INDEX.md
   novadev totest [--all]    what still needs YOUR hands-on testing, and what is ready
                             for review; --new <slug> scaffolds a test task
+  novadev file-todo …       the command half of /novadev-file-a-todo: "plan" says which batch
+                            a chat request lands in, "file <payload.json>" writes the folders
+  novadev test-result …     the command half of /novadev-what-to-test and /novadev-test-review:
+                            "tasks [query]" resolves the queue, "write" records one scenario,
+                            "review" records a whole round of a human's testing
   novadev migrate-repo      upgrade this repo's .novadev/ layout to the installed version
                             (stepwise, version-aware; --dry-run to preview, --force if dirty)
   novadev doctor            validate structure; non-zero exit on problems
@@ -59,6 +64,16 @@ switch (command) {
   case 'totest': {
     const { totest } = await import('../src/totest.ts');
     totest(args);
+    break;
+  }
+  case 'file-todo': {
+    const { fileTodo } = await import('../src/file-todo.ts');
+    fileTodo(args);
+    break;
+  }
+  case 'test-result': {
+    const { testResult } = await import('../src/test-result.ts');
+    testResult(args);
     break;
   }
   case 'sync': {

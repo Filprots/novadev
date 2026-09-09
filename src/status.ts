@@ -52,7 +52,7 @@ export function status(): void {
       console.log(`  ${t.hasResults ? '◆' : '○'} ${t.id}  — ${state}, ${t.scenarios} scenario(s)`);
       if (t.todoRefs.length) console.log(`      todos: ${t.todoRefs.join(', ')}`);
     }
-    if (ready.length > 0) console.log('  → run `/novadev-review-tests` to close the loop');
+    if (ready.length > 0) console.log('  → run `/novadev-work` to close the loop');
   }
 
   // Postponed with triggers.
@@ -81,7 +81,7 @@ export function status(): void {
     console.log(
       existsSync(join(nd, 'features', 'INDEX.md'))
         ? 'features — 0 entries'
-        : 'features — MISSING (an agent must create it: skills/novadev.md (phase 9))',
+        : 'features — MISSING (an agent must create it: skills/novadev-work.md (phase 9))',
     );
   } else {
     const counts = new Map<string, number>();
@@ -99,7 +99,7 @@ export function status(): void {
     );
     console.log(`wiki — ${pages.length} page(s)`);
   } else {
-    console.log('wiki — MISSING (an agent must create it: skills/novadev.md (phase 9))');
+    console.log('wiki — MISSING (an agent must create it: skills/novadev-work.md (phase 9))');
   }
 
   let archived = 0;
