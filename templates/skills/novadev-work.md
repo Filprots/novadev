@@ -253,11 +253,13 @@ first, screenshots included.
 - **`ai_progress.md`** for long-running work: what is done, what is next, how to
   resume. Replaced by a terminal record when it concludes.
 - **A chat-initiated record carries one extra section**, because the conversation that
-  shaped it is saved nowhere else:
+  shaped it is saved nowhere else. It records the DECISIONS, the way a design note or an
+  ADR does — what was settled and why, so the next person is not left guessing:
 
 ```markdown
-## Thinking
-<the approach and why; alternatives rejected; decisions and their rationale; dead ends>
+## Decisions
+<what was decided and why; options considered and turned down; approaches tried that did
+not work; anything still open>
 ```
 
 **Conventions.** One record per todo, updated in place when status changes (a deferred

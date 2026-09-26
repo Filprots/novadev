@@ -18,7 +18,7 @@ Inside a todo folder:
 Todos are not only human-authored: when the human asks an agent in chat to
 implement/fix/change something that no open todo covers, the agent must FILE it
 here itself — transcribe the request as `prompt.md`, do the work, record the
-outcome (plus its Thinking) — so chat-driven work is documented like any other.
+outcome (plus its Decisions) — so chat-driven work is documented like any other.
 
 For work you want done LATER rather than now, say so and let `/novadev-file-a-todo`
 write the folder: your words go in verbatim, your screenshots are copied in beside
