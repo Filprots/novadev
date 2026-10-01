@@ -30,8 +30,9 @@ else (logs go to stderr):
 (no `..`). novadev does not know what the numbers mean. It only compares them.
 
 A hub's `path` is also what the placement check uses: a record whose commits changed a file
-inside it needs a `## Placement` section. When no hub here has a path, `"hubs"` in
-`../novadev.json` can list the paths instead.
+inside it needs a `## Placement` section. And `novadev features --hubs` lists the features whose
+`touches:` name it. When no hub here has a path, `"hubs"` in `../novadev.json` can list the
+paths instead.
 
 Every `novadev sync` runs the command and stores the new snapshot. It compares the numbers
 with the last commit and lists what GREW under NEXT ACTIONS, until a record of this round

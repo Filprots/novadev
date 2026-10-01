@@ -22,6 +22,7 @@ is the signal that an agent must create it (`../skills/novadev-work.md`).
 ```sh
 novadev features <query>            # name / area / tags / body
 novadev features --touching src/x   # which features already own this code
+novadev features --hubs             # which features lean on each hub (../metrics/README.md)
 novadev features --status planned
 novadev features --new <slug>       # scaffold the next FEAT-NNNN
 ```

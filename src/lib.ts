@@ -170,6 +170,18 @@ export const FEATURE_TESTS = 'tests.md';
 
 export const FEATURE_STATUSES = ['planned', 'in-progress', 'shipped', 'deprecated'] as const;
 export type FeatureStatus = (typeof FEATURE_STATUSES)[number];
+/** The mark `novadev features` prints before a feature, by status. */
+const FEATURE_STATUS_MARKS: Readonly<Record<string, string>> = {
+  planned: '○',
+  'in-progress': '◐',
+  shipped: '●',
+  deprecated: '⊘',
+} satisfies Record<FeatureStatus, string>;
+
+/** A feature's status mark: "○ ◐ ● ⊘" for planned … deprecated, "?" for any other status. */
+export function featureStatusMark(status: string): string {
+  return Object.hasOwn(FEATURE_STATUS_MARKS, status) ? FEATURE_STATUS_MARKS[status]! : '?';
+}
 
 export const FEATURE_REQUIRED_KEYS = ['id', 'title', 'status', 'area', 'created', 'updated'] as const;
 /** Frontmatter keys whose values are FEAT-ID references to other features. */
@@ -469,13 +481,26 @@ export function csvList(value: string | undefined | null): string[] {
     .filter((s) => s.length > 0 && s !== 'none' && s !== '-');
 }
 
+/** A repo path as the path checks compare it: without a leading "./" and without trailing "/". */
+export function comparablePath(path: string): string {
+  return path.replace(/^\.\//, '').replace(/\/+$/, '');
+}
+
+/**
+ * Is `inner` the path `outer`, or inside it? A path is read as a file or as a folder, with or
+ * without a trailing "/": "src/wb" holds "src/wb/a.ts" but not "src/wb2/a.ts". An empty path is
+ * nowhere.
+ */
+export function pathWithin(inner: string, outer: string): boolean {
+  const i = comparablePath(inner);
+  const o = comparablePath(outer);
+  if (!i || !o) return false;
+  return i === o || i.startsWith(o + '/');
+}
+
 /** Do two repo paths cover common ground (equal, or one inside the other)? */
 export function pathsOverlap(a: string, b: string): boolean {
-  const norm = (p: string) => p.replace(/^\.\//, '').replace(/\/+$/, '');
-  const na = norm(a);
-  const nb = norm(b);
-  if (!na || !nb) return false;
-  return na === nb || na.startsWith(nb + '/') || nb.startsWith(na + '/');
+  return pathWithin(a, b) || pathWithin(b, a);
 }
 
 // ---------------------------------------------------------------------------

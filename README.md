@@ -38,6 +38,7 @@ novadev sync                          # the close-out: measure (if set), derive,
 novadev totest                        # what needs YOUR hands-on testing
 novadev status                        # open todos + record states, postponed triggers, health
 novadev features --touching src/auth  # which features already own this code (conflict pre-flight)
+novadev features --hubs               # which features lean on each hub (see Placement)
 novadev migrate-repo                  # upgrade an older .novadev/ layout to this version
 ```
 
@@ -149,6 +150,7 @@ record and commit that built it) plus `tests.md` (every human test round and its
 verdict) are generated beside it. Before anything new is designed, the registry is
 searched — `novadev features --touching src/auth` answers "what already owns this
 code?" — so duplicates and conflicts get caught at proposal time rather than in review.
+`novadev features --hubs` lists the features that lean on each hub (see *Placement*).
 
 Records and features are cross-linked, and the graph is maintainable because each
 edge has **one authored direction and one derived direction**: the record names
@@ -411,6 +413,39 @@ records of the days in between should not be checked, set `placementSince` to th
 clone (many CI systems fetch only the newest commit) does not have them, and the check then
 skips them. Fetch the full history where `novadev sync --check` runs (for GitHub Actions:
 `fetch-depth: 0`).
+
+**Which features lean on a hub.** `novadev features --hubs` lists, for each hub path, the
+features whose `touches:` name it — the same matching as `--touching`. The hub with the most
+features comes first. It is the worklist for moving code off a hub, one feature at a time:
+
+```
+$ novadev features --hubs
+features --hubs — 2 hub paths (from the metrics snapshot); features that touch them: 4 of 5
+
+Workbench (src/editor/workbench/) — 3 features
+  ● FEAT-0003  [shipped]  Copy and paste  (hub paths: 1 of 2)
+  ◐ FEAT-0007  [in-progress]  Selection filter  (hub paths: 1 of 1)  ← only hub paths
+  ● FEAT-0011  [shipped]  Undo history  (hub paths: 0 of 2; its path src/editor/ holds this hub)
+
+Stage3D (src/editor/stage3d.ts) — 2 features
+  ● FEAT-0011  [shipped]  Undo history  (hub paths: 0 of 2; its path src/editor/ holds this hub)
+  ● FEAT-0012  [shipped]  Camera controls  (hub paths: 1 of 2)
+
+← only hub paths: every path in the feature's `touches:` is on a hub. A search by folder
+  finds it only together with all the other features on that hub. When its code moves off
+  the hub, add the new path to its `touches:`, and remove the hub path once none of its
+  code is left there.
+```
+
+Each line counts the paths in the feature's `touches:` that are on a hub: a hub path, or a path
+inside one. A feature whose every path is on a hub is marked "only hub paths": it has no folder
+of its own. A feature that is listed only because one of its paths holds the hub (a folder above
+it) says so, because none of its code needs to be in the hub. A feature leaves a hub's list once
+no path in its `touches:` is in the hub or holds it. `--status`, `--area`, `--touching` and
+search words narrow the list, and `--touching <hub path>` shows that one hub. The hub paths are
+the ones the placement check uses: the stored snapshot's, or else `hubs` in `novadev.json`. The
+command only reads files. It never runs the metrics command. With no hub paths, it says how to
+set them and exits with 1.
 
 ## The three companion playbooks
 

@@ -113,6 +113,21 @@ export function todo(root: string, ref: string, files: Record<string, string> = 
   for (const [name, content] of Object.entries(files)) write(root, `.novadev/todos/${ref}/${name}`, content);
 }
 
+/** A feature folder, `features/<id>-<slug>/feature.md`; `touches` is the frontmatter value as written. */
+export function feature(
+  root: string,
+  id: string,
+  slug: string,
+  o: { title?: string; status?: string; area?: string; tags?: string; touches?: string } = {},
+): void {
+  const title = o.title ?? slug;
+  write(
+    root,
+    `.novadev/features/${id}-${slug}/feature.md`,
+    `---\nid: ${id}\ntitle: ${title}\nstatus: ${o.status ?? 'shipped'}\narea: ${o.area ?? 'editor'}\ncreated: 2026-10-01\nupdated: 2026-10-01\ntags: ${o.tags ?? ''}\ntouches: ${o.touches ?? ''}\ndepends-on:\nsupersedes:\nsuperseded-by:\nconflicts-with:\n---\n\n# ${id} — ${title}\n\n## What it does\n\nIt works.\n`,
+  );
+}
+
 /** A completed record; `extra` is appended (a `## Debt` section, say). */
 export function completed(slug: string, extra = ''): string {
   return `# ai_completed — ${slug}\n\n**Date:** 2026-10-01\n**Feature:** none — test fixture\n\n## What I did\nThe work.\n${extra}`;

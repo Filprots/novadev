@@ -5,10 +5,11 @@
 //
 //   "hubs": ["src/editor/workbench/", "src/editor/stage3d.ts"]      off when absent, null or []
 //
-// The placement check (placement.ts) asks which records changed a file inside one.
+// The placement check (placement.ts) asks which records changed a file inside one, and
+// `novadev features --hubs` (feature-hubs.ts) which features name one in their `touches:`.
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { type Parsed, readManifest, refuse } from './lib.ts';
+import { type Parsed, pathWithin, readManifest, refuse } from './lib.ts';
 import { type SnapshotRead, readSnapshot, repoPath } from './metrics.ts';
 
 /** One hub path, with the hub's name when the metrics snapshot gives one. */
@@ -57,8 +58,7 @@ export function hubPaths(nd: string, snapshot?: SnapshotRead): HubPaths {
  * trailing "/": "src/wb" holds "src/wb/a.ts" but not "src/wb2/a.ts".
  */
 export function inHub(path: string, hub: string): boolean {
-  const base = hub.replace(/\/+$/, '');
-  return path === base || path.startsWith(`${base}/`);
+  return pathWithin(path, hub);
 }
 
 /** How a hub is named in a message: its name and its path, or just the path. */

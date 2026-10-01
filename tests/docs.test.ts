@@ -8,13 +8,14 @@ import { debtRaiseIn } from '../src/debt-budget.ts';
 import { parseHubsSetting } from '../src/hubs.ts';
 import { parseMetricsOutput } from '../src/metrics.ts';
 import { placementState } from '../src/placement.ts';
-import { REPO, commitAll, completed, metricsOutput, metricsProject, read, run, tempDir, todo } from './helpers.ts';
+import { REPO, commitAll, completed, feature, metricsOutput, metricsProject, read, run, tempDir, todo } from './helpers.ts';
 
 const readme = readFileSync(join(REPO, 'README.md'), 'utf8');
 const playbook = readFileSync(join(REPO, 'templates/skills/novadev-work.md'), 'utf8');
 const folderReadme = readFileSync(join(REPO, 'templates/readmes/metrics.md'), 'utf8');
 const rootReadme = readFileSync(join(REPO, 'templates/readmes/root.md'), 'utf8');
 const todosReadme = readFileSync(join(REPO, 'templates/readmes/todos.md'), 'utf8');
+const featuresReadme = readFileSync(join(REPO, 'templates/readmes/features.md'), 'utf8');
 
 /** The bodies of the fenced blocks in a markdown text whose info string is `lang` ('' = none). */
 function fences(text: string, lang: string): string[] {
@@ -150,6 +151,48 @@ describe('the README on placement', () => {
   });
 });
 
+describe('the README on features --hubs', () => {
+  test('its sample output is what the command prints, line for line', () => {
+    const sample = fences(readme, '').find((body) => body.startsWith('$ novadev features --hubs'));
+    expect(sample).toBeDefined();
+    const expected = sample!.trimEnd().split('\n').slice(1); // without the "$ novadev features --hubs" prompt
+
+    // The registry the sample shows: two hubs from the metrics snapshot, five features.
+    const root = metricsProject({
+      hubs: [
+        { name: 'Workbench', measure: 11019, path: 'src/editor/workbench/' },
+        { name: 'Stage3D', measure: 3304, path: 'src/editor/stage3d.ts' },
+      ],
+    });
+    feature(root, 'FEAT-0003', 'copy-and-paste', { title: 'Copy and paste', touches: 'src/editor/workbench/, src/clipboard/' });
+    feature(root, 'FEAT-0007', 'selection-filter', { title: 'Selection filter', status: 'in-progress', touches: 'src/editor/workbench/selection.ts' });
+    feature(root, 'FEAT-0011', 'undo-history', { title: 'Undo history', touches: 'src/editor/, src/history/' });
+    feature(root, 'FEAT-0012', 'camera-controls', { title: 'Camera controls', touches: 'src/editor/stage3d.ts, src/camera/' });
+    feature(root, 'FEAT-0014', 'export', { title: 'Export', touches: 'src/export/' });
+    run(root, 'sync');
+    const printed = run(root, 'features', '--hubs');
+    expect(printed.code).toBe(0);
+    expect(printed.stdout.trimEnd().split('\n')).toEqual(expected);
+  });
+
+  test('names the command where features are searched, and says what it reads and what the marker means', () => {
+    const prose = readme.replace(/\s+/g, ' '); // the checks below do not depend on where lines break
+    expect(readme).toContain('novadev features --hubs               # which features lean on each hub');
+    for (const text of [
+      '`novadev features --hubs` lists the features that lean on each hub (see *Placement*).',
+      'the same matching as `--touching`',
+      'A feature whose every path is on a hub is marked "only hub paths": it has no folder of its own.',
+      'listed only because one of its paths holds the hub (a folder above it) says so',
+      'A feature leaves a hub\'s list once no path in its `touches:` is in the hub or holds it.',
+      '`--touching <hub path>` shows that one hub',
+      'It never runs the metrics command.',
+      'With no hub paths, it says how to set them and exits with 1.',
+    ]) {
+      expect(prose).toContain(text);
+    }
+  });
+});
+
 describe('the templates', () => {
   test('the PLAN phase asks whether the todo touches a hub, before any code is written', () => {
     const plan = playbook.split('## 2 · PLAN')[1]!.split('## 3 · WORK')[0]!;
@@ -168,6 +211,21 @@ describe('the templates', () => {
     expect(record).toContain('**Every record has a `## Placement` section.**');
     expect(record).toContain('"nothing new placed"');
     expect(record).toContain('`novadev sync --check` fails');
+  });
+
+  test('the playbook points at features --hubs where hubs meet the registry: the PLAN pre-flight and REGISTER', () => {
+    const plan = playbook.split('## 2 · PLAN')[1]!.split('## 3 · WORK')[0]!;
+    expect(plan).toContain('| Hub | `novadev features --hubs` | the features already on a hub you will change |');
+    const register = playbook.split('## 7 · REGISTER')[1]!.split('## 8 · REMEMBER')[0]!;
+    expect(register).toContain('**Features on a hub.** `novadev features --hubs` lists, for each hub, the features whose');
+    expect(register).toContain('A feature marked "only hub paths" has no folder of its own.');
+    expect(register).toContain('add the new path to its `touches:`, and remove the\n  hub path once none of its code is left there');
+  });
+
+  test('the features and metrics folder READMEs and the CLI help name features --hubs', () => {
+    expect(featuresReadme).toContain('novadev features --hubs             # which features lean on each hub');
+    expect(folderReadme).toContain('`novadev features --hubs` lists the features whose\n`touches:` name it');
+    expect(run(tempDir(), 'help').stdout).toContain('--hubs lists the features on each hub');
   });
 
   test('the folder READMEs mention the section and what drives the check', () => {

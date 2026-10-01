@@ -1,6 +1,8 @@
-// `novadev features` — search the feature registry; `--new` scaffolds an entry.
+// `novadev features` — search the feature registry; `--hubs` groups it by hub (feature-hubs.ts);
+// `--new` scaffolds an entry.
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { printHubReport } from './feature-hubs.ts';
 import {
   FEATURE_DOC,
   FEATURE_STATUSES,
@@ -8,6 +10,7 @@ import {
   FEATURE_WORK,
   type Feature,
   fail,
+  featureStatusMark,
   featuresDir,
   listFeatures,
   nextFeatureId,
@@ -16,13 +19,6 @@ import {
   requireProjectRoot,
   todayStamp,
 } from './lib.ts';
-
-const STATUS_MARK: Record<string, string> = {
-  planned: '○',
-  'in-progress': '◐',
-  shipped: '●',
-  deprecated: '⊘',
-};
 
 export function features(args: string[]): void {
   const root = requireProjectRoot();
@@ -59,6 +55,11 @@ export function features(args: string[]): void {
     hits = hits.filter((f) => haystack(f).includes(q));
   }
 
+  if (opts.hubs) {
+    printHubReport(root, hits, describe(opts), opts.touching);
+    return;
+  }
+
   const filtered = opts.status || opts.area || opts.touching || opts.query;
   console.log(
     filtered
@@ -75,7 +76,7 @@ export function features(args: string[]): void {
   if (opts.touching) {
     console.log(
       `\nThese features already claim code overlapping "${opts.touching}" — read them before` +
-        '\nchanging that surface (skills/feature-check.md).',
+        '\nchanging that surface (skills/novadev-work.md, loop phase 2).',
     );
   }
 }
@@ -97,8 +98,7 @@ function describe(opts: Options): string {
 }
 
 function print(f: Feature, opts: Options): void {
-  const mark = STATUS_MARK[f.status] ?? '?';
-  console.log(`  ${mark} ${f.id}  [${f.status || 'no-status'}]  ${f.area || '—'}  ${f.title}`);
+  console.log(`  ${featureStatusMark(f.status)} ${f.id}  [${f.status || 'no-status'}]  ${f.area || '—'}  ${f.title}`);
   if (f.tags.length) console.log(`      tags: ${f.tags.join(', ')}`);
   if (f.touches.length) {
     const marked = f.touches.map((t) =>
@@ -117,6 +117,7 @@ type Options = {
   status?: string;
   area?: string;
   touching?: string;
+  hubs?: boolean;
   new?: string;
   title?: string;
   tags?: string;
@@ -146,6 +147,9 @@ function parseArgs(args: string[]): Options {
       case '--touching':
         opts.touching = value();
         break;
+      case '--hubs':
+        opts.hubs = true;
+        break;
       case '--new':
         opts.new = value();
         break;
@@ -164,6 +168,9 @@ function parseArgs(args: string[]): Options {
     }
   }
   if (words.length) opts.query = words.join(' ');
+  if (opts.new !== undefined && opts.hubs) {
+    fail('--hubs and --new do not go together: --new makes a feature, --hubs lists them by hub');
+  }
   return opts;
 }
 

@@ -19,7 +19,8 @@ usage:
   novadev status            stock-take: open todos + record states, postponed triggers, wiki/memories
   novadev archive <batch>…  move fully-recorded batch(es) to archive/<year>/   (or: --done for all)
   novadev features [query]  search the feature registry; --touching <path> finds overlap,
-                            --status/--area filter, --new <slug> scaffolds an entry
+                            --hubs lists the features on each hub, --status/--area filter,
+                            --new <slug> scaffolds an entry
   novadev links [--fix]     validate the link graph (records ↔ features ↔ commits);
                             --fix regenerates derived backlinks and features/INDEX.md
   novadev totest [--all]    what still needs YOUR hands-on testing, and what is ready

@@ -222,6 +222,7 @@ conflicting second version is the expensive failure this prevents:
 |---|---|---|
 | Name/keyword | `novadev features <term>` per synonym | the same thing under another name |
 | Code surface | `novadev features --touching <path>` | features that own the code you will change |
+| Hub | `novadev features --hubs` | the features already on a hub you will change |
 | Area / lifecycle | `--area <a>`, `--status planned\|in-progress` | neighbours; someone already started it |
 | Deprecated | `--status deprecated` | capability removed on purpose — don't resurrect it blindly |
 | History | grep `archive/` records + `postponed/` + `sparks/` | rejected designs, earlier shapes of the idea |
@@ -483,6 +484,10 @@ gets the wrong verdict.
 - **`## Progress`**: one dated line per real step, newest last, naming the todo ref.
 - **Refresh** `touches:` when the code surface moved and `tags:` when it gained
   vocabulary someone would search for — stale fields cause duplicate features later.
+- **Features on a hub.** `novadev features --hubs` lists, for each hub, the features whose
+  `touches:` name it. A feature marked "only hub paths" has no folder of its own. When your
+  work moves a feature's code off a hub, add the new path to its `touches:`, and remove the
+  hub path once none of its code is left there.
 - **Removal**: never delete the feature file. `status: deprecated`, log it, and set
   `superseded-by:` / `supersedes:` on both sides if something replaced it.
 - **Never hand-edit** `work.md`, `tests.md`, or `features/INDEX.md` inside their
