@@ -7,8 +7,10 @@ const [command, ...args] = process.argv.slice(2);
 const HELP = `novadev ${NOVADEV_VERSION} — structured development system
 
 usage:
-  novadev sync [--check]    THE close-out: regenerate derived links, archive what is finished,
-                            validate, and print what the agent + the human still have to do
+  novadev sync [--check]    THE close-out: run the metrics hook (if set), regenerate derived
+                            links, archive what is finished, validate, and print what the agent
+                            + the human still have to do; --check writes nothing and fails on
+                            stale derived files or a debt budget that is exceeded
   novadev deploy            create/upgrade .novadev/ + the playbook + agent adapters
   novadev new [slug…]       scaffold today's next batch (todos/YYYY-MM-DD_N/), optional todo folders
   novadev status            stock-take: open todos + record states, postponed triggers, wiki/memories

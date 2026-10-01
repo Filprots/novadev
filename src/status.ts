@@ -1,5 +1,5 @@
 // `novadev status` — stock-take of the novadev tree without an agent.
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   FEATURE_STATUSES,
@@ -13,6 +13,7 @@ import {
   requireProjectRoot,
   todoState,
 } from './lib.ts';
+import { metricsStatusLine } from './metrics-audit.ts';
 
 const STATE_MARK = {
   confirmed: '✓✓',
@@ -101,6 +102,8 @@ export function status(): void {
   } else {
     console.log('wiki — MISSING (an agent must create it: skills/novadev-work.md (phase 9))');
   }
+
+  console.log(metricsStatusLine(nd));
 
   let archived = 0;
   for (const year of listDirs(join(nd, 'archive'))) {

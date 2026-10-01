@@ -35,11 +35,14 @@ import {
   listFiles,
   novadevDir,
   readFrontmatter,
+  readManifest,
   requireProjectRoot,
   setFrontmatter,
   todayStamp,
   totestDir,
+  writeManifest,
 } from './lib.ts';
+import { METRICS_DIR, METRICS_SNAPSHOT } from './metrics.ts';
 
 export type MigrationContext = { nd: string; dryRun: boolean; log: (line: string) => void };
 export type Migration = {
@@ -69,6 +72,11 @@ export const MIGRATIONS: Migration[] = [
     to: '0.9.0',
     title: 'the gateway skill becomes /novadev-work, beside three novadev-* companion skills',
     run: migrateToFourSkills,
+  },
+  {
+    to: '0.10.0',
+    title: 'metrics hook + debt budget: novadev.json gains "metrics" and "debtBudget", both off until set',
+    run: migrateMetricsSettings,
   },
 ];
 
@@ -264,6 +272,42 @@ function migrateToFourSkills(ctx: MigrationContext): void {
     if (!ctx.dryRun) rmSync(join(claudeSkills, slug), { recursive: true, force: true });
   }
   ctx.log('run `novadev deploy` to write the four novadev-* playbooks and their adapters');
+}
+
+// ---------------------------------------------------------------------------
+// 0.9.0 → 0.10.0
+// ---------------------------------------------------------------------------
+
+/**
+ * Two new opt-in settings, written as `null` — OFF — so the repo's novadev.json shows they exist
+ * without changing what sync does: novadev cannot guess a project's metrics command or its debt
+ * budget. The `metrics/` folder name becomes novadev's, so anything a project already kept there
+ * is reported rather than silently mixed in with the snapshot.
+ */
+function migrateMetricsSettings(ctx: MigrationContext): void {
+  const manifest = readManifest(ctx.nd);
+  if (manifest !== null) {
+    const missing = ['metrics', 'debtBudget'].filter((key) => !(key in manifest));
+    if (missing.length > 0) {
+      ctx.log(
+        `add ${missing.map((key) => `"${key}": null`).join(' and ')} to novadev.json — off until you set ${missing.length === 1 ? 'it' : 'them'} (README, "Metrics and the debt budget")`,
+      );
+      if (!ctx.dryRun) {
+        for (const key of missing) manifest[key] = null;
+        writeManifest(ctx.nd, manifest);
+      }
+    }
+  }
+  const dir = join(ctx.nd, METRICS_DIR);
+  const foreign = [
+    ...listFiles(dir).filter((file) => file !== METRICS_SNAPSHOT && file !== 'README.md'),
+    ...listDirs(dir).map((folder) => `${folder}/`),
+  ];
+  if (foreign.length > 0) {
+    ctx.log(
+      `SKIP .novadev/${METRICS_DIR}/ — it already holds ${foreign.join(', ')}; from 0.10.0 novadev keeps its metrics snapshot there, so move those to another folder`,
+    );
+  }
 }
 
 function featureFolderFor(nd: string, featureId: string): string | null {

@@ -1,9 +1,10 @@
 // `novadev sync` — the mechanical half of the novadev loop, in one call.
 //
-// Regenerate derived content, sweep everything finished into the archive, validate,
-// then print NEXT ACTIONS: exactly what the agent still has to do and what is waiting
-// on the human. The agent runs this after every round of work and acts on the list
-// until it comes back clean — so nobody has to remember a sequence of commands.
+// Run the project's metrics hook (when one is set), regenerate derived content, sweep
+// everything finished into the archive, validate, then print NEXT ACTIONS: exactly what
+// the agent still has to do and what is waiting on the human. The agent runs this after
+// every round of work and acts on the list until it comes back clean — so nobody has to
+// remember a sequence of commands.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { sweepDone } from './archive.ts';
@@ -27,6 +28,8 @@ import {
   todoState,
 } from './lib.ts';
 import { auditLinks } from './links.ts';
+import { refreshMetrics } from './metrics.ts';
+import { auditMetrics } from './metrics-audit.ts';
 
 export function sync(args: string[]): void {
   const check = args.includes('--check');
@@ -48,13 +51,27 @@ export function sync(args: string[]): void {
     process.exit(1);
   }
 
+  // 0. Metrics: run the project's command, compare with the stored snapshot, store the new
+  // one, apply budget raises. A missing or failing command is a warning, never a failure.
+  const metrics = refreshMetrics(root, {
+    check,
+    onRun: (command) => console.log(`metrics: running \`${command}\` …`),
+  });
+  if (metrics.headline !== null) {
+    console.log(metrics.headline);
+    for (const line of metrics.lines) console.log(`  ${line}`);
+  }
+  // Judged from the files the step above just wrote: the wiki budgets block and bad settings.
+  const metricsAudit = auditMetrics(root);
+
   // 1. Derived content.
   const before = auditLinks(root);
-  if (!check && before.fixes.length > 0) {
-    for (const fix of before.fixes) writeFileSync(fix.path, fix.next);
-    console.log(`derived: regenerated ${before.fixes.length} file(s)`);
-  } else if (check && before.fixes.length > 0) {
-    console.log(`derived: ${before.fixes.length} file(s) are stale`);
+  const fixes = [...before.fixes, ...metricsAudit.fixes];
+  if (!check && fixes.length > 0) {
+    for (const fix of fixes) writeFileSync(fix.path, fix.next);
+    console.log(`derived: regenerated ${fixes.length} file(s)`);
+  } else if (check && fixes.length > 0) {
+    console.log(`derived: ${fixes.length} file(s) are stale`);
   }
 
   // 2. Archive whatever is finished.
@@ -68,9 +85,10 @@ export function sync(args: string[]): void {
 
   // 3. Validate what is left.
   const audit = auditLinks(root);
-  if (audit.problems.length > 0) {
-    console.log(`\nPROBLEMS (${audit.problems.length}):`);
-    for (const p of audit.problems) console.log(`  ✗ ${p}`);
+  const problems = [...audit.problems, ...metricsAudit.problems];
+  if (problems.length > 0) {
+    console.log(`\nPROBLEMS (${problems.length}):`);
+    for (const p of problems) console.log(`  ✗ ${p}`);
   }
 
   // Finished batches inside the grace window stay put on purpose — say so, or their
@@ -89,7 +107,7 @@ export function sync(args: string[]): void {
   }
 
   // 4. What still needs doing, split by who has to do it.
-  const agent = agentActions(root, nd, audit.notes);
+  const agent = [...agentActions(root, nd, audit.notes), ...metrics.actions];
   const human = humanActions(nd);
 
   if (agent.length > 0) {
@@ -101,14 +119,18 @@ export function sync(args: string[]): void {
     for (const h of human) console.log(`  ⧗ ${h}`);
   }
 
-  if (agent.length === 0 && audit.problems.length === 0) {
+  if (agent.length === 0 && problems.length === 0) {
     console.log(
       human.length > 0
         ? '\nsync: clean — everything left is the human\'s to do.'
         : '\nsync: clean. ✓',
     );
   }
-  if (audit.problems.length > 0 || (check && before.fixes.length > 0)) process.exit(1);
+  // `--check` is the gate: a debt budget that is exceeded (and not raised in a record) fails it.
+  // Plain `sync` lists the same thing as a NEXT ACTION instead, like any other unfinished work.
+  if (problems.length > 0 || (check && fixes.length > 0) || (check && metrics.overBudget)) {
+    process.exit(1);
+  }
 }
 
 /** Work only an agent can do — the loop keeps running until this list is empty. */

@@ -17,6 +17,7 @@ development history.
 | `memories/` | Hard-won gotchas, guides, decisions, guardrails + `INDEX.md` |
 | `features/` | What the software DOES: one `FEAT-NNNN/` folder per capability (`feature.md` + derived `work.md`/`tests.md`) |
 | `totest/` | The active queue of tests waiting on a **human** — stepped scenarios an agent could not verify itself |
+| `metrics/` | `latest.json` — the newest snapshot of the project's own numbers (known debt, the biggest hubs), written by `novadev sync` when `novadev.json` sets a `metrics` command |
 | `skills/` | The four playbooks that run this system, `novadev-*.md` (managed by deploy) |
 
 **Agents:** the rule of the house is `skills/novadev-work.md` — the always-applied

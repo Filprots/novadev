@@ -56,6 +56,9 @@ tree so the migration lands as a reviewable diff of its own. Then `novadev deplo
 refresh the playbook, and `novadev sync`. Both `sync` and `doctor` tell you when a
 repo is behind.
 
+0.10.0 adds two settings to `novadev.json`, `metrics` and `debtBudget`. `migrate-repo` writes
+both as `null`, which means off; see *Metrics and the debt budget* below to turn them on.
+
 ## The system
 
 ```
@@ -68,6 +71,7 @@ repo is behind.
   memories/    gotchas/guides/decisions/guardrails, auto-written during work + INDEX.md
   features/    what the software DOES — FEAT-NNNN/ folders: feature.md + derived work.md/tests.md
   totest/      the ACTIVE queue of tests waiting on a human (rounds archive once reviewed)
+  metrics/     latest.json — the newest snapshot of the project's own numbers (when a metrics command is set)
   skills/      the four canonical playbooks, novadev-*.md (agent-agnostic; managed by deploy)
 ```
 
@@ -171,10 +175,11 @@ a single loop the agent runs for every round of work:
 10 CLOSE   `novadev sync`
 ```
 
-`novadev sync` is the close-out and the engine: it regenerates every derived file,
-archives finished batches and reviewed test rounds, validates the tree and the link
-graph, and prints two lists — **NEXT ACTIONS** (the agent's) and **WAITING ON THE
-HUMAN**. The agent works its list and re-runs until it reports clean:
+`novadev sync` is the close-out and the engine: it runs the project's metrics command
+(when one is set), regenerates every derived file, archives finished batches and reviewed
+test rounds, validates the tree and the link graph, and prints two lists — **NEXT
+ACTIONS** (the agent's) and **WAITING ON THE HUMAN**. The agent works its list and re-runs
+until it reports clean:
 
 ```
 $ novadev sync
@@ -191,6 +196,92 @@ WAITING ON THE HUMAN (1):
 **You write todo briefs and walk the tests only a person can walk. That is the whole
 job.** No command to remember, no skill to pick, no archive step to run — if
 something needs doing and an agent can do it, `sync` says so and the agent does it.
+
+## Metrics and the debt budget
+
+novadev can watch the numbers a project measures about itself: how much known debt it
+carries, and how big its largest files or modules ("hubs") are. It does this without knowing
+anything about the stack. You give it ONE command, and it reads the JSON that command prints.
+Both settings live in `.novadev/novadev.json`, and both are off (`null`) until you set them:
+
+```json
+{
+  "metrics": "bun scripts/novadev-metrics.ts",
+  "debtBudget": { "maxKnown": 230 }
+}
+```
+
+The command runs from the project root. It must print ONE JSON object on stdout and nothing
+else. Send logs to stderr.
+
+```json
+{
+  "debt": { "known": 230, "new": 0 },
+  "hubs": [
+    { "name": "Workbench", "measure": 11019, "over": ["loc", "publicVerbs"], "path": "src/editor/workbench/" }
+  ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `debt.known` | findings the project has accepted as known debt — a whole number |
+| `debt.new` | optional: findings nobody has accepted yet |
+| `hubs[].name` | the hub's name; unique, because changes are compared by name |
+| `hubs[].measure` | its size, in the project's own unit (lines, members, …) |
+| `hubs[].over` | optional: the budgets it is over, e.g. `["loc"]` |
+| `hubs[].path` | optional: the repo path of its file or folder |
+
+`debt` and `hubs` are both optional, but at least one must be there. Other keys are ignored.
+
+**Every `novadev sync`** runs the command, compares the result with
+`.novadev/metrics/latest.json`, and stores the new snapshot there. The file is tracked, so
+each commit shows how the numbers moved. What GREW is listed under NEXT ACTIONS, so the agent
+explains it in the record or undoes it. What shrank is only reported:
+
+```
+metrics: snapshot updated — .novadev/metrics/latest.json
+  ↑ known debt 230 → 238 (+8)
+  ↑ hub Workbench 11,019 → 11,140 (+121)
+  ↓ hub Stage3D 3,304 → 3,280 (-24)
+```
+
+A missing or failing command — a non-zero exit, a timeout, output that is not the agreed
+JSON — is a warning, never a sync failure. The stored snapshot then stays as it was.
+
+**The debt budget** is the most known debt the project accepts. Debt can only go above it
+on purpose. When `debt.known` is over `maxKnown`, `novadev sync` lists it as a NEXT ACTION,
+and `novadev sync --check` fails. There are two ways out:
+reduce the debt, or raise the budget in the record of the work that caused it, with a
+reason:
+
+```markdown
+## Debt
+**Raise:** 230 → 238
+The kit registry adds eight known findings. Todo 19 removes them again.
+```
+
+`--check` accepts the raise at once. Plain `sync` writes `238` into `debtBudget.maxKnown`
+and adds the raise to `debtBudget.raises`: the record, the old budget, the value it asked
+for, and the date. That list is how sync applies each raise exactly once, so an old record
+can never raise a budget that someone lowered later. Keep it. Sync only reads raises from
+records still in `todos/`; once a batch is archived, its raise is history. A raise with no
+reason is a problem, and it is not applied. To lower the budget, edit `maxKnown` by hand.
+
+**The wiki budgets block.** sync also keeps a generated block in `wiki/architecture.md`,
+between `<!-- novadev:budgets:begin -->` and `<!-- novadev:budgets:end -->`: the known debt,
+the budget, and the hub table. The first time, it adds a `## Budgets` section at the end of
+the page. You can move the block anywhere in the page; sync rewrites it where it is.
+
+Two more settings, both optional:
+
+| Setting | Default | |
+|---|---|---|
+| `metricsWikiPage` | `"architecture.md"` | the wiki page that carries the block; `false` for no block |
+| `metricsTimeoutSeconds` | `300` | how long the command may run |
+
+`novadev doctor` checks the settings, the snapshot, the raises and the block, and never runs
+the command. On a merge conflict in `latest.json`, take either side and run `novadev sync`.
 
 ## The three companion playbooks
 

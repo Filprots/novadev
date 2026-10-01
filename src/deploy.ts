@@ -26,6 +26,7 @@ const USER_FOLDERS = [
   'memories',
   'features',
   'totest',
+  'metrics',
 ];
 
 export function deploy(cwd: string = process.cwd()): void {
@@ -100,16 +101,20 @@ export function deploy(cwd: string = process.cwd()): void {
   }
 
   // 3. Manifest — merge, never clobber: it carries user settings like archiveGraceDays.
+  const firstDeploy = !existsSync(join(root, 'novadev.json'));
   let manifest: Record<string, unknown> = {};
   try {
     manifest = JSON.parse(readFileSync(join(root, 'novadev.json'), 'utf8'));
   } catch {
     /* first deploy, or unreadable — start fresh */
   }
+  // A new project starts with the opt-in settings visible and off, exactly like a repo that
+  // `migrate-repo` brought to 0.10.0. Only on the FIRST deploy: someone who deleted them meant it.
+  const seeded = firstDeploy ? { metrics: null, debtBudget: null } : {};
   writeManaged(
     join(root, 'novadev.json'),
     JSON.stringify(
-      { ...manifest, novadev: true, version: NOVADEV_VERSION, deployedAt: todayStamp() },
+      { ...manifest, novadev: true, version: NOVADEV_VERSION, deployedAt: todayStamp(), ...seeded },
       null,
       2,
     ) + '\n',

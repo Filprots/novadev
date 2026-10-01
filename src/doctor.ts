@@ -25,6 +25,7 @@ import {
   requireProjectRoot,
 } from './lib.ts';
 import { auditLinks } from './links.ts';
+import { auditMetrics } from './metrics-audit.ts';
 
 export function doctor(): void {
   const root = requireProjectRoot();
@@ -253,6 +254,15 @@ export function doctor(): void {
     problems.push(`${fix.label} — run \`novadev links --fix\``);
   }
 
+  // --- metrics: the settings, the stored snapshot, budget raises, the wiki budgets block ---
+  // Judged from the files alone: doctor never runs the project's metrics command.
+  const metricsAudit = auditMetrics(root);
+  problems.push(...metricsAudit.problems);
+  notes.push(...metricsAudit.notes);
+  for (const fix of metricsAudit.fixes) {
+    problems.push(`${fix.label} — run \`novadev sync\``);
+  }
+
   // --- unknown top-level folders: tolerated, but surfaced ---
   const known = new Set([
     'todos',
@@ -264,6 +274,7 @@ export function doctor(): void {
     'features',
     'totest',
     'skills',
+    'metrics',
   ]);
   for (const dir of listDirs(nd)) {
     if (!known.has(dir)) notes.push(`.novadev/${dir}/: not a novadev folder (tolerated)`);

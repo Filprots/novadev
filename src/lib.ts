@@ -1,9 +1,9 @@
 // Shared helpers for the novadev CLI. Zero dependencies — Bun + node:fs only.
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
 export const ROOT_DIR_NAME = '.novadev';
-export const NOVADEV_VERSION = '0.9.0';
+export const NOVADEV_VERSION = '0.10.0';
 
 /** Compare dotted versions: <0 when a is older, 0 when equal, >0 when a is newer. */
 export function compareVersions(a: string, b: string): number {
@@ -14,6 +14,28 @@ export function compareVersions(a: string, b: string): number {
     if (d !== 0) return d;
   }
   return 0;
+}
+
+/** `.novadev/novadev.json` — the manifest: the deployed version plus the project's settings. */
+export function manifestPath(nd: string): string {
+  return join(nd, 'novadev.json');
+}
+
+/** The manifest as an object, or null when it is missing, unreadable, or not a JSON object. */
+export function readManifest(nd: string): Record<string, unknown> | null {
+  try {
+    const value: unknown = JSON.parse(readFileSync(manifestPath(nd), 'utf8'));
+    return value !== null && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Write the manifest back in the one format every writer uses (2-space JSON, trailing newline). */
+export function writeManifest(nd: string, manifest: Record<string, unknown>): void {
+  writeFileSync(manifestPath(nd), JSON.stringify(manifest, null, 2) + '\n');
 }
 
 /** The version recorded in the project's novadev.json, or null when absent/unreadable. */
@@ -620,6 +642,33 @@ export function setFrontmatter(text: string, updates: Record<string, string>): s
     if (!seen.has(key)) lines.push(`${key}: ${value}`);
   }
   return '---' + lines.join('\n') + text.slice(end);
+}
+
+// ---------------------------------------------------------------------------
+// Small value guards — for reading JSON a person or a command wrote
+// ---------------------------------------------------------------------------
+
+/** A plain JSON object: not null, not an array. */
+export function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** A whole number, 0 or more. */
+export function isCount(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0;
+}
+
+/** Code-point order: the same on every machine, whatever its locale. */
+export function byCodePoint(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/** A parse that either worked or says, in words, why not. */
+export type Parsed<T> = { ok: true; value: T } | { ok: false; error: string };
+
+/** The failed half of `Parsed` (unlike `fail`, it does not exit the process). */
+export function refuse(error: string): { ok: false; error: string } {
+  return { ok: false, error };
 }
 
 /** Directory of the installed novadev package itself (for reading templates/). */
