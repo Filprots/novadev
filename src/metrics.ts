@@ -12,27 +12,37 @@
 //   the command    { "debt": { "known": 230, "new": 0 },
 //   prints         "hubs": [ { "name": "Workbench", "measure": 11019, "over": ["loc"], "path": "…" } ] }
 //
-// `novadev sync` runs the command, compares the result with `.novadev/metrics/latest.json`, stores
-// the new snapshot there (tracked, so the change is in the commit's diff), and lists what GREW
-// under NEXT ACTIONS. A missing or failing command is a warning, never a sync failure.
+// `novadev sync` runs the command and stores the result in `.novadev/metrics/latest.json` (tracked,
+// so the change is in the commit's diff; a derived file, so `sync --check` fails while it is stale).
+// It compares the numbers with the last commit's snapshot and lists what GREW under NEXT ACTIONS
+// until a record of the round explains it. A missing or failing command is a warning, never a
+// sync failure.
 //
 // What can be judged from the files alone — doctor's view and the wiki budgets block — is
 // metrics-audit.ts.
-import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
+import { constants } from 'node:os';
 import { join } from 'node:path';
 import {
   type DebtBudget,
-  applyRaises,
+  type RaiseOutcome,
+  type RecordRaise,
   collectRaises,
+  debtNotes,
+  ledgerEntryFor,
   parseBudget,
-  pendingRaises,
+  planRaises,
   writeBudget,
 } from './debt-budget.ts';
+import { changedSinceHead, fileAtHead } from './git.ts';
 import {
+  type Fix,
   type Parsed,
+  ROOT_DIR_NAME,
   byCodePoint,
   isCount,
+  isDirectory,
   isPlainObject,
   novadevDir,
   readManifest,
@@ -46,6 +56,15 @@ export const METRICS_TIMEOUT_DEFAULT = 300;
 export const METRICS_WIKI_PAGE_DEFAULT = 'architecture.md';
 
 const MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
+/** The longest delay a timer can hold; a bigger "metricsTimeoutSeconds" would fire at once. */
+const MAX_TIMER_MS = 2_147_483_647;
+/** After a timeout: how long the command's processes get to stop before they are killed. */
+const KILL_GRACE_MS = 1_000;
+/** After the command exits: how long a process it left behind may keep its output open. */
+const DRAIN_MS = 2_000;
+const WINDOWS = process.platform === 'win32';
+/** Control characters: never part of a hub name, a budget name or a path. */
+const CONTROL = /[\u0000-\u001f\u007f]/;
 
 export type Debt = { known: number; new?: number };
 export type Hub = { name: string; measure: number; over: string[]; path?: string };
@@ -166,6 +185,7 @@ export function normalizeMetrics(raw: unknown): Parsed<Metrics> {
       if (!isPlainObject(entry)) return refuse(`hubs[${i}] must be an object`);
       const name = typeof entry.name === 'string' ? entry.name.trim() : '';
       if (name === '') return refuse(`hubs[${i}] needs a "name"`);
+      if (CONTROL.test(name)) return refuse(`hubs[${i}]: "name" must be one line of plain text`);
       if (seen.has(name)) return refuse(`two hubs are named "${name}" — every hub name must be unique`);
       seen.add(name);
       const measure = entry.measure;
@@ -173,7 +193,10 @@ export function normalizeMetrics(raw: unknown): Parsed<Metrics> {
         return refuse(`hub "${name}": "measure" must be a number, 0 or more`);
       }
       const over = entry.over ?? [];
-      if (!Array.isArray(over) || over.some((axis) => typeof axis !== 'string' || axis.trim() === '')) {
+      if (
+        !Array.isArray(over) ||
+        over.some((axis) => typeof axis !== 'string' || axis.trim() === '' || CONTROL.test(axis))
+      ) {
         return refuse(`hub "${name}": "over" must be a list of names, like ["loc"]`);
       }
       const hub: Hub = {
@@ -182,10 +205,11 @@ export function normalizeMetrics(raw: unknown): Parsed<Metrics> {
         over: [...new Set((over as string[]).map((axis) => axis.trim()))].sort(byCodePoint),
       };
       if (entry.path !== undefined && entry.path !== null) {
-        if (typeof entry.path !== 'string' || entry.path.trim() === '') {
-          return refuse(`hub "${name}": "path" must be a repo path (a string)`);
+        const path = typeof entry.path === 'string' ? repoPath(entry.path) : null;
+        if (path === null) {
+          return refuse(`hub "${name}": "path" must be a path inside the project, relative to its root, like "src/wb/"`);
         }
-        hub.path = entry.path.trim().replace(/^\.\//, '');
+        hub.path = path;
       }
       hubs.push(hub);
     }
@@ -194,34 +218,137 @@ export function normalizeMetrics(raw: unknown): Parsed<Metrics> {
   return { ok: true, value: { ...(debt ? { debt } : {}), hubs } };
 }
 
+/**
+ * A hub path as the snapshot stores it: forward slashes, no leading "./", no doubled slashes — so
+ * the same script gives the same snapshot on Windows and on Linux. Null for a path that is empty,
+ * absolute (it would differ from one machine to the next), or not one line of text.
+ */
+export function repoPath(raw: string): string | null {
+  if (CONTROL.test(raw)) return null;
+  let path = raw.trim().replace(/\\/g, '/').replace(/\/{2,}/g, '/');
+  while (path.startsWith('./')) path = path.slice(2);
+  if (path === '' || path.startsWith('/') || /^[A-Za-z]:/.test(path)) return null;
+  return path;
+}
+
 export type CommandResult = { ok: true; value: Metrics } | { ok: false; error: string };
 
-/** Run the configured command from the project root and read its JSON. Never throws. */
-export function runMetricsCommand(root: string, command: string, timeoutSeconds: number): CommandResult {
-  const run = spawnSync(command, {
-    cwd: root,
-    shell: true,
-    encoding: 'utf8',
-    timeout: Math.round(timeoutSeconds * 1000),
-    maxBuffer: MAX_OUTPUT_BYTES,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  const tail = lastLines(run.stderr ?? '', 3);
-  if (run.error) {
-    const code = (run.error as NodeJS.ErrnoException).code;
-    if (code === 'ETIMEDOUT') {
-      return refuse(
-        `\`${command}\` did not finish within ${timeoutSeconds} s (raise "metricsTimeoutSeconds" if it needs longer)`,
-      );
+/** The command as it is printed: control characters made visible, so the output stays one line. */
+export function displayCommand(command: string): string {
+  return command.replace(/[\u0000-\u001f\u007f]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
+}
+
+/**
+ * Run the configured command from the project root and read its JSON. It never throws and never
+ * leaves the command running: the command runs in a process group of its own, and on a timeout
+ * the whole group is stopped — the command AND every process it started. When novadev itself is
+ * stopped while the command runs (Ctrl+C), it stops that group too. A process the command moves
+ * out of its group on purpose (a daemon) is the one thing this cannot reach.
+ */
+export function runMetricsCommand(root: string, command: string, timeoutSeconds: number): Promise<CommandResult> {
+  const shown = `\`${displayCommand(command)}\``;
+  const ms = Math.min(Math.max(1, Math.round(timeoutSeconds * 1000)), MAX_TIMER_MS);
+  return new Promise((done) => {
+    let child: ChildProcess;
+    try {
+      child = spawn(command, {
+        cwd: root,
+        shell: true,
+        detached: !WINDOWS,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+      });
+    } catch (error) {
+      done(refuse(`${shown} could not run: ${error instanceof Error ? error.message : String(error)}`));
+      return;
     }
-    return refuse(`\`${command}\` could not run: ${run.error.message}`);
+
+    const out: Buffer[] = [];
+    let outBytes = 0;
+    let errTail = '';
+    let stopped: 'timeout' | 'overflow' | null = null;
+    let settled = false;
+    let drain: ReturnType<typeof setTimeout> | undefined;
+
+    const stopGroup = () => {
+      killGroup(child, 'SIGTERM');
+      setTimeout(() => killGroup(child, 'SIGKILL'), KILL_GRACE_MS);
+    };
+    // novadev is being stopped (Ctrl+C, a closed terminal): stop the command's group with it. The
+    // group gets SIGTERM whatever novadev got — a shell's background jobs ignore SIGINT.
+    const passOn = (signal: NodeJS.Signals) => {
+      killGroup(child, 'SIGTERM');
+      process.exit(128 + (constants.signals[signal] ?? 1));
+    };
+    const signals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGHUP'];
+    for (const signal of signals) process.on(signal, passOn);
+    const timer = setTimeout(() => {
+      stopped = 'timeout';
+      stopGroup();
+    }, ms);
+
+    const finish = (result: CommandResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearTimeout(drain);
+      for (const signal of signals) process.off(signal, passOn);
+      done(result);
+    };
+    const settle = (code: number | null, signal: NodeJS.Signals | null) => {
+      if (stopped === 'timeout') {
+        finish(refuse(`${shown} did not finish within ${timeoutSeconds} s (raise "metricsTimeoutSeconds" if it needs longer)`));
+      } else if (stopped === 'overflow') {
+        finish(refuse(`${shown} printed more than ${MAX_OUTPUT_BYTES / 1024 / 1024} MB on stdout`));
+      } else if (code !== 0) {
+        const how = code === null ? `was stopped (${signal ?? 'signal'})` : `exited with ${code}`;
+        const tail = lastLines(errTail, 3);
+        finish(refuse(`${shown} ${how}${tail ? ` — ${tail}` : ''}`));
+      } else {
+        const parsed = parseMetricsOutput(Buffer.concat(out).toString('utf8'));
+        finish(parsed.ok ? parsed : refuse(`${shown}: ${parsed.error}`));
+      }
+    };
+
+    child.stdout!.on('data', (chunk: Buffer) => {
+      outBytes += chunk.length;
+      if (outBytes <= MAX_OUTPUT_BYTES) {
+        out.push(chunk);
+      } else if (stopped === null) {
+        stopped = 'overflow';
+        stopGroup();
+      }
+    });
+    child.stderr!.on('data', (chunk: Buffer) => {
+      errTail = (errTail + chunk.toString('utf8')).slice(-4096);
+    });
+    child.on('error', (error) => finish(refuse(`${shown} could not run: ${error.message}`)));
+    child.on('exit', (code, signal) => {
+      if (settled) return;
+      // The command is done. A process it left behind may still hold its output open: give the
+      // pipes a moment to drain, then stop waiting for them.
+      drain = setTimeout(() => {
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        settle(code, signal);
+      }, DRAIN_MS);
+    });
+    child.on('close', (code, signal) => settle(code, signal));
+  });
+}
+
+/** Stop the command and every process in its group. Quiet when they are already gone. */
+function killGroup(child: ChildProcess, signal: NodeJS.Signals): void {
+  if (child.pid === undefined) return;
+  try {
+    if (WINDOWS) {
+      spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+    } else {
+      process.kill(-child.pid, signal);
+    }
+  } catch {
+    /* already gone */
   }
-  if (run.status !== 0) {
-    const how = run.status === null ? `was stopped (${run.signal ?? 'signal'})` : `exited with ${run.status}`;
-    return refuse(`\`${command}\` ${how}${tail ? ` — ${tail}` : ''}`);
-  }
-  const parsed = parseMetricsOutput(run.stdout ?? '');
-  return parsed.ok ? parsed : refuse(`\`${command}\`: ${parsed.error}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -230,6 +357,12 @@ export function runMetricsCommand(root: string, command: string, timeoutSeconds:
 
 export function snapshotPath(nd: string): string {
   return join(nd, METRICS_DIR, METRICS_SNAPSHOT);
+}
+
+/** True when `.novadev/metrics` is a file where novadev needs its folder. */
+export function metricsFolderIsFile(nd: string): boolean {
+  const path = join(nd, METRICS_DIR);
+  return existsSync(path) && !isDirectory(path);
 }
 
 export type SnapshotRead =
@@ -261,6 +394,18 @@ export function currentSnapshot(nd: string): Snapshot | null {
   return read.state === 'ok' ? read.snapshot : null;
 }
 
+/** The snapshot as it was in the last commit, or null (no git, no commit yet, not committed). */
+export function committedSnapshot(root: string): Metrics | null {
+  const text = fileAtHead(root, `${ROOT_DIR_NAME}/${METRICS_DIR}/${METRICS_SNAPSHOT}`);
+  if (text === null) return null;
+  try {
+    const parsed = normalizeMetrics(JSON.parse(text));
+    return parsed.ok ? parsed.value : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The file format: plain JSON, one hub per line, so a commit's diff shows exactly which hub moved.
  * Deterministic for the same metrics, which is what lets sync skip the write when nothing changed.
@@ -282,11 +427,6 @@ export function renderSnapshot(snapshot: Snapshot): string {
   return lines.join('\n') + '\n';
 }
 
-export function writeSnapshot(nd: string, snapshot: Snapshot): void {
-  mkdirSync(join(nd, METRICS_DIR), { recursive: true });
-  writeFileSync(snapshotPath(nd), renderSnapshot(snapshot));
-}
-
 /** Same numbers, same hubs, same paths — the date is not part of the comparison. */
 export function sameMetrics(a: Metrics, b: Metrics): boolean {
   return renderSnapshot({ ...a, updated: '' }) === renderSnapshot({ ...b, updated: '' });
@@ -305,31 +445,34 @@ function hubJson(hub: Hub): Record<string, unknown> {
 // ---------------------------------------------------------------------------
 
 export type Delta = {
-  /** True when something got bigger or worse — these become NEXT ACTIONS. */
+  /** True when something got bigger or worse — these become NEXT ACTIONS until explained. */
   grew: boolean;
   /** "known debt 230 → 238 (+8)", "hub Workbench 11,019 → 11,140 (+121)". */
   text: string;
   /** What the agent should do about it, appended to the NEXT ACTIONS line. */
   advice: string;
+  /** The hub it is about; absent for the debt counts. A `## Debt` section explains it by name. */
+  hub?: string;
 };
+
+const DEBT_ADVICE = 'it grew: say why in a "## Debt" section of this round\'s record, or reduce it';
 
 export function diffMetrics(prev: Metrics, next: Metrics): Delta[] {
   const out: Delta[] = [];
-  const debtAdvice = 'it grew: explain why in this round\'s record, or reduce it';
 
   if (prev.debt && next.debt) {
     if (prev.debt.known !== next.debt.known) {
       out.push({
         grew: next.debt.known > prev.debt.known,
         text: `known debt ${change(prev.debt.known, next.debt.known)}`,
-        advice: debtAdvice,
+        advice: DEBT_ADVICE,
       });
     }
     if (prev.debt.new !== undefined && next.debt.new !== undefined && prev.debt.new !== next.debt.new) {
       out.push({
         grew: next.debt.new > prev.debt.new,
         text: `new debt ${change(prev.debt.new, next.debt.new)}`,
-        advice: debtAdvice,
+        advice: DEBT_ADVICE,
       });
     }
   }
@@ -352,19 +495,33 @@ export function diffMetrics(prev: Metrics, next: Metrics): Delta[] {
       out.push({
         grew: b.measure > a.measure || added.length > 0,
         text: parts.join(', '),
-        advice: 'a hub grew: explain in the record why the change belongs there, or move it to a smaller unit',
+        advice:
+          'a hub grew: name it in a "## Debt" section of this round\'s record and say why the change belongs there, or move it to a smaller unit',
+        hub: name,
       });
     } else if (b) {
       out.push({
         grew: true,
         text: `hub ${name} ${fmt(b.measure)} is new${b.over.length > 0 ? ` (over ${b.over.join(', ')})` : ''}`,
-        advice: 'a new hub: explain in the record why, or split it',
+        advice: 'a new hub: name it in a "## Debt" section of this round\'s record and say why, or split it',
+        hub: name,
       });
     } else if (a) {
-      out.push({ grew: false, text: `hub ${name} is gone (was ${fmt(a.measure)})`, advice: '' });
+      out.push({ grew: false, text: `hub ${name} is gone (was ${fmt(a.measure)})`, advice: '', hub: name });
     }
   }
   return out;
+}
+
+/** True when `text` names `name` as a word of its own (not inside a longer name), ignoring case. */
+export function mentions(text: string, name: string): boolean {
+  const hay = text.toLowerCase();
+  const needle = name.toLowerCase();
+  const word = /[\p{L}\p{N}_]/u;
+  for (let at = hay.indexOf(needle); at !== -1; at = hay.indexOf(needle, at + 1)) {
+    if (!word.test(hay[at - 1] ?? ' ') && !word.test(hay[at + needle.length] ?? ' ')) return true;
+  }
+  return false;
 }
 
 /** 11019 → "11,019"; 2.5 → "2.5". */
@@ -382,72 +539,88 @@ export function change(from: number, to: number): string {
 // The sync step
 // ---------------------------------------------------------------------------
 
+/**
+ * What the wiki block and the audit are judged against: the snapshot as this sync stores it (or
+ * would, with --check), and the budget novadev.json holds once this sync is done.
+ */
+export type MetricsView = { snapshot: SnapshotRead; budget: DebtBudget | null };
+
 export type MetricsRun = {
   /** The first line of the metrics block, or null when metrics are off and nothing is stored. */
   headline: string | null;
   /** The lines under it: every change, the budget state, warnings. */
   lines: string[];
-  /** NEXT ACTIONS: what grew, and a debt budget that is exceeded. */
+  /** NEXT ACTIONS: what grew without an explanation, a budget that is exceeded, a broken snapshot. */
   actions: string[];
-  /** Known debt is over the budget (after any raise a record asks for) — fails `sync --check`. */
+  /** Known debt is over the budget (after the raises records ask for) — fails `sync --check`. */
   overBudget: boolean;
+  /** The snapshot, when it changes: derived content, written by sync beside the link files. */
+  fixes: Fix[];
+  /** Further reasons `sync --check` fails: a snapshot nobody can read. */
+  failures: string[];
+  /** The state the wiki block and the audit must be judged against. */
+  view: MetricsView;
 };
 
 /**
- * The metrics half of `novadev sync`: run the command, compare, store, apply budget raises.
- * With `check`, nothing is written — the comparison and the budget check still run.
+ * The metrics half of `novadev sync`: run the command, compare, apply budget raises. The new
+ * snapshot comes back as a Fix for sync to write; the budget is written here. With `check`,
+ * nothing is written — the comparison and the budget check still run.
  */
-export function refreshMetrics(
+export async function refreshMetrics(
   root: string,
   opts: { check: boolean; today?: string; onRun?: (command: string) => void },
-): MetricsRun {
+): Promise<MetricsRun> {
   const nd = novadevDir(root);
   const today = opts.today ?? todayStamp();
   const config = readMetricsConfig(nd);
   const stored = readSnapshot(nd);
   const storedSnapshot = stored.state === 'ok' ? stored.snapshot : null;
+  const where = `${ROOT_DIR_NAME}/${METRICS_DIR}/${METRICS_SNAPSHOT}`;
   const lines: string[] = [];
   const actions: string[] = [];
+  const fixes: Fix[] = [];
+  const failures: string[] = [];
   let headline: string | null = null;
+  let snapshot: SnapshotRead = stored;
 
   // What the budget is checked against: fresh numbers when the command worked, else the stored ones.
   let measured: Metrics | null = storedSnapshot;
-  let measuredFresh = false;
+  let fresh = false;
 
   if (config.command !== null) {
     opts.onRun?.(config.command);
-    const result = runMetricsCommand(root, config.command, config.timeoutSeconds);
-    if (!result.ok) {
-      headline = `metrics: ⚠ the command failed — ${result.error}`;
-      lines.push(
-        storedSnapshot
-          ? `the snapshot was not updated; the checks below use the stored one${storedSnapshot.updated ? ` (${storedSnapshot.updated})` : ''}`
-          : stored.state === 'invalid'
-            ? `the stored ${METRICS_SNAPSHOT} cannot be read either (${stored.error})`
-            : 'there is no stored snapshot yet',
-      );
+    const result = await runMetricsCommand(root, config.command, config.timeoutSeconds);
+    // Output that stopped reporting the debt is incomplete, not "no debt": storing it would drop the
+    // count from the snapshot, and the budget gate would pass without anyone noticing.
+    const lostDebt = result.ok && storedSnapshot?.debt !== undefined && result.value.debt === undefined;
+    if (!result.ok || lostDebt) {
+      headline = result.ok
+        ? `metrics: ⚠ the command no longer prints "debt" — the stored snapshot has known debt ${fmt(storedSnapshot!.debt!.known)}`
+        : `metrics: ⚠ the command failed — ${result.error}`;
+      lines.push(keptLine(stored));
+      if (lostDebt) {
+        lines.push(
+          'if the project stopped counting debt on purpose, remove "debtBudget" from novadev.json and delete the snapshot; `novadev sync` then stores a new one',
+        );
+      }
     } else {
       measured = result.value;
-      measuredFresh = true;
-      const changed = storedSnapshot === null || !sameMetrics(storedSnapshot, result.value);
-      const deltas = storedSnapshot ? diffMetrics(storedSnapshot, result.value) : [];
-      if (!opts.check && changed) writeSnapshot(nd, { ...result.value, updated: today });
-      const where = `.novadev/${METRICS_DIR}/${METRICS_SNAPSHOT}`;
-      if (storedSnapshot === null) {
-        headline = opts.check
-          ? `metrics: no snapshot is stored yet — \`novadev sync\` stores the first one in ${where}`
-          : `metrics: first snapshot stored — ${where}`;
-        if (stored.state === 'invalid') lines.push(`the old ${METRICS_SNAPSHOT} could not be read (${stored.error})`);
-      } else if (!changed) {
-        headline = 'metrics: no change since the last snapshot';
+      fresh = true;
+      if (metricsFolderIsFile(nd)) {
+        headline = `metrics: ⚠ the snapshot cannot be stored — ${ROOT_DIR_NAME}/${METRICS_DIR} is a file, not a folder`;
       } else {
-        headline = opts.check
-          ? `metrics: changed since the stored snapshot — \`novadev sync\` stores the new one in ${where}`
-          : `metrics: snapshot updated — ${where}`;
-      }
-      for (const delta of deltas) {
-        lines.push(`${delta.grew ? '↑' : '↓'} ${delta.text}`);
-        if (delta.grew) actions.push(`${delta.text} — ${delta.advice}`);
+        const changed = storedSnapshot === null || !sameMetrics(storedSnapshot, result.value);
+        const next: Snapshot = changed || storedSnapshot === null ? { ...result.value, updated: today } : storedSnapshot;
+        snapshot = { state: 'ok', snapshot: next };
+        if (changed) {
+          const state = stored.state === 'ok' ? 'out of date' : stored.state === 'absent' ? 'missing' : 'unreadable';
+          fixes.push({ path: snapshotPath(nd), label: `${METRICS_DIR}/${METRICS_SNAPSHOT}: ${state}`, next: renderSnapshot(next) });
+        }
+        headline = freshHeadline(stored, changed, opts.check, where);
+        const growth = growthSince(root, nd, storedSnapshot, result.value);
+        lines.push(...growth.lines);
+        actions.push(...growth.actions);
       }
     }
   } else if (storedSnapshot !== null || config.budget !== null) {
@@ -455,45 +628,152 @@ export function refreshMetrics(
       'metrics: ⚠ no "metrics" command is set in novadev.json — nothing refreshes the snapshot or measures the debt';
   }
 
-  let overBudget = false;
-  if (config.budget !== null) {
-    let budget = config.budget;
-    const pending = pendingRaises(budget, collectRaises(nd).raises);
-    if (pending.length > 0) {
-      const next = applyRaises(budget, pending, today);
-      if (!opts.check) writeBudget(nd, next);
-      for (const entry of next.raises.slice(budget.raises.length)) {
-        if (entry.to <= entry.from) {
-          lines.push(`debt budget: ${entry.by} asks for ${fmt(entry.to)}; it is already ${fmt(entry.from)}`);
-        } else if (opts.check) {
-          lines.push(
-            `debt budget: ${entry.by} raises it ${fmt(entry.from)} → ${fmt(entry.to)} — \`novadev sync\` writes that to novadev.json`,
-          );
-        } else {
-          lines.push(`debt budget raised ${fmt(entry.from)} → ${fmt(entry.to)} by ${entry.by}`);
-        }
-      }
-      budget = next;
-    }
+  // A snapshot nobody can read, which this sync cannot write again either (merge-conflict markers,
+  // most likely). Not a sync failure — the command may simply not run here — but the gate fails.
+  if (snapshot.state === 'invalid') {
+    headline ??= `metrics: ⚠ ${where} cannot be read`;
+    actions.push(
+      `${METRICS_DIR}/${METRICS_SNAPSHOT} cannot be read (${snapshot.error}) — if it holds merge-conflict markers, keep one side; or delete it, and \`novadev sync\` writes it again once the metrics command works`,
+    );
+    failures.push(`${METRICS_DIR}/${METRICS_SNAPSHOT} cannot be read`);
+  }
 
-    const debt = measured?.debt;
-    const source = measuredFresh ? '' : ' (stored snapshot)';
+  let budget = config.budget;
+  let overBudget = false;
+  if (budget !== null) {
+    const known = measured?.debt?.known ?? null;
+    const found = collectRaises(nd).raises;
+    const plan = planRaises(budget, found, known, today);
+    for (const outcome of plan.outcomes) lines.push(describeRaise(outcome, budget.maxKnown, !opts.check));
+    if (plan.changed && !opts.check) writeBudget(nd, plan.budget);
+    budget = plan.budget;
+
+    const source = fresh ? '' : ' (stored snapshot)';
     if (measured === null) {
       lines.push('debt budget: not checked — there are no metrics to check it against');
-    } else if (!debt) {
+    } else if (known === null) {
       lines.push('debt budget: not checked — the metrics have no "debt" count');
-    } else if (debt.known > budget.maxKnown) {
+    } else if (known > budget.maxKnown) {
       overBudget = true;
-      lines.push(`✗ known debt ${fmt(debt.known)} is over the budget ${fmt(budget.maxKnown)}${source}`);
-      actions.push(
-        `known debt ${fmt(debt.known)} is over the budget ${fmt(budget.maxKnown)} — reduce it, or raise the budget in this round's record: add a "## Debt" section with "**Raise:** ${budget.maxKnown} → ${debt.known}" and the reason`,
-      );
+      lines.push(`✗ known debt ${fmt(known)} is over the budget ${fmt(budget.maxKnown)}${source}`);
+      actions.push(overBudgetAction(budget, found, known));
     } else {
-      lines.push(`debt budget: known debt ${fmt(debt.known)} of ${fmt(budget.maxKnown)} ✓${source}`);
+      lines.push(`debt budget: known debt ${fmt(known)} of ${fmt(budget.maxKnown)} ✓${source}`);
+      if (known < budget.maxKnown) {
+        lines.push(
+          `debt budget: ${fmt(budget.maxKnown - known)} under it — set "maxKnown" to ${known} in novadev.json to keep that gain`,
+        );
+      }
     }
   }
 
-  return { headline, lines, actions, overBudget };
+  // The view is what the files hold once this sync is done. With --check the snapshot is judged
+  // as sync would store it (it is derived, so a stale one fails the gate), but novadev.json keeps
+  // its budget: --check accepts a raise at once, so a raise sync has yet to write is not "stale".
+  return {
+    headline,
+    lines,
+    actions,
+    overBudget,
+    fixes,
+    failures,
+    view: { snapshot, budget: opts.check ? config.budget : budget },
+  };
+}
+
+function freshHeadline(stored: SnapshotRead, changed: boolean, check: boolean, where: string): string {
+  if (stored.state === 'invalid') {
+    return check
+      ? `metrics: the stored snapshot cannot be read (${stored.error}) — \`novadev sync\` writes it again in ${where}`
+      : `metrics: snapshot written again — ${where} could not be read (${stored.error})`;
+  }
+  if (stored.state === 'absent') {
+    return check
+      ? `metrics: no snapshot is stored yet — \`novadev sync\` stores the first one in ${where}`
+      : `metrics: first snapshot stored — ${where}`;
+  }
+  if (!changed) return 'metrics: no change since the last snapshot';
+  return check
+    ? `metrics: changed since the stored snapshot — \`novadev sync\` stores the new one in ${where}`
+    : `metrics: snapshot updated — ${where}`;
+}
+
+function keptLine(stored: SnapshotRead): string {
+  if (stored.state === 'ok') {
+    const when = stored.snapshot.updated ? ` (${stored.snapshot.updated})` : '';
+    return `the snapshot was not updated; the checks below use the stored one${when}`;
+  }
+  if (stored.state === 'invalid') return `the stored ${METRICS_SNAPSHOT} cannot be read either (${stored.error})`;
+  return 'there is no stored snapshot yet';
+}
+
+/**
+ * What changed in this round, and what grew with no explanation yet. The round is everything since
+ * the last commit: compared with the committed snapshot, a hub that grew stays on the list on every
+ * sync until a record changed in this round names it in a `## Debt` section — or the growth is
+ * undone. Without git (or before the first snapshot is committed), the comparison is with the
+ * stored snapshot, and a change is listed once.
+ */
+function growthSince(
+  root: string,
+  nd: string,
+  stored: Snapshot | null,
+  fresh: Metrics,
+): { lines: string[]; actions: string[] } {
+  const committed = committedSnapshot(root);
+  const base = committed ?? stored;
+  if (base === null) return { lines: [], actions: [] };
+  const deltas = diffMetrics(base, fresh);
+  if (deltas.length === 0) return { lines: [], actions: [] };
+
+  const notes = committed
+    ? debtNotes(nd, changedSinceHead(root, `${ROOT_DIR_NAME}/todos`) ?? new Set())
+    : debtNotes(nd);
+  const lines = committed ? ['since the last commit:'] : [];
+  const actions: string[] = [];
+  for (const delta of deltas) {
+    const by = delta.grew
+      ? notes.find((note) => delta.hub === undefined || mentions(note.text, delta.hub))?.ref
+      : undefined;
+    lines.push(`${delta.grew ? '↑' : '↓'} ${delta.text}${by ? ` — explained in ${by}` : ''}`);
+    if (delta.grew && by === undefined) actions.push(`${delta.text} — ${delta.advice}`);
+  }
+  return { lines, actions };
+}
+
+/** One line about one raise a record asks for. `written`: plain sync, which writes it. */
+export function describeRaise(outcome: RaiseOutcome, budget: number, written: boolean): string {
+  const { raise } = outcome;
+  switch (outcome.status) {
+    case 'applied': {
+      const capped =
+        outcome.applied < raise.to
+          ? ` (it asks for ${fmt(raise.to)}, above the measured debt — a raise stops there)`
+          : '';
+      return written
+        ? `debt budget raised ${fmt(raise.from)} → ${fmt(outcome.applied)} by ${raise.ref}${capped}`
+        : `debt budget: ${raise.ref} raises it ${fmt(raise.from)} → ${fmt(outcome.applied)}${capped} — \`novadev sync\` writes that to novadev.json`;
+    }
+    case 'stale':
+      return `debt budget: ${raise.ref} raises it from ${fmt(raise.from)}, but the budget is ${fmt(budget)} — not applied; if it is still needed, make it "**Raise:** ${budget} → <the new budget>"`;
+    case 'not-needed':
+      return `debt budget: ${raise.ref} asks for ${fmt(raise.to)}, but known debt is within the budget — not needed, so not applied`;
+    case 'unmeasured':
+      return `debt budget: ${raise.ref} asks for ${fmt(raise.to)} — not applied: there is no debt count to check it against`;
+  }
+}
+
+function overBudgetAction(budget: DebtBudget, found: readonly RecordRaise[], known: number): string {
+  const over = `known debt ${fmt(known)} is over the budget ${fmt(budget.maxKnown)} — `;
+  // The one raise a record cannot repeat: the exact one it already made, before someone lowered the
+  // budget again. Asking for it once more would send the agent in a circle, so say why instead.
+  for (const raise of found) {
+    if (raise.from !== budget.maxKnown || raise.to !== known) continue;
+    const entry = ledgerEntryFor(budget, raise);
+    if (!entry) continue;
+    return `${over}${raise.ref} already raised it ${fmt(raise.from)} → ${fmt(raise.to)} on ${entry.on}, and the budget was lowered after that, so that raise does not count again: reduce the debt, or raise the budget in another record, with the reason`;
+  }
+  return `${over}reduce it, or raise the budget in this round's record: add a "## Debt" section with "**Raise:** ${budget.maxKnown} → ${known}" and the reason`;
 }
 
 function lastLines(text: string, count: number): string {

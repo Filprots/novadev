@@ -100,6 +100,14 @@ export function completed(slug: string, extra = ''): string {
 
 export type Run = { code: number; stdout: string; stderr: string };
 
+/**
+ * The environment for anything a test starts. Without the GIT_* variables a parent git process
+ * may have set (a hook running the tests), so git in a fixture always means the fixture's repo.
+ */
+export function cleanEnv(): Record<string, string | undefined> {
+  return Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
+}
+
 /** Run the CLI from `cwd`, exactly as a person would. */
 export function run(cwd: string, ...args: string[]): Run {
   const result = Bun.spawnSync({
@@ -107,11 +115,39 @@ export function run(cwd: string, ...args: string[]): Run {
     cwd,
     stdout: 'pipe',
     stderr: 'pipe',
-    env: { ...process.env },
+    env: cleanEnv(),
   });
   return {
     code: result.exitCode ?? -1,
     stdout: result.stdout.toString(),
     stderr: result.stderr.toString(),
   };
+}
+
+/** git in a fixture, with a fixed identity and none of the user's signing or hooks. */
+export function git(root: string, ...args: string[]): Run {
+  const result = Bun.spawnSync({
+    cmd: [
+      'git',
+      '-c', 'user.email=novadev@example.invalid',
+      '-c', 'user.name=novadev tests',
+      '-c', 'commit.gpgsign=false',
+      '-c', 'core.hooksPath=/dev/null',
+      ...args,
+    ],
+    cwd: root,
+    stdout: 'pipe',
+    stderr: 'pipe',
+    env: cleanEnv(),
+  });
+  const out = { code: result.exitCode ?? -1, stdout: result.stdout.toString(), stderr: result.stderr.toString() };
+  if (out.code !== 0) throw new Error(`git ${args.join(' ')} failed: ${out.stderr}`);
+  return out;
+}
+
+/** Make the fixture a git repository (once) and commit everything in it. */
+export function commitAll(root: string, message = 'fixture'): void {
+  if (!exists(root, '.git')) git(root, 'init', '-q');
+  git(root, 'add', '-A');
+  git(root, 'commit', '-q', '--no-verify', '--allow-empty', '-m', message);
 }

@@ -21,11 +21,13 @@ import {
   TEST_PLAN_REQUIRED_KEYS,
   TEST_STATUSES,
   type Feature,
+  type Fix,
   type TestRound,
   type TestTask,
   type TodoRef,
   blockBegin,
   blockEnd,
+  blockTrouble,
   commitHashesIn,
   featureIdsIn,
   featuresDir,
@@ -36,7 +38,6 @@ import {
   listTestRounds,
   listTestTasks,
   novadevDir,
-  readBlock,
   readField,
   readFrontmatter,
   requireProjectRoot,
@@ -44,7 +45,7 @@ import {
   writeBlock,
 } from './lib.ts';
 
-export type Fix = { path: string; label: string; next: string };
+export type { Fix } from './lib.ts';
 export type Audit = { problems: string[]; notes: string[]; fixes: Fix[] };
 
 type TodoLinks = {
@@ -249,14 +250,13 @@ export function auditLinks(root: string): Audit {
     const featureRounds = rounds.filter((r) => r.featureIds.includes(f.id));
     const openTasks = tasks.filter((t) => t.featureIds.includes(f.id));
 
-    const workNext = renderDerivedFile(f.workPath, 'work', renderWork(linked, f.id));
-    if (workNext) fixes.push(workNext);
-    const testsNext = renderDerivedFile(
-      f.testsPath,
-      'tests',
-      renderTests(featureRounds, openTasks, f.id),
-    );
-    if (testsNext) fixes.push(testsNext);
+    for (const derived of [
+      renderDerivedFile(f.workPath, 'work', renderWork(linked, f.id)),
+      renderDerivedFile(f.testsPath, 'tests', renderTests(featureRounds, openTasks, f.id)),
+    ]) {
+      if (derived.fix) fixes.push(derived.fix);
+      if (derived.problem) problems.push(derived.problem);
+    }
 
     // `confirmed` is completed work that a human additionally verified — it counts.
     const done = (t: TodoLinks) => t.state === 'completed' || t.state === 'confirmed';
@@ -291,9 +291,7 @@ export function auditLinks(root: string): Audit {
     const base = current ?? indexScaffold();
     const next = writeBlock(base, 'features-index', renderIndex(features));
     if (next === null) {
-      problems.push(
-        `features/INDEX.md: missing ${blockBegin('features-index')} … ${blockEnd('features-index')} block`,
-      );
+      problems.push(`features/INDEX.md: ${blockTrouble(base, 'features-index')}`);
     } else if (next !== current) {
       fixes.push({
         path: indexPath,
@@ -348,19 +346,22 @@ function readTodoLinks(todo: TodoRef): TodoLinks {
 }
 
 /**
- * Rebuild one derived file, preserving anything a human wrote outside the block.
- * Returns a Fix when the content changed (or the file does not exist yet).
+ * Rebuild one derived file, preserving anything a human wrote outside the block. Gives a Fix when
+ * the content changed (or the file does not exist yet), and a problem when its markers are missing
+ * or broken — the file then stays as it is, instead of silently going stale.
  */
-function renderDerivedFile(path: string, block: string, body: string): Fix | null {
+function renderDerivedFile(path: string, block: string, body: string): { fix?: Fix; problem?: string } {
   const current = existsSync(path) ? readFileSync(path, 'utf8') : null;
   const base = current ?? derivedScaffold(block);
+  const where = path.split(/[\\/]features[\\/]/)[1]?.replace(/\\/g, '/') ?? path;
   const next = writeBlock(base, block, body);
-  if (next === null || next === current) return null;
-  return {
-    path,
-    label: `${path.split('/features/')[1] ?? path}: ${current === null ? 'missing' : 'out of date'}`,
-    next,
-  };
+  if (next === null) {
+    return {
+      problem: `features/${where}: ${blockTrouble(base, block)} — repair the markers, or delete the file and \`novadev sync\` writes it again`,
+    };
+  }
+  if (next === current) return {};
+  return { fix: { path, label: `${where}: ${current === null ? 'missing' : 'out of date'}`, next } };
 }
 
 function derivedScaffold(block: string): string {

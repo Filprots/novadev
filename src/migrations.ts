@@ -31,6 +31,8 @@ import {
   deployedVersion,
   featureIdsIn,
   featuresDir,
+  isDirectory,
+  isNovadevManaged,
   listDirs,
   listFiles,
   novadevDir,
@@ -42,7 +44,7 @@ import {
   totestDir,
   writeManifest,
 } from './lib.ts';
-import { METRICS_DIR, METRICS_SNAPSHOT } from './metrics.ts';
+import { METRICS_DIR, METRICS_SNAPSHOT, readSnapshot } from './metrics.ts';
 
 export type MigrationContext = { nd: string; dryRun: boolean; log: (line: string) => void };
 export type Migration = {
@@ -80,6 +82,11 @@ export const MIGRATIONS: Migration[] = [
   },
 ];
 
+/** The migrations a repo whose layout is at `from` still needs, in order. */
+export function pendingMigrations(from: string): Migration[] {
+  return MIGRATIONS.filter((m) => compareVersions(from, m.to) < 0);
+}
+
 export function migrateRepo(args: string[]): void {
   const dryRun = args.includes('--dry-run');
   const force = args.includes('--force');
@@ -108,7 +115,7 @@ export function migrateRepo(args: string[]): void {
     process.exit(1);
   }
 
-  const pending = MIGRATIONS.filter((m) => compareVersions(from, m.to) < 0);
+  const pending = pendingMigrations(from);
   if (pending.length === 0) {
     // No structural change between these versions — the layout is already current, so
     // just advance the stamp; leaving it behind would keep `novadev sync` blocked.
@@ -282,7 +289,8 @@ function migrateToFourSkills(ctx: MigrationContext): void {
  * Two new opt-in settings, written as `null` — OFF — so the repo's novadev.json shows they exist
  * without changing what sync does: novadev cannot guess a project's metrics command or its debt
  * budget. The `metrics/` folder name becomes novadev's, so anything a project already kept there
- * is reported rather than silently mixed in with the snapshot.
+ * is reported rather than silently mixed in with the snapshot — its own README.md included, which
+ * `novadev deploy` then leaves alone.
  */
 function migrateMetricsSettings(ctx: MigrationContext): void {
   const manifest = readManifest(ctx.nd);
@@ -299,8 +307,17 @@ function migrateMetricsSettings(ctx: MigrationContext): void {
     }
   }
   const dir = join(ctx.nd, METRICS_DIR);
+  if (existsSync(dir) && !isDirectory(dir)) {
+    ctx.log(
+      `SKIP .novadev/${METRICS_DIR} — it is a file; from 0.10.0 novadev keeps its metrics snapshot in a folder of that name, so move the file away`,
+    );
+    return;
+  }
   const foreign = [
-    ...listFiles(dir).filter((file) => file !== METRICS_SNAPSHOT && file !== 'README.md'),
+    ...listFiles(dir).filter((file) => {
+      if (file === METRICS_SNAPSHOT) return readSnapshot(ctx.nd).state === 'invalid';
+      return !(file === 'README.md' && isNovadevManaged(join(dir, file)));
+    }),
     ...listDirs(dir).map((folder) => `${folder}/`),
   ];
   if (foreign.length > 0) {

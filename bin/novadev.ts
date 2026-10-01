@@ -10,8 +10,10 @@ usage:
   novadev sync [--check]    THE close-out: run the metrics hook (if set), regenerate derived
                             links, archive what is finished, validate, and print what the agent
                             + the human still have to do; --check writes nothing and fails on
-                            stale derived files or a debt budget that is exceeded
+                            problems, stale derived files (the metrics snapshot and the wiki
+                            block included), an unreadable snapshot, or known debt over its budget
   novadev deploy            create/upgrade .novadev/ + the playbook + agent adapters
+                            (on an older layout, run migrate-repo first)
   novadev new [slug…]       scaffold today's next batch (todos/YYYY-MM-DD_N/), optional todo folders
   novadev status            stock-take: open todos + record states, postponed triggers, wiki/memories
   novadev archive <batch>…  move fully-recorded batch(es) to archive/<year>/   (or: --done for all)
@@ -80,7 +82,7 @@ switch (command) {
   }
   case 'sync': {
     const { sync } = await import('../src/sync.ts');
-    sync(args);
+    await sync(args);
     break;
   }
   case 'migrate-repo': {

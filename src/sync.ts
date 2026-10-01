@@ -5,8 +5,12 @@
 // the agent still has to do and what is waiting on the human. The agent runs this after
 // every round of work and acts on the list until it comes back clean — so nobody has to
 // remember a sequence of commands.
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+//
+// `--check` is the gate (a hook, CI): it writes nothing, and fails on problems, on any stale
+// derived file — the metrics snapshot and the wiki budgets block included — on a metrics
+// snapshot nobody can read, and on known debt over its budget.
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { sweepDone } from './archive.ts';
 import {
   RECORD_NEEDSTEST,
@@ -28,10 +32,10 @@ import {
   todoState,
 } from './lib.ts';
 import { auditLinks } from './links.ts';
-import { refreshMetrics } from './metrics.ts';
+import { displayCommand, refreshMetrics } from './metrics.ts';
 import { auditMetrics } from './metrics-audit.ts';
 
-export function sync(args: string[]): void {
+export async function sync(args: string[]): Promise<void> {
   const check = args.includes('--check');
   for (const a of args) {
     if (a !== '--check') {
@@ -51,24 +55,28 @@ export function sync(args: string[]): void {
     process.exit(1);
   }
 
-  // 0. Metrics: run the project's command, compare with the stored snapshot, store the new
-  // one, apply budget raises. A missing or failing command is a warning, never a failure.
-  const metrics = refreshMetrics(root, {
+  // 0. Metrics: run the project's command, compare, apply budget raises. A missing or failing
+  // command is a warning, never a failure. The new snapshot is derived content, written below.
+  const metrics = await refreshMetrics(root, {
     check,
-    onRun: (command) => console.log(`metrics: running \`${command}\` …`),
+    onRun: (command) => console.log(`metrics: running \`${displayCommand(command)}\` …`),
   });
   if (metrics.headline !== null) {
     console.log(metrics.headline);
     for (const line of metrics.lines) console.log(`  ${line}`);
   }
-  // Judged from the files the step above just wrote: the wiki budgets block and bad settings.
-  const metricsAudit = auditMetrics(root);
+  // Judged against what the files hold once this sync is done — the fresh snapshot, the budget
+  // as novadev.json keeps it — so `--check` judges the wiki budgets block the way sync writes it.
+  const metricsAudit = auditMetrics(root, metrics.view);
 
   // 1. Derived content.
   const before = auditLinks(root);
-  const fixes = [...before.fixes, ...metricsAudit.fixes];
+  const fixes = [...before.fixes, ...metrics.fixes, ...metricsAudit.fixes];
   if (!check && fixes.length > 0) {
-    for (const fix of fixes) writeFileSync(fix.path, fix.next);
+    for (const fix of fixes) {
+      mkdirSync(dirname(fix.path), { recursive: true });
+      writeFileSync(fix.path, fix.next);
+    }
     console.log(`derived: regenerated ${fixes.length} file(s)`);
   } else if (check && fixes.length > 0) {
     console.log(`derived: ${fixes.length} file(s) are stale`);
@@ -126,9 +134,21 @@ export function sync(args: string[]): void {
         : '\nsync: clean. ✓',
     );
   }
-  // `--check` is the gate: a debt budget that is exceeded (and not raised in a record) fails it.
-  // Plain `sync` lists the same thing as a NEXT ACTION instead, like any other unfinished work.
-  if (problems.length > 0 || (check && fixes.length > 0) || (check && metrics.overBudget)) {
+  // `--check` is the gate: a stale derived file, an unreadable snapshot, or a debt budget that is
+  // exceeded (and not raised in a record) fails it. Plain `sync` writes the files and lists the
+  // rest as NEXT ACTIONS instead, like any other unfinished work.
+  if (check) {
+    const reasons = [
+      problems.length > 0 ? `${problems.length} problem(s)` : '',
+      fixes.length > 0 ? `${fixes.length} stale derived file(s)` : '',
+      ...metrics.failures,
+      metrics.overBudget ? 'known debt is over the budget' : '',
+    ].filter(Boolean);
+    if (reasons.length > 0) {
+      console.log(`\nsync --check: ✗ ${reasons.join('; ')}`);
+      process.exit(1);
+    }
+  } else if (problems.length > 0) {
     process.exit(1);
   }
 }

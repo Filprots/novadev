@@ -3,27 +3,32 @@
 // `novadev sync` writes the block and reports the problems; `novadev doctor` reports both.
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { applyRaises, collectRaises, type DebtBudget, pendingRaises } from './debt-budget.ts';
-import type { Fix } from './links.ts';
+import { type DebtBudget, collectRaises, planRaises } from './debt-budget.ts';
 import {
+  type Fix,
   blockBegin,
   blockEnd,
+  blockTrouble,
   byCodePoint,
+  findBlock,
+  isNovadevManaged,
   listDirs,
   listFiles,
   manifestPath,
   novadevDir,
-  readBlock,
   readManifest,
   writeBlock,
 } from './lib.ts';
 import {
   METRICS_DIR,
   METRICS_SNAPSHOT,
-  type MetricsConfig,
+  type MetricsView,
   type Snapshot,
+  type SnapshotRead,
   currentSnapshot,
+  describeRaise,
   fmt,
+  metricsFolderIsFile,
   readMetricsConfig,
   readSnapshot,
 } from './metrics.ts';
@@ -35,10 +40,14 @@ export type MetricsAudit = { problems: string[]; notes: string[]; fixes: Fix[] }
 
 /**
  * Everything about metrics that can be judged from the files alone — never runs the command.
- * `fixes` is the wiki budgets block, derived from the stored snapshot and the budget in
- * novadev.json; `novadev sync` writes it, `novadev doctor` reports it when it is stale.
+ * `fixes` is the wiki budgets block, derived from the snapshot and the budget; `novadev sync`
+ * writes it, `novadev doctor` reports it when it is stale.
+ *
+ * `view` is what sync is about to store (the fresh snapshot, the raised budget), so the block is
+ * judged against what sync writes — in `--check` too, where nothing is written. Without it (doctor)
+ * the files on disk are judged.
  */
-export function auditMetrics(root: string): MetricsAudit {
+export function auditMetrics(root: string, view?: MetricsView): MetricsAudit {
   const nd = novadevDir(root);
   const problems: string[] = [];
   const notes: string[] = [];
@@ -50,14 +59,23 @@ export function auditMetrics(root: string): MetricsAudit {
   const config = readMetricsConfig(nd);
   problems.push(...config.problems);
 
-  const stored = readSnapshot(nd);
-  if (stored.state === 'invalid') {
+  if (metricsFolderIsFile(nd)) {
     problems.push(
-      `${METRICS_DIR}/${METRICS_SNAPSHOT}: ${stored.error} — let \`novadev sync\` write it again (or delete it if the project has no metrics command any more)`,
+      `${METRICS_DIR}: a file, not a folder — novadev keeps its metrics snapshot in a folder of that name; move the file away`,
+    );
+  }
+
+  const snapshot = view?.snapshot ?? readSnapshot(nd);
+  // sync says this itself, as a NEXT ACTION: it may be about to write the file again, or be unable
+  // to because the command fails. doctor never runs the command, so for doctor it is a problem.
+  if (!view && snapshot.state === 'invalid') {
+    problems.push(
+      `${METRICS_DIR}/${METRICS_SNAPSHOT}: ${snapshot.error} — run \`novadev sync\` to write it again; if it holds merge-conflict markers and the metrics command cannot run, keep one side or delete the file`,
     );
   }
   for (const file of listFiles(join(nd, METRICS_DIR))) {
-    if (file === METRICS_SNAPSHOT || file === 'README.md') continue;
+    if (file === METRICS_SNAPSHOT) continue;
+    if (file === 'README.md' && isNovadevManaged(join(nd, METRICS_DIR, file))) continue;
     notes.push(`${METRICS_DIR}/${file}: not a novadev file (tolerated) — novadev keeps only ${METRICS_SNAPSHOT} here`);
   }
   for (const dir of listDirs(join(nd, METRICS_DIR))) {
@@ -67,34 +85,28 @@ export function auditMetrics(root: string): MetricsAudit {
   const found = collectRaises(nd);
   problems.push(...found.problems);
 
-  if (config.command === null && stored.state === 'ok') {
+  if (config.command === null && snapshot.state === 'ok') {
     notes.push(
       `${METRICS_DIR}/${METRICS_SNAPSHOT} exists, but novadev.json sets no "metrics" command — the snapshot is no longer refreshed`,
     );
   }
-  if (config.command !== null && stored.state === 'absent') {
+  if (config.command !== null && snapshot.state === 'absent') {
     notes.push('metrics: a command is set, but no snapshot is stored yet — run `novadev sync`');
   }
-  if (config.budget !== null) {
+  const budget = view ? view.budget : config.budget;
+  if (budget !== null) {
     if (config.command === null) notes.push('debtBudget is set, but no "metrics" command measures the debt');
-    const pending = pendingRaises(config.budget, found.raises);
-    for (const raise of pending) {
+    const known = snapshot.state === 'ok' ? (snapshot.snapshot.debt?.known ?? null) : null;
+    const plan = planRaises(budget, found.raises, known, '');
+    for (const outcome of plan.outcomes) notes.push(describeRaise(outcome, budget.maxKnown, false));
+    if (known !== null && known > plan.budget.maxKnown) {
       notes.push(
-        raise.to > config.budget.maxKnown
-          ? `${raise.ref}: raises the debt budget to ${fmt(raise.to)} — \`novadev sync\` writes it to novadev.json`
-          : `${raise.ref}: asks for a debt budget of ${fmt(raise.to)}, which it already is or exceeds — \`novadev sync\` records it`,
-      );
-    }
-    const allowed = applyRaises(config.budget, pending, '').maxKnown;
-    const debt = stored.state === 'ok' ? stored.snapshot.debt : undefined;
-    if (debt && debt.known > allowed) {
-      notes.push(
-        `known debt ${fmt(debt.known)} in ${METRICS_DIR}/${METRICS_SNAPSHOT} is over the budget ${fmt(allowed)} — \`novadev sync --check\` fails until it is reduced or the budget is raised in a record`,
+        `known debt ${fmt(known)} in ${METRICS_DIR}/${METRICS_SNAPSHOT} is over the budget ${fmt(plan.budget.maxKnown)} — \`novadev sync --check\` fails until it is reduced or the budget is raised in a record`,
       );
     }
   }
 
-  const block = budgetsBlockFix(nd, config, stored.state === 'ok' ? stored.snapshot : null);
+  const block = budgetsBlockFix(nd, config.wikiPage, snapshot, budget);
   if (block.fix) fixes.push(block.fix);
   if (block.note) notes.push(block.note);
   if (block.problem) problems.push(block.problem);
@@ -107,45 +119,53 @@ const BLOCK_NOTE =
 
 function budgetsBlockFix(
   nd: string,
-  config: MetricsConfig,
-  snapshot: Snapshot | null,
+  page: string | null,
+  snapshot: SnapshotRead,
+  budget: DebtBudget | null,
 ): { fix?: Fix; note?: string; problem?: string } {
-  if (config.wikiPage === null) return {};
+  if (page === null) return {};
   const wikiDir = join(nd, 'wiki');
   // No wiki yet: building it is already on the agent's list, and it will get the block after.
   if (!existsSync(join(wikiDir, 'INDEX.md'))) return {};
-  const page = config.wikiPage;
   const path = join(wikiDir, page);
   if (!existsSync(path)) {
-    return snapshot
+    return snapshot.state === 'ok'
       ? { note: `wiki/${page}: missing, so the budgets block has nowhere to go — create the page, or set "metricsWikiPage"` }
       : {};
   }
+  // A snapshot that cannot be read says nothing about the numbers: leave the block as it is.
+  if (snapshot.state === 'invalid') return {};
+
   // Work on LF text and write back in the page's own line endings: a CRLF checkout
   // (core.autocrlf) must not read as "out of date" on every run.
   const raw = readFileSync(path, 'utf8');
   const crlf = raw.includes('\r\n');
   const current = crlf ? raw.replace(/\r\n/g, '\n') : raw;
-  const hasBlock = readBlock(current, BUDGETS_BLOCK) !== null;
-  // One marker without its partner: appending a second block would make the next rewrite span
-  // from the stray marker to the new one and delete whatever a person wrote in between.
-  if (!hasBlock && (current.includes(blockBegin(BUDGETS_BLOCK)) || current.includes(blockEnd(BUDGETS_BLOCK)))) {
+  // The page is hand-written: only marker LINES outside code count (see findBlock), so a page that
+  // quotes the markers is never rewritten between the quote and the real block. Broken markers are
+  // a problem, and the page is not touched — a second block would make the next rewrite span from
+  // a stray marker to the new one and delete whatever a person wrote in between.
+  const spot = findBlock(current.split('\n'), BUDGETS_BLOCK);
+  if (spot.state === 'broken') {
     return {
-      problem: `wiki/${page}: the budgets block markers are broken (${blockBegin(BUDGETS_BLOCK)} … ${blockEnd(BUDGETS_BLOCK)}, in that order) — repair them or delete both`,
+      problem: `wiki/${page}: ${blockTrouble(current, BUDGETS_BLOCK)} — repair them, or delete both and \`novadev sync\` adds the block again`,
     };
   }
-  if (!hasBlock && snapshot === null) return {};
-  const body = snapshot
-    ? renderBudgetsBlock(snapshot, config.budget)
-    : `${BLOCK_NOTE}\n_No metrics snapshot is stored — set "metrics" in \`.novadev/novadev.json\`._`;
-  const next = hasBlock
-    ? writeBlock(current, BUDGETS_BLOCK, body)!
-    : `${current.trimEnd()}\n\n## Budgets\n\n${blockBegin(BUDGETS_BLOCK)}\n${body}\n${blockEnd(BUDGETS_BLOCK)}\n`;
+  if (spot.state === 'absent' && snapshot.state !== 'ok') return {};
+  const body =
+    snapshot.state === 'ok'
+      ? renderBudgetsBlock(snapshot.snapshot, budget)
+      : `${BLOCK_NOTE}\n_No metrics snapshot is stored — set "metrics" in \`.novadev/novadev.json\`._`;
+  const handWritten = current.trimEnd();
+  const next =
+    spot.state === 'found'
+      ? writeBlock(current, BUDGETS_BLOCK, body)!
+      : `${handWritten ? `${handWritten}\n\n` : ''}## Budgets\n\n${blockBegin(BUDGETS_BLOCK)}\n${body}\n${blockEnd(BUDGETS_BLOCK)}\n`;
   if (next === current) return {};
   return {
     fix: {
       path,
-      label: `wiki/${page}: budgets block ${hasBlock ? 'out of date' : 'missing'}`,
+      label: `wiki/${page}: budgets block ${spot.state === 'found' ? 'out of date' : 'missing'}`,
       next: crlf ? next.replace(/\n/g, '\r\n') : next,
     },
   };
@@ -173,8 +193,8 @@ export function renderBudgetsBlock(snapshot: Snapshot, budget: DebtBudget | null
   lines.push(withPath ? '|---|---:|---|---|' : '|---|---:|---|');
   const hubs = [...snapshot.hubs].sort((a, b) => b.measure - a.measure || byCodePoint(a.name, b.name));
   for (const hub of hubs) {
-    const cells = [cell(hub.name), fmt(hub.measure), hub.over.length ? cell(hub.over.join(', ')) : '—'];
-    if (withPath) cells.push(hub.path ? `\`${cell(hub.path)}\`` : '—');
+    const cells = [textCell(hub.name), fmt(hub.measure), hub.over.length ? textCell(hub.over.join(', ')) : '—'];
+    if (withPath) cells.push(hub.path ? codeCell(hub.path) : '—');
     lines.push(`| ${cells.join(' | ')} |`);
   }
   return lines.join('\n');
@@ -201,6 +221,19 @@ export function metricsStatusLine(nd: string): string {
   return `metrics — ${parts.join(', ')}${when}${off}`;
 }
 
-function cell(text: string): string {
-  return text.replace(/\|/g, '\\|');
+/**
+ * Plain text in a table cell: one line, with the characters escaped that markdown would read as a
+ * column break, a code span, emphasis, a link or HTML.
+ */
+function textCell(text: string): string {
+  return text.replace(/\s+/g, ' ').replace(/[\\`*[\]<|~]/g, '\\$&');
+}
+
+/** A path in a table cell, as a code span that no backtick inside it can end early. */
+function codeCell(text: string): string {
+  const flat = text.replace(/\s+/g, ' ').replace(/\|/g, '\\|');
+  const longest = Math.max(0, ...(flat.match(/`+/g) ?? []).map((run) => run.length));
+  const fence = '`'.repeat(longest + 1);
+  const pad = flat.startsWith('`') || flat.endsWith('`') ? ' ' : '';
+  return `${fence}${pad}${flat}${pad}${fence}`;
 }

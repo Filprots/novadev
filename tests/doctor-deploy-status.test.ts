@@ -1,5 +1,7 @@
 // `novadev deploy`, `novadev doctor` and `novadev status` around the metrics folder and settings.
 import { describe, expect, test } from 'bun:test';
+import { rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { NOVADEV_VERSION, todayStamp } from '../src/lib.ts';
 import { exists, project, read, readJson, run, setManifest, tempDir, write } from './helpers.ts';
 
@@ -46,6 +48,56 @@ describe('deploy', () => {
     expect('metrics' in after).toBe(false);
     expect('debtBudget' in after).toBe(false);
   });
+
+  test('refuses a repo that still needs migrating, changes nothing, and goes ahead after migrate-repo', () => {
+    const root = project({ version: '0.9.0' });
+    const before = read(root, '.novadev/novadev.json');
+    const result = run(root, 'deploy');
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain('this repo is at 0.9.0, and novadev');
+    expect(result.stderr).toContain('Run `novadev migrate-repo` first, then `novadev deploy` again. Nothing was changed.');
+    expect(read(root, '.novadev/novadev.json')).toBe(before);
+    expect(exists(root, '.novadev/skills')).toBe(false);
+    expect(exists(root, 'AGENTS.md')).toBe(false);
+
+    expect(run(root, 'migrate-repo', '--force').stdout).toContain('▸ 0.10.0');
+    expect(run(root, 'deploy').code).toBe(0);
+    expect(readJson(root, '.novadev/novadev.json').version).toBe(NOVADEV_VERSION);
+  });
+
+  test('refuses a repo deployed by a newer novadev, instead of stamping it older', () => {
+    const root = project({ version: '99.0.0' });
+    const result = run(root, 'deploy');
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain('this repo is at 99.0.0, newer than the installed novadev');
+    expect(readJson(root, '.novadev/novadev.json').version).toBe('99.0.0');
+  });
+
+  test("keeps a folder README that is the project's own, and says so — novadev's own are refreshed", () => {
+    const root = tempDir();
+    write(root, '.novadev/metrics/README.md', '# Our weekly numbers\n');
+    const result = run(root, 'deploy');
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain(
+      'kept:     .novadev/metrics/README.md — the project\'s own (no "managed by `novadev deploy`" line), so not replaced',
+    );
+    expect(read(root, '.novadev/metrics/README.md')).toBe('# Our weekly numbers\n');
+
+    write(root, '.novadev/todos/README.md', '# todos\n\n<!-- managed by `novadev deploy`. -->\n\nan old version\n');
+    run(root, 'deploy');
+    expect(read(root, '.novadev/todos/README.md')).toContain('# todos — task batches');
+  });
+
+  test('a file where a novadev folder belongs: the rest is deployed, then it fails and says what to move', () => {
+    const root = tempDir();
+    write(root, '.novadev/metrics', 'a file');
+    const result = run(root, 'deploy');
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain('.novadev/metrics is a file where novadev needs a folder — move it away');
+    expect(result.stderr).not.toContain('ENOTDIR');
+    expect(exists(root, '.novadev/todos/README.md')).toBe(true);
+    expect(read(root, '.novadev/metrics')).toBe('a file');
+  });
 });
 
 describe('doctor', () => {
@@ -84,6 +136,16 @@ describe('doctor', () => {
     write(root, 'metrics-out.json', '{"debt":{"known":230},"hubs":[]}');
     expect(run(root, 'sync').code).toBe(0);
     expect(run(root, 'doctor').stdout.trim()).toBe('doctor: structure is healthy.');
+  });
+
+  test('a file where the metrics folder belongs is a problem, not a crash', () => {
+    const root = deployed();
+    rmSync(join(root, '.novadev/metrics'), { recursive: true });
+    write(root, '.novadev/metrics', 'a file');
+    const result = run(root, 'doctor');
+    expect(result.code).toBe(1);
+    expect(result.stderr).toBe('');
+    expect(result.stdout).toContain('✗ metrics: a file, not a folder');
   });
 
   test('never runs the metrics command', () => {

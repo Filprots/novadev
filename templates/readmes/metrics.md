@@ -26,22 +26,26 @@ else (logs go to stderr):
 ```
 
 `debt` and `hubs` are both optional, but at least one must be there. `new`, `over` and
-`path` are optional too. novadev does not know what the numbers mean. It only compares them.
+`path` are optional too. A path is relative to the project root. novadev does not know what
+the numbers mean. It only compares them.
 
-Every `novadev sync` runs the command, compares the result with `latest.json`, stores the
-new snapshot, and lists what GREW under NEXT ACTIONS. A missing or failing command is only
-a warning.
+Every `novadev sync` runs the command and stores the new snapshot. It compares the numbers
+with the last commit and lists what GREW under NEXT ACTIONS, until a record of this round
+explains it in a `## Debt` section (it names each hub that grew). A missing or failing
+command is only a warning. `novadev sync --check` fails while this file is out of date.
 
 **The debt budget.** Add `"debtBudget": { "maxKnown": 230 }` to `../novadev.json`. When
 known debt goes over `maxKnown`, `novadev sync` lists it as a NEXT ACTION and
 `novadev sync --check` fails. To raise the budget, the record of the work that caused it
-gets a `## Debt` section with a `**Raise:** 230 → 238` line and the reason. Sync then writes
-the new budget and remembers the raise under `debtBudget.raises`.
+gets a `## Debt` section with a `**Raise:** 230 → 238` line and the reason. The raise starts
+at the current budget and stops at the measured debt. Sync then writes the new budget and
+remembers the raise under `debtBudget.raises`, so it counts once.
 
 **The wiki block.** Sync also keeps a generated "Budgets" block in
 `../wiki/architecture.md` (or the page named by `"metricsWikiPage"`): the debt count, the
 budget and the hub table.
 
-On a merge conflict in `latest.json`: take either side, then run `novadev sync`.
+On a merge conflict in `latest.json`: keep either side, or delete the file, then run
+`novadev sync`.
 
 All the rules are in `../skills/novadev-work.md` (loop phases 4 and 10).

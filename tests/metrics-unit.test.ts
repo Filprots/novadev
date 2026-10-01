@@ -1,23 +1,32 @@
 // The pure parts of the metrics hook: the agreed JSON shape, the snapshot format, the deltas,
-// the `## Debt` raise syntax, the raise ledger, the settings, and the wiki block.
+// the `## Debt` raise syntax, the raise plan and ledger, the settings, and the wiki block.
 import { describe, expect, test } from 'bun:test';
-import { type DebtBudget, type RecordRaise, applyRaises, debtRaiseIn, pendingRaises } from '../src/debt-budget.ts';
+import { join } from 'node:path';
+import {
+  type DebtBudget,
+  type RecordRaise,
+  debtRaiseIn,
+  debtSections,
+  pendingRaises,
+  planRaises,
+} from '../src/debt-budget.ts';
 import { renderBudgetsBlock } from '../src/metrics-audit.ts';
 import {
   type Metrics,
   change,
   diffMetrics,
+  displayCommand,
   fmt,
+  mentions,
   normalizeMetrics,
   parseMetricsOutput,
   readMetricsConfig,
   readSnapshot,
   renderSnapshot,
+  repoPath,
   sameMetrics,
-  writeSnapshot,
 } from '../src/metrics.ts';
 import { project, setManifest, tempDir, write } from './helpers.ts';
-import { join } from 'node:path';
 
 function ok(stdout: string): Metrics {
   const parsed = parseMetricsOutput(stdout);
@@ -94,6 +103,29 @@ describe('the agreed JSON shape', () => {
   test('hub names must be unique — they are what deltas compare by', () => {
     expect(error({ hubs: [{ name: 'A', measure: 1 }, { name: 'A', measure: 2 }] })).toContain('unique');
   });
+
+  test('a name, a budget name or a path must be one line of text — it ends up in a table and a terminal', () => {
+    expect(error({ hubs: [{ name: 'Work\nbench', measure: 1 }] })).toContain('one line of plain text');
+    expect(error({ hubs: [{ name: 'A', measure: 1, over: ['l\toc'] }] })).toContain('"over"');
+    expect(error({ hubs: [{ name: 'A', measure: 1, path: 'src/\nwb' }] })).toContain('"path"');
+  });
+});
+
+describe('hub paths', () => {
+  test('are stored with forward slashes and no leading "./", whatever the platform printed', () => {
+    expect(repoPath('.\\src\\wb\\')).toBe('src/wb/');
+    expect(repoPath('./src/wb/')).toBe('src/wb/');
+    expect(repoPath('././src//wb')).toBe('src/wb');
+    expect(repoPath('  src/wb.ts  ')).toBe('src/wb.ts');
+    expect(repoPath('../shared/x.ts')).toBe('../shared/x.ts');
+  });
+
+  test('an absolute or empty path is refused: it would differ from one machine to the next', () => {
+    for (const path of ['/home/me/repo/src', 'C:\\repo\\src', 'c:/repo', '\\\\server\\share', './', '']) {
+      expect(repoPath(path)).toBeNull();
+    }
+    expect(error({ hubs: [{ name: 'A', measure: 1, path: '/abs/src' }] })).toContain('relative to its root');
+  });
 });
 
 describe('the stored snapshot', () => {
@@ -117,9 +149,12 @@ describe('the stored snapshot', () => {
         '  ]\n' +
         '}\n',
     );
-    const nd = join(tempDir(), '.novadev');
-    writeSnapshot(nd, { ...metrics, updated: '2026-10-01' });
-    expect(readSnapshot(nd)).toEqual({ state: 'ok', snapshot: { ...metrics, updated: '2026-10-01' } });
+    const root = tempDir();
+    write(root, '.novadev/metrics/latest.json', text);
+    expect(readSnapshot(join(root, '.novadev'))).toEqual({
+      state: 'ok',
+      snapshot: { ...metrics, updated: '2026-10-01' },
+    });
   });
 
   test('an empty hub list and a missing debt still render as valid JSON', () => {
@@ -145,6 +180,12 @@ describe('the stored snapshot', () => {
     write(root, '.novadev/metrics/latest.json', '{"debt":{"known":3}}');
     expect(readSnapshot(nd)).toEqual({ state: 'ok', snapshot: { debt: { known: 3 }, hubs: [], updated: '' } });
   });
+
+  test('a file where the metrics folder belongs reads as no snapshot, not a crash', () => {
+    const root = tempDir();
+    write(root, '.novadev/metrics', 'a file');
+    expect(readSnapshot(join(root, '.novadev'))).toEqual({ state: 'absent' });
+  });
 });
 
 describe('deltas', () => {
@@ -156,7 +197,7 @@ describe('deltas', () => {
     expect(change(3304, 3280)).toBe('3,304 → 3,280 (-24)');
   });
 
-  test('growth is flagged, shrinking is not', () => {
+  test('growth is flagged, shrinking is not; hub deltas name their hub', () => {
     const before: Metrics = {
       debt: { known: 230, new: 0 },
       hubs: [
@@ -173,14 +214,14 @@ describe('deltas', () => {
         { name: 'Workbench', measure: 11140, over: ['loc', 'publicVerbs'] },
       ],
     };
-    const deltas = diffMetrics(before, after).map((d) => [d.grew, d.text]);
+    const deltas = diffMetrics(before, after).map((d) => [d.grew, d.text, d.hub]);
     expect(deltas).toEqual([
-      [true, 'known debt 230 → 238 (+8)'],
-      [true, 'new debt 0 → 2 (+2)'],
-      [false, 'hub Gone is gone (was 1,550)'],
-      [true, 'hub Planner 1,600 is new (over loc)'],
-      [false, 'hub Stage3D 3,304 → 3,280 (-24), no longer over loc'],
-      [true, 'hub Workbench 11,019 → 11,140 (+121), now over publicVerbs'],
+      [true, 'known debt 230 → 238 (+8)', undefined],
+      [true, 'new debt 0 → 2 (+2)', undefined],
+      [false, 'hub Gone is gone (was 1,550)', 'Gone'],
+      [true, 'hub Planner 1,600 is new (over loc)', 'Planner'],
+      [false, 'hub Stage3D 3,304 → 3,280 (-24), no longer over loc', 'Stage3D'],
+      [true, 'hub Workbench 11,019 → 11,140 (+121), now over publicVerbs', 'Workbench'],
     ]);
   });
 
@@ -198,20 +239,71 @@ describe('deltas', () => {
     expect(diffMetrics({ hubs: [] }, { debt: { known: 9 }, hubs: [] })).toEqual([]);
     expect(diffMetrics({ debt: { known: 1, new: 0 }, hubs: [] }, { debt: { known: 1 }, hubs: [] })).toEqual([]);
   });
+
+  test('a record names a hub as a word of its own, in any case', () => {
+    expect(mentions('The Workbench grew because …', 'Workbench')).toBe(true);
+    expect(mentions('the workbench grew', 'Workbench')).toBe(true);
+    expect(mentions('`Workbench`: it grew', 'Workbench')).toBe(true);
+    expect(mentions('WorkbenchView grew', 'Workbench')).toBe(false);
+    expect(mentions('MyWorkbench grew', 'Workbench')).toBe(false);
+    expect(mentions('src/editor/workbench.ts grew', 'src/editor/workbench.ts')).toBe(true);
+  });
 });
 
 describe('the ## Debt raise in a record', () => {
   const record = (debt: string) =>
     `# ai_completed — x\n\n**Date:** 2026-10-01\n\n## What I did\nStuff.\n\n${debt}\n## Notes\nnone\n`;
+  const raise = (line: string, reason = 'The kit registry adds eight findings.') =>
+    debtRaiseIn(record(`## Debt\n${line}\n${reason}\n`));
 
-  test('reads "from → to" in every arrow spelling, and a bare value', () => {
-    for (const arrow of ['→', '->', '=>', 'to']) {
-      expect(debtRaiseIn(record(`## Debt\n**Raise:** 230 ${arrow} 238\nThe kit registry adds eight.\n`))).toEqual({
-        from: 230,
-        to: 238,
-      });
+  test('reads "from → to" in every arrow spelling', () => {
+    for (const arrow of ['→', '->', '=>', 'to', 'TO', '⟶', '⇒', '–', '—']) {
+      expect(raise(`**Raise:** 230 ${arrow} 238`)).toEqual({ from: 230, to: 238 });
     }
-    expect(debtRaiseIn(record('## Debt\n**Raise:** 1,238 (was 1,230)\nBecause.\n'))).toEqual({ to: 1238 });
+    expect(raise('**Raise:** 230→238')).toEqual({ from: 230, to: 238 });
+    expect(raise('**Raise:** 1,230 → 1,238')).toEqual({ from: 1230, to: 1238 });
+    expect(raise('**Raise:** 1_230 → 1_238')).toEqual({ from: 1230, to: 1238 });
+  });
+
+  test('reads the label as people write it: colon outside the bold, a bullet, no bold', () => {
+    for (const label of ['**Raise**:', '- **Raise:**', '* **Raise:**', 'Raise:', '__Raise:__', '*Raise:*']) {
+      expect(raise(`${label} 230 → 238`)).toEqual({ from: 230, to: 238 });
+    }
+  });
+
+  test('a reason on the raise line itself counts', () => {
+    expect(raise('**Raise:** 230 → 238 because the kit registry adds eight findings', '')).toEqual({
+      from: 230,
+      to: 238,
+    });
+    expect(raise('**Raise:** 230 → 238 — the kit registry adds eight', '')).toEqual({ from: 230, to: 238 });
+    expect(raise('**Raise:** 230 → 238 8 new findings from the kit registry', '')).toEqual({ from: 230, to: 238 });
+  });
+
+  test('a number it cannot read for certain is an error — never a raise to the first number', () => {
+    for (const value of ['230 - 238', '1 230 → 1 238', '230 → 1 238', '230 → 1\u00a0238', '1.230 → 1.238', '230 → 238.5', '1,2345 → 1,2346', '238', '1,238 (was 1,230)', 'a lot']) {
+      expect(raise(`**Raise:** ${value}`)).toEqual({ error: expect.stringContaining('must look like `**Raise:** 230 → 238`') });
+    }
+  });
+
+  test('a raise must go up', () => {
+    expect(raise('**Raise:** 238 → 230')).toEqual({ error: expect.stringContaining('does not raise the budget') });
+    expect(raise('**Raise:** 238 → 238')).toEqual({ error: expect.stringContaining('does not raise the budget') });
+  });
+
+  test('two raise lines are an error: which one counts would be a guess', () => {
+    expect(raise('**Raise:** 230 → 238\n**Raise:** 238 → 240')).toEqual({
+      error: expect.stringContaining('has 2 "**Raise:**" lines'),
+    });
+    const twoSections = record('## Debt\n**Raise:** 230 → 238\nWhy.\n\n## Debt\n- **Raise**: 230 → 240\nWhy.\n');
+    expect(debtRaiseIn(twoSections)).toEqual({ error: expect.stringContaining('has 2') });
+  });
+
+  test('a raise needs a reason — a placeholder, a comment or "(+8)" is not one', () => {
+    for (const reason of ['', '<why the debt grew>\n<!-- todo -->', '(+8)', '---']) {
+      expect(raise('**Raise:** 230 → 238', reason)).toEqual({ error: expect.stringContaining('gives no reason') });
+    }
+    expect(raise('**Raise:** 230 → 238 (+8)', '')).toEqual({ error: expect.stringContaining('gives no reason') });
   });
 
   test('tolerates CRLF files and any case', () => {
@@ -219,79 +311,90 @@ describe('the ## Debt raise in a record', () => {
     expect(debtRaiseIn(text)).toEqual({ from: 230, to: 238 });
   });
 
-  test('no section, or a section with no Raise line, is no raise', () => {
+  test('no section, or a section with no raise line, is no raise — "raise" in prose is not a raise line', () => {
     expect(debtRaiseIn(record(''))).toBeNull();
     expect(debtRaiseIn(record('## Debt\nWe noticed some debt but stayed under budget.\n'))).toBeNull();
-    expect(debtRaiseIn(record('## Debts paid\n**Raise:** 5\nno\n'))).toBeNull();
-    expect(debtRaiseIn(record('### Debt\n**Raise:** 5\nno\n'))).toBeNull();
+    expect(debtRaiseIn(record('## Debt\nWe did not raise the budget: Workbench grew by 40 lines.\n'))).toBeNull();
+    expect(debtRaiseIn(record('## Debts paid\n**Raise:** 5 → 6\nno\n'))).toBeNull();
+    expect(debtRaiseIn(record('### Debt\n**Raise:** 5 → 6\nno\n'))).toBeNull();
   });
 
-  test('the section ends at the next heading: a Raise line after it does not count', () => {
-    expect(debtRaiseIn('## Debt\nOnly words here.\n\n## Notes\n**Raise:** 999\nnope\n')).toBeNull();
+  test('the section ends at the next heading: a raise line after it does not count', () => {
+    expect(debtRaiseIn('## Debt\nOnly words here.\n\n## Notes\n**Raise:** 1 → 999\nnope\n')).toBeNull();
   });
 
-  test('a Raise quoted inside a code fence is ignored', () => {
+  test('a raise quoted inside a code fence is ignored', () => {
     const quoted = record('```markdown\n## Debt\n**Raise:** 1 → 999999\nquoted\n```\n');
     expect(debtRaiseIn(quoted)).toBeNull();
     const both = record('~~~\n## Debt\n**Raise:** 1 → 999999\n~~~\n\n## Debt\n**Raise:** 230 → 238\nReal.\n');
     expect(debtRaiseIn(both)).toEqual({ from: 230, to: 238 });
+    const inside = record('## Debt\nWhy it grew.\n\n```\n**Raise:** 1 → 999999\n```\n');
+    expect(debtRaiseIn(inside)).toBeNull();
   });
 
-  test('a raise needs a number and a reason — otherwise it is an error, never applied', () => {
-    expect(debtRaiseIn(record('## Debt\n**Raise:** a lot\nBecause.\n'))).toEqual({
-      error: expect.stringContaining('needs the new budget'),
-    });
-    expect(debtRaiseIn(record('## Debt\n**Raise:** 230 → 238\n'))).toEqual({
-      error: expect.stringContaining('gives no reason'),
-    });
-    expect(debtRaiseIn(record('## Debt\n**Raise:** 230 → 238\n<why the debt grew>\n<!-- todo -->\n'))).toEqual({
-      error: expect.stringContaining('gives no reason'),
-    });
+  test('debtSections returns every section, fenced code blanked', () => {
+    const sections = debtSections(record('## Debt\nOne.\n```\nhidden\n```\n\n## Debt\nTwo.\n'));
+    expect(sections.map((lines) => lines.join(' ').replace(/\s+/g, ' ').trim())).toEqual(['One.', 'Two.']);
   });
 });
 
-describe('the raise ledger', () => {
-  const raise = (ref: string, to: number, from?: number): RecordRaise => ({
-    ref,
-    file: 'ai_completed.md',
-    to,
-    ...(from === undefined ? {} : { from }),
+describe('the raise plan and ledger', () => {
+  const raise = (ref: string, from: number, to: number): RecordRaise => ({ ref, file: 'ai_completed.md', from, to });
+  const budget = (maxKnown: number, raises: DebtBudget['raises'] = []): DebtBudget => ({ maxKnown, raises });
+
+  test('a raise from the current budget applies when the debt is over it', () => {
+    const plan = planRaises(budget(230), [raise('b/01-a', 230, 238)], 238, '2026-10-01');
+    expect(plan.outcomes.map((o) => o.status)).toEqual(['applied']);
+    expect(plan.budget).toEqual({ maxKnown: 238, raises: [{ by: 'b/01-a', from: 230, to: 238, on: '2026-10-01' }] });
+    expect(plan.changed).toBe(true);
   });
 
-  test('a raise is pending until the ledger names that record AND that value', () => {
-    const budget: DebtBudget = {
-      maxKnown: 238,
-      raises: [{ by: 'b/01-a', from: 230, to: 238, on: '2026-10-01' }],
-    };
-    const found = [raise('b/01-a', 238), raise('b/02-b', 250), raise('b/01-a', 245), raise('b/02-b', 250)];
-    expect(pendingRaises(budget, found).map((r) => `${r.ref}:${r.to}`)).toEqual(['b/01-a:245', 'b/02-b:250']);
+  test('it stops at the measured debt: one record cannot switch the gate off', () => {
+    const plan = planRaises(budget(230), [raise('b/01-a', 230, 100000)], 238, '2026-10-01');
+    expect(plan.outcomes).toEqual([{ status: 'applied', raise: raise('b/01-a', 230, 100000), applied: 238 }]);
+    expect(plan.budget.maxKnown).toBe(238);
+    expect(plan.budget.raises).toEqual([{ by: 'b/01-a', from: 230, to: 100000, applied: 238, on: '2026-10-01' }]);
   });
 
-  test('applying keeps the highest value, never lowers, and remembers every raise', () => {
-    const budget: DebtBudget = { maxKnown: 230, raises: [] };
-    const next = applyRaises(budget, [raise('b/01-a', 235), raise('b/02-b', 238)], '2026-10-01');
-    expect(next).toEqual({
-      maxKnown: 238,
-      raises: [
-        { by: 'b/01-a', from: 230, to: 235, on: '2026-10-01' },
-        { by: 'b/02-b', from: 235, to: 238, on: '2026-10-01' },
-      ],
-    });
-    // A raise below the current budget changes nothing but is still remembered — so it can never
-    // fire later, after someone lowers the budget by hand.
-    const noop = applyRaises(next, [raise('b/03-c', 200)], '2026-10-02');
-    expect(noop.maxKnown).toBe(238);
-    expect(noop.raises.at(-1)).toEqual({ by: 'b/03-c', from: 238, to: 200, on: '2026-10-02' });
-    expect(pendingRaises({ ...noop, maxKnown: 100 }, [raise('b/03-c', 200)])).toEqual([]);
+  test('a raise written against another budget is stale and not applied', () => {
+    const plan = planRaises(budget(225), [raise('b/01-a', 230, 238)], 238, '2026-10-01');
+    expect(plan.outcomes.map((o) => o.status)).toEqual(['stale']);
+    expect(plan.budget).toEqual(budget(225));
+    expect(plan.changed).toBe(false);
+  });
+
+  test('within the budget, or with nothing measured, a raise waits — it is not used up', () => {
+    expect(planRaises(budget(230), [raise('b/01-a', 230, 238)], 230, 'd').outcomes[0]!.status).toBe('not-needed');
+    expect(planRaises(budget(230), [raise('b/01-a', 230, 238)], null, 'd').outcomes[0]!.status).toBe('unmeasured');
+    const later = planRaises(budget(230), [raise('b/01-a', 230, 238)], 236, 'd');
+    expect(later.budget.maxKnown).toBe(236);
+  });
+
+  test('two raises from the same start both count; the highest wins', () => {
+    const plan = planRaises(budget(230), [raise('b/02-b', 230, 240), raise('b/01-a', 230, 235)], 238, 'd');
+    expect(plan.outcomes.map((o) => `${o.raise.ref}:${o.status}`)).toEqual(['b/01-a:applied', 'b/02-b:applied']);
+    expect(plan.budget.maxKnown).toBe(238);
+  });
+
+  test('the ledger knows a raise by its record AND its numbers', () => {
+    const ledger = budget(238, [{ by: 'b/01-a', from: 230, to: 238, on: '2026-10-01' }]);
+    const found = [raise('b/01-a', 230, 238), raise('b/01-a', 238, 245), raise('b/02-b', 238, 250), raise('b/02-b', 238, 250)];
+    expect(pendingRaises(ledger, found).map((r) => `${r.ref}:${r.from}→${r.to}`)).toEqual([
+      'b/01-a:238→245',
+      'b/02-b:238→250',
+    ]);
+  });
+
+  test('an old raise never applies again after the budget is lowered — an edited one does', () => {
+    const lowered = budget(230, [{ by: 'b/01-a', from: 230, to: 238, on: '2026-10-01' }]);
+    expect(planRaises(lowered, [raise('b/01-a', 230, 238)], 238, 'd').budget.maxKnown).toBe(230);
+    const relowered = budget(232, lowered.raises);
+    expect(planRaises(relowered, [raise('b/01-a', 232, 238)], 238, 'd').budget.maxKnown).toBe(238);
   });
 
   test('pending raises come lowest value first, so the ledger reads in order', () => {
-    const found = [raise('b/09-z', 240), raise('b/01-a', 236), raise('b/05-m', 236)];
-    expect(pendingRaises({ maxKnown: 230, raises: [] }, found).map((r) => r.ref)).toEqual([
-      'b/01-a',
-      'b/05-m',
-      'b/09-z',
-    ]);
+    const found = [raise('b/09-z', 230, 240), raise('b/01-a', 230, 236), raise('b/05-m', 230, 236)];
+    expect(pendingRaises(budget(230), found).map((r) => r.ref)).toEqual(['b/01-a', 'b/05-m', 'b/09-z']);
   });
 });
 
@@ -319,19 +422,19 @@ describe('settings in novadev.json', () => {
     expect(config({ metrics: '   ' }).command).toBeNull();
   });
 
-  test('reads a command, a timeout, a page, and a budget', () => {
+  test('reads a command, a timeout, a page, and a budget with its ledger', () => {
     expect(
       config({
         metrics: ' bun scripts/metrics.ts ',
         metricsTimeoutSeconds: 90,
         metricsWikiPage: 'budgets.md',
-        debtBudget: { maxKnown: 230 },
+        debtBudget: { maxKnown: 238, raises: [{ by: 'b/01-a', from: 230, to: 300, applied: 238, on: '2026-10-01' }] },
       }),
     ).toEqual({
       command: 'bun scripts/metrics.ts',
       timeoutSeconds: 90,
       wikiPage: 'budgets.md',
-      budget: { maxKnown: 230, raises: [] },
+      budget: { maxKnown: 238, raises: [{ by: 'b/01-a', from: 230, to: 300, applied: 238, on: '2026-10-01' }] },
       problems: [],
     });
     expect(config({ metricsWikiPage: false }).wikiPage).toBeNull();
@@ -354,6 +457,12 @@ describe('settings in novadev.json', () => {
     expect(config({ debtBudget: 230 }).problems[0]).toContain('"debtBudget" must be an object');
     expect(config({ debtBudget: { maxKnown: 1, raises: {} } }).problems[0]).toContain('must be a list');
     expect(config({ debtBudget: { maxKnown: 1, raises: [{ by: 'x' }] } }).problems[0]).toContain('raises[0]');
+    const badApplied = { by: 'x', from: 1, to: 2, applied: 'two', on: '2026-10-01' };
+    expect(config({ debtBudget: { maxKnown: 1, raises: [badApplied] } }).problems[0]).toContain('raises[0]');
+  });
+
+  test('a command is printed on one line, whatever it holds', () => {
+    expect(displayCommand('cat x\u0000\nrm y')).toBe('cat x\\u0000\\u000arm y');
   });
 });
 
@@ -389,5 +498,22 @@ describe('the wiki budgets block', () => {
     expect(renderBudgetsBlock({ updated: '', debt: { known: 3 }, hubs: [] }, null)).toContain(
       '**Known debt:** 3\n\n_No hubs reported._',
     );
+  });
+
+  test('a name or a path cannot break the table or the page around it', () => {
+    const text = renderBudgetsBlock(
+      {
+        updated: '',
+        hubs: [
+          { name: 'a*b*c [x](y) <b> ~s~ `q`', measure: 2, over: ['l|oc'], path: 'src/`odd`/p|q' },
+          { name: 'B', measure: 1, over: [], path: '`edge' },
+        ],
+      },
+      null,
+    );
+    expect(text).toContain('| a\\*b\\*c \\[x\\](y) \\<b> \\~s\\~ \\`q\\` | 2 | l\\|oc | ``src/`odd`/p\\|q`` |');
+    expect(text).toContain('| B | 1 | — | `` `edge `` |');
+    const rows = text.split('\n').filter((line) => line.startsWith('| '));
+    expect(rows).toHaveLength(3);
   });
 });

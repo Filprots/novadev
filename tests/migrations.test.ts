@@ -64,6 +64,29 @@ describe('0.9.0 → 0.10.0', () => {
     expect(exists(root, '.novadev/metrics/weekly.csv')).toBe(true);
   });
 
+  test("a README of the project's own, or a latest.json that is not a snapshot, is reported too", () => {
+    const own = project({ version: '0.9.0' });
+    write(own, '.novadev/metrics/README.md', '# Our weekly numbers\n');
+    write(own, '.novadev/metrics/latest.json', '{"loc": 12}');
+    expect(run(own, 'migrate-repo', '--force').stdout).toContain(
+      'SKIP .novadev/metrics/ — it already holds README.md, latest.json',
+    );
+
+    const managed = project({ version: '0.9.0' });
+    write(managed, '.novadev/metrics/README.md', '# metrics\n\n<!-- managed by `novadev deploy`. -->\n');
+    write(managed, '.novadev/metrics/latest.json', '{"debt":{"known":1}}');
+    expect(run(managed, 'migrate-repo', '--force').stdout).not.toContain('SKIP');
+  });
+
+  test('a file named metrics is reported, not a crash', () => {
+    const root = project({ version: '0.9.0' });
+    write(root, '.novadev/metrics', 'a file');
+    const result = run(root, 'migrate-repo', '--force');
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe('');
+    expect(result.stdout).toContain('SKIP .novadev/metrics — it is a file');
+  });
+
   test('then sync runs on the migrated repo', () => {
     const root = project({ version: '0.9.0' });
     run(root, 'migrate-repo', '--force');

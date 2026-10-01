@@ -20,7 +20,7 @@ The CLI runs straight from the clone, so upgrading is just:
 
 ```sh
 cd novadev
-git pull          # then re-run `novadev deploy` in each project to refresh it
+git pull          # then, in each project: `novadev migrate-repo`, then `novadev deploy`
 ```
 
 ## Use
@@ -34,7 +34,7 @@ Then:
 
 ```sh
 novadev new fix-login add-dark-mode   # scaffold todos/2026-08-16_1/{01-fix-login,02-add-dark-mode}/
-novadev sync                          # the close-out: derive, archive, validate, list what's left
+novadev sync                          # the close-out: measure (if set), derive, archive, validate, list what's left
 novadev totest                        # what needs YOUR hands-on testing
 novadev status                        # open todos + record states, postponed triggers, health
 novadev features --touching src/auth  # which features already own this code (conflict pre-flight)
@@ -54,7 +54,8 @@ reached yet, in order (a repo at 0.5.0 runs 0.5.0→0.6.0 then 0.6.0→0.7.0), a
 the new version. `--dry-run` previews the moves; it refuses to run on a dirty working
 tree so the migration lands as a reviewable diff of its own. Then `novadev deploy` to
 refresh the playbook, and `novadev sync`. Both `sync` and `doctor` tell you when a
-repo is behind.
+repo is behind, and `deploy` refuses to run until `migrate-repo` has: deploy stamps the
+new version, and a current stamp would make `migrate-repo` skip the migrations.
 
 0.10.0 adds two settings to `novadev.json`, `metrics` and `debtBudget`. `migrate-repo` writes
 both as `null`, which means off; see *Metrics and the debt budget* below to turn them on.
@@ -230,24 +231,46 @@ else. Send logs to stderr.
 | `hubs[].name` | the hub's name; unique, because changes are compared by name |
 | `hubs[].measure` | its size, in the project's own unit (lines, members, …) |
 | `hubs[].over` | optional: the budgets it is over, e.g. `["loc"]` |
-| `hubs[].path` | optional: the repo path of its file or folder |
+| `hubs[].path` | optional: the path of its file or folder, relative to the project root |
 
 `debt` and `hubs` are both optional, but at least one must be there. Other keys are ignored.
+Names, `over` entries and paths must each be one line of text. A path printed with
+backslashes is stored with `/`, so Windows and Linux give the same snapshot; an absolute path
+is refused, because it would differ from one machine to the next.
 
-**Every `novadev sync`** runs the command, compares the result with
-`.novadev/metrics/latest.json`, and stores the new snapshot there. The file is tracked, so
-each commit shows how the numbers moved. What GREW is listed under NEXT ACTIONS, so the agent
-explains it in the record or undoes it. What shrank is only reported:
+**Every `novadev sync`** runs the command and stores the result in
+`.novadev/metrics/latest.json`. The file is tracked, so each commit shows how the numbers
+moved. sync compares the numbers with the snapshot of the LAST COMMIT, so it shows everything
+that changed in this round:
 
 ```
+$ novadev sync
+metrics: running `bun scripts/novadev-metrics.ts` …
 metrics: snapshot updated — .novadev/metrics/latest.json
-  ↑ known debt 230 → 238 (+8)
-  ↑ hub Workbench 11,019 → 11,140 (+121)
+  since the last commit:
+  ↑ known debt 230 → 238 (+8) — explained in 2026-10-01_1/01-kits
   ↓ hub Stage3D 3,304 → 3,280 (-24)
+  ↑ hub Workbench 11,019 → 11,140 (+121) — explained in 2026-10-01_1/01-kits
+  debt budget raised 230 → 238 by 2026-10-01_1/01-kits
+  debt budget: known debt 238 of 238 ✓
 ```
+
+What GREW is a NEXT ACTION, and it stays on the list on every sync until a record changed in
+this round explains it in a `## Debt` section: any words there explain the debt, and a hub is
+explained when the section names it. What shrank is only reported. Without git (or before
+the first snapshot is committed), sync compares with the stored snapshot, and lists a change
+once.
 
 A missing or failing command — a non-zero exit, a timeout, output that is not the agreed
-JSON — is a warning, never a sync failure. The stored snapshot then stays as it was.
+JSON — is a warning, never a sync failure. The stored snapshot then stays as it was. Output
+that stops printing `debt` while the snapshot has a count is treated the same way: novadev
+keeps the count and checks the budget against it. The command runs in a process group of its
+own: on a timeout, novadev stops it and every process it started, and so does Ctrl+C. (A
+process that leaves the group on purpose, like a daemon, is out of reach.)
+
+`novadev sync --check` writes nothing. It is the gate for hooks and CI: it fails on any
+problem, on a stale derived file — the snapshot and the wiki block included — on a snapshot
+nobody can read, and on known debt over its budget.
 
 **The debt budget** is the most known debt the project accepts. Debt can only go above it
 on purpose. When `debt.known` is over `maxKnown`, `novadev sync` lists it as a NEXT ACTION,
@@ -261,17 +284,35 @@ reason:
 The kit registry adds eight known findings. Todo 19 removes them again.
 ```
 
-`--check` accepts the raise at once. Plain `sync` writes `238` into `debtBudget.maxKnown`
-and adds the raise to `debtBudget.raises`: the record, the old budget, the value it asked
-for, and the date. That list is how sync applies each raise exactly once, so an old record
-can never raise a budget that someone lowered later. Keep it. Sync only reads raises from
-records still in `todos/`; once a batch is archived, its raise is history. A raise with no
-reason is a problem, and it is not applied. To lower the budget, edit `maxKnown` by hand.
+The raise line is `**Raise:** <the budget now> → <the new budget>`, in whole numbers
+(`1,238` is fine; `1 238` and `1.238` are not, because they read differently by country).
+The reason may also follow the numbers on the same line. A raise line that sync cannot read
+for certain is a problem, and it is not applied.
+
+`--check` accepts the raise at once. Plain `sync` writes the new value into
+`debtBudget.maxKnown` and adds the raise to `debtBudget.raises`: the record, its two numbers,
+and the date. Keep that list. Three rules keep the budget honest:
+
+- **A raise starts at the current budget.** One written against an older budget is not
+  applied, and sync says so — a raise never overrides a change someone made since.
+- **A raise stops at the measured debt.** `**Raise:** 230 → 100000` with 238 known findings
+  sets 238, and the list notes `"applied": 238`. One record cannot switch the gate off.
+- **A raise counts once.** The list knows it by its record and its two numbers, so an old
+  record never raises a budget that someone lowered later. Edit the numbers, and it is a new
+  request.
+
+A raise written before the debt grew waits until it is needed. Sync only reads raises from
+records still in `todos/`; once a batch is archived, its raise is history. To lower the
+budget, edit `maxKnown` by hand — that is always allowed, and sync tells you when known debt
+is under the budget, so the gain can be kept.
 
 **The wiki budgets block.** sync also keeps a generated block in `wiki/architecture.md`,
 between `<!-- novadev:budgets:begin -->` and `<!-- novadev:budgets:end -->`: the known debt,
 the budget, and the hub table. The first time, it adds a `## Budgets` section at the end of
-the page. You can move the block anywhere in the page; sync rewrites it where it is.
+the page. You can move the block anywhere in the page; sync rewrites it where it is. Only
+marker LINES count — each marker on a line of its own, outside code — so the page can quote
+the markers in a sentence or a code example. Broken markers (one missing, or two of one) are
+a problem, and sync does not touch the page until they are repaired.
 
 Two more settings, both optional:
 
@@ -281,7 +322,10 @@ Two more settings, both optional:
 | `metricsTimeoutSeconds` | `300` | how long the command may run |
 
 `novadev doctor` checks the settings, the snapshot, the raises and the block, and never runs
-the command. On a merge conflict in `latest.json`, take either side and run `novadev sync`.
+the command. On a merge conflict in `latest.json`, keep either side, or delete the file, and
+run `novadev sync`: it writes the file again once the command works. `novadev deploy` writes a
+README into `metrics/`, unless the folder already holds one of the project's own (a README
+without the "managed by `novadev deploy`" line); then it keeps that one.
 
 ## The three companion playbooks
 

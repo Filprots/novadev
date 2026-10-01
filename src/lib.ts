@@ -461,20 +461,84 @@ export function blockEnd(name: string): string {
   return `<!-- novadev:${name}:end -->`;
 }
 
-/** Current content between a block's markers, or null when the block is absent. */
-export function readBlock(text: string, name: string): string | null {
-  const b = text.indexOf(blockBegin(name));
-  const e = text.indexOf(blockEnd(name));
-  if (b === -1 || e === -1 || e < b) return null;
-  return text.slice(b + blockBegin(name).length, e).trim();
+/**
+ * Which lines of a markdown text are fenced code (``` or ~~~), the fence lines included. A fence
+ * opens with three or more backticks or tildes (indented by at most three spaces) and closes with a
+ * line of the same character, at least as long, and nothing else. An unclosed fence runs to the end
+ * of the text — the way markdown renders it.
+ */
+export function fencedLines(lines: readonly string[]): boolean[] {
+  const fenced: boolean[] = [];
+  let open: { char: string; length: number } | null = null;
+  for (const line of lines) {
+    if (open === null) {
+      const start = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+      // A backtick fence's info string may not contain a backtick: "```x```" is inline code.
+      if (start && !(start[1]![0] === '`' && start[2]!.includes('`'))) {
+        open = { char: start[1]![0]!, length: start[1]!.length };
+        fenced.push(true);
+      } else {
+        fenced.push(false);
+      }
+      continue;
+    }
+    fenced.push(true);
+    const end = /^ {0,3}(`{3,}|~{3,})[ \t]*\r?$/.exec(line);
+    if (end && end[1]![0] === open.char && end[1]!.length >= open.length) open = null;
+  }
+  return fenced;
 }
 
-/** Replace a block's content, keeping the markers. Returns null when the block is absent. */
+/** Where a derived block sits in a text: nowhere, between two marker lines, or broken. */
+export type BlockSpot =
+  | { state: 'absent' }
+  | { state: 'found'; begin: number; end: number }
+  | { state: 'broken'; begins: number; ends: number };
+
+/**
+ * Find a block's two marker lines. A marker counts only on a line of its own (indented by at most
+ * three spaces, as markdown allows for a comment) and outside fenced code. A page that QUOTES a
+ * marker — in a sentence, in an inline code span, in a fenced example — is therefore never taken for
+ * the block itself, and a rewrite can never reach the hand-written text around such a quote.
+ * Anything but exactly one begin line followed by exactly one end line is `broken`.
+ */
+export function findBlock(lines: readonly string[], name: string): BlockSpot {
+  const fenced = fencedLines(lines);
+  const isLine = (line: string, marker: string) => {
+    const bare = line.replace(/[ \t\r]+$/, '');
+    return bare.endsWith(marker) && /^ {0,3}$/.test(bare.slice(0, bare.length - marker.length));
+  };
+  const begins: number[] = [];
+  const ends: number[] = [];
+  lines.forEach((line, i) => {
+    if (fenced[i]) return;
+    if (isLine(line, blockBegin(name))) begins.push(i);
+    else if (isLine(line, blockEnd(name))) ends.push(i);
+  });
+  if (begins.length === 0 && ends.length === 0) return { state: 'absent' };
+  if (begins.length === 1 && ends.length === 1 && begins[0]! < ends[0]!) {
+    return { state: 'found', begin: begins[0]!, end: ends[0]! };
+  }
+  return { state: 'broken', begins: begins.length, ends: ends.length };
+}
+
+/** What is wrong with a block that cannot be rewritten, in words — null when it can be. */
+export function blockTrouble(text: string, name: string): string | null {
+  const spot = findBlock(text.split('\n'), name);
+  if (spot.state === 'found') return null;
+  if (spot.state === 'absent') return `missing ${blockBegin(name)} … ${blockEnd(name)} block`;
+  return `the ${name} block markers are broken — there must be one "${blockBegin(name)}" line, then one "${blockEnd(name)}" line, each on a line of its own (found ${spot.begins} and ${spot.ends})`;
+}
+
+/**
+ * Replace a block's content and keep both marker lines; everything outside them is left exactly as
+ * it was. Returns null when there is no well-formed block (see `findBlock`).
+ */
 export function writeBlock(text: string, name: string, body: string): string | null {
-  const b = text.indexOf(blockBegin(name));
-  const e = text.indexOf(blockEnd(name));
-  if (b === -1 || e === -1 || e < b) return null;
-  return text.slice(0, b + blockBegin(name).length) + '\n' + body.trim() + '\n' + text.slice(e);
+  const lines = text.split('\n');
+  const spot = findBlock(lines, name);
+  if (spot.state !== 'found') return null;
+  return [...lines.slice(0, spot.begin + 1), body.trim(), ...lines.slice(spot.end)].join('\n');
 }
 
 /** Walk up from cwd to find the directory that CONTAINS <root>/ (the project root). */
@@ -507,17 +571,40 @@ export function fail(message: string): never {
   process.exit(1);
 }
 
-export function listDirs(path: string): string[] {
-  if (!existsSync(path)) return [];
-  return readdirSync(path)
-    .filter((name) => statSync(join(path, name)).isDirectory())
-    .sort();
+/** True for an existing folder — false for a file, a broken link, or nothing. */
+export function isDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
+/**
+ * The folders inside `path`, sorted. Empty when `path` is not a folder (missing, or a file where a
+ * folder belongs), so one misplaced file never crashes a command; entries that cannot be read (a
+ * broken link) are skipped.
+ */
+export function listDirs(path: string): string[] {
+  return listEntries(path, 'dir');
+}
+
+/** The files inside `path`, sorted — empty when `path` is not a folder (see `listDirs`). */
 export function listFiles(path: string): string[] {
-  if (!existsSync(path)) return [];
+  return listEntries(path, 'file');
+}
+
+function listEntries(path: string, kind: 'dir' | 'file'): string[] {
+  if (!isDirectory(path)) return [];
   return readdirSync(path)
-    .filter((name) => statSync(join(path, name)).isFile())
+    .filter((name) => {
+      try {
+        const stat = statSync(join(path, name));
+        return kind === 'dir' ? stat.isDirectory() : stat.isFile();
+      } catch {
+        return false;
+      }
+    })
     .sort();
 }
 
@@ -669,6 +756,21 @@ export type Parsed<T> = { ok: true; value: T } | { ok: false; error: string };
 /** The failed half of `Parsed` (unlike `fail`, it does not exit the process). */
 export function refuse(error: string): { ok: false; error: string } {
   return { ok: false, error };
+}
+
+/** A derived file novadev (re)writes: where, why, and its new content. */
+export type Fix = { path: string; label: string; next: string };
+
+/** The line every file deploy manages carries. A README without it is the project's own. */
+export const MANAGED_MARK = 'managed by `novadev deploy`';
+
+/** True when the file at `path` says it is managed by `novadev deploy`. */
+export function isNovadevManaged(path: string): boolean {
+  try {
+    return readFileSync(path, 'utf8').includes(MANAGED_MARK);
+  } catch {
+    return false;
+  }
 }
 
 /** Directory of the installed novadev package itself (for reading templates/). */
