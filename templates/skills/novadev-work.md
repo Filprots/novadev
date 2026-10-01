@@ -275,9 +275,10 @@ not work; anything still open>
 
 - **A record carries a `## Debt` section when the round made the project's numbers
   worse.** Add it when `novadev sync` lists growth: known debt, or a hub that grew. Say
-  why, and name each hub that grew — sync stops listing a hub once a record you changed
-  in this round names it there. When known debt is over the budget and you cannot reduce
-  it in this todo, the same section raises the budget:
+  why, and name each hub that grew. Sync stops listing the growth once a record says why in
+  lines you wrote in this round. "None." or "No new debt." is not a reason. When known debt
+  is over the budget and you cannot reduce it in this todo, the same section raises the
+  budget:
 
 ```markdown
 ## Debt
@@ -287,17 +288,22 @@ not work; anything still open>
 
   Use the numbers the NEXT ACTION gives you. A raise must start at the current budget, and
   it never goes above the measured debt. The reason may also follow the numbers on the same
-  line. `novadev sync` writes the new budget into `novadev.json` and remembers which record
-  raised it and with which numbers, so each raise counts once; to raise it again, write new
-  numbers. A raise with no reason, or one sync cannot read for certain, is refused.
-  Keep ONE raise line in a record: when the NEXT ACTION says to change your raise line, edit
-  its numbers — a second line is an error.
+  line. Write the raise line on a line of its own: sync does not read one in a quote (`>`)
+  or in a comment. `novadev sync` writes the new budget into `novadev.json` and remembers
+  which record raised it and with which numbers, so each raise counts once; to raise it
+  again, write new numbers. A raise with no reason, or one sync cannot read for certain, is
+  refused. Keep ONE raise line in a record: when the NEXT ACTION says to change your raise
+  line, edit its numbers — a second line is an error.
 
-  A raise counts only in the round you write it in. Once its record is committed, a raise
-  that was never needed is history; later growth needs a raise in that later round's own
-  record. Write the raise in the record of the round that made the debt grow — not in an
-  old record. Never change `debtBudget` in `novadev.json` yourself to get past the check:
-  the record is how the budget goes up. Lowering `maxKnown` by hand is always allowed.
+  A raise counts only in the round you write it in. Run `novadev sync` before you commit:
+  it writes the raise into `novadev.json`, and `novadev sync --check` fails until it has.
+  Commit `novadev.json` together with the record. Once the raise is committed, sync no
+  longer reads it, even when you change other lines of the record later. Growth in a later
+  round needs a raise in that round's own record. Write the raise in the record of the round
+  that made the debt grow — not in an old record. Never change `debtBudget` in
+  `novadev.json` yourself to get past the check: the record is how the budget goes up.
+  Lowering `maxKnown` by hand is always allowed. When known debt is under the budget, sync
+  asks you to lower it, so the gain is kept.
 
 **Conventions.** One record per todo, updated in place when status changes (a deferred
 item that lands flips `ai_failed.md` → `ai_completed.md`; delete the stale one). Short
@@ -554,14 +560,17 @@ lists: **NEXT ACTIONS** (yours) and **WAITING ON THE HUMAN**.
 **Metrics.** When `novadev.json` sets a `metrics` command, `novadev sync` runs it first and
 stores the result in `metrics/latest.json`. It compares the numbers with the last commit,
 and whatever GREW is a NEXT ACTION ("known debt 230 → 238 (+8)", "hub Workbench 11,019 →
-11,140 (+121)"). Each one stays on the list until a record you changed in this round explains
-it in a `## Debt` section (phase 4), or until the growth is undone. With a `debtBudget`, known
-debt over the budget is a NEXT ACTION too: reduce the debt, or raise the budget in that
-`## Debt` section. A missing or failing command is only a warning; say so in your report.
-Never edit `metrics/latest.json` by hand: on a merge conflict, keep one side or delete the
-file, and sync writes it again. `novadev sync --check` (for hooks and CI) writes nothing, and
-fails on stale derived files — the snapshot and the wiki block included — and on known debt
-over its budget.
+11,140 (+121)"). Each one stays on the list until a record explains it in a `## Debt`
+section, in lines you wrote in this round (phase 4), or until the growth is undone. With a
+`debtBudget`, known debt over the budget is a NEXT ACTION too: reduce the debt, or raise the
+budget in that `## Debt` section. Known debt under the budget is a NEXT ACTION to lower
+`maxKnown`, so the gain is kept. A missing or failing command is only a warning; say so in
+your report. Never edit `metrics/latest.json` by hand: on a merge conflict, keep one side or
+delete the file, and sync writes it again. On a merge conflict in `novadev.json`, keep the
+higher `maxKnown` and the raises of both sides. `novadev sync --check` (for hooks and CI)
+writes nothing, and fails on stale derived files — the snapshot and the wiki block included —
+on a raise sync has not written yet, on a debt budget it cannot check, and on known debt over
+its budget.
 
 **Archiving has a grace period.** A batch whose todos are all recorded is marked with
 an autogenerated `completed.md` and stays in `todos/` for `archiveGraceDays` (default

@@ -3,7 +3,7 @@
 // `novadev sync` writes the block and reports the problems; `novadev doctor` reports both.
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { type DebtBudget, collectRaises, planRaises, recordRounds } from './debt-budget.ts';
+import { type DebtBudget, collectRaises, planRaises, recordHistory } from './debt-budget.ts';
 import {
   type Fix,
   blockBegin,
@@ -92,8 +92,9 @@ export function auditMetrics(root: string, view?: MetricsView): MetricsAudit {
 
   // A raise line only means something to a project with a debt budget. Without one, a "## Debt"
   // section is free text — a line that happens to start with "Raise:" there is nobody's problem.
-  // (Nor is git asked which round a record belongs to.)
-  const found = collectRaises(nd, config.budget !== null ? recordRounds(root) : undefined);
+  // Which round a raise belongs to matters only to doctor's notes: sync says that itself, so git is
+  // not asked twice.
+  const found = collectRaises(nd, config.budget !== null && !view ? recordHistory(root) : undefined);
   if (config.budget !== null) problems.push(...found.problems);
 
   if (config.command === null && snapshot.state === 'ok') {
@@ -105,7 +106,8 @@ export function auditMetrics(root: string, view?: MetricsView): MetricsAudit {
     notes.push('metrics: a command is set, but no snapshot is stored yet — run `novadev sync`');
   }
   const budget = view ? view.budget : config.budget;
-  if (budget !== null) {
+  // doctor's notes about the budget. sync prints its own lines about it, from fresh numbers.
+  if (budget !== null && !view) {
     if (config.command === null) notes.push('debtBudget is set, but no "metrics" command measures the debt');
     const known = snapshot.state === 'ok' ? (snapshot.snapshot.debt?.known ?? null) : null;
     const plan = planRaises(budget, found.raises, known, '');
@@ -116,6 +118,11 @@ export function auditMetrics(root: string, view?: MetricsView): MetricsAudit {
     if (known !== null && known > plan.budget.maxKnown) {
       notes.push(
         `known debt ${fmt(known)} in ${METRICS_DIR}/${METRICS_SNAPSHOT} is over the budget ${fmt(plan.budget.maxKnown)} — \`novadev sync --check\` fails until it is reduced or the budget is raised in a record`,
+      );
+    }
+    if (known === null && snapshot.state === 'ok') {
+      notes.push(
+        `debtBudget is set, but ${METRICS_DIR}/${METRICS_SNAPSHOT} has no "debt" count to check it against — the metrics command must print one`,
       );
     }
   }
@@ -188,7 +195,7 @@ function budgetsBlockFix(
   const body =
     snapshot.state === 'ok'
       ? renderBudgetsBlock(snapshot.snapshot, budget)
-      : `${BLOCK_NOTE}\n_No metrics snapshot is stored — set "metrics" in \`.novadev/novadev.json\`._`;
+      : `${BLOCK_NOTE}\n_No metrics snapshot is stored. \`novadev sync\` stores one when the "metrics" command in \`.novadev/novadev.json\` works._`;
   const handWritten = current.trimEnd();
   const next =
     spot.state === 'found'

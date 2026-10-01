@@ -1,7 +1,7 @@
 // The read-only questions novadev asks git, on fixture repositories.
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { unchangedSinceHead } from '../src/git.ts';
+import { fileAtHead, unchangedSinceHead } from '../src/git.ts';
 import { commitAll, git, tempDir, write } from './helpers.ts';
 
 describe('unchangedSinceHead', () => {
@@ -34,5 +34,34 @@ describe('unchangedSinceHead', () => {
     write(repo, 'app/todos/a.md', 'a');
     commitAll(repo, 'base');
     expect(unchangedSinceHead(join(repo, 'app'), 'todos')).toEqual(new Set([join(repo, 'app/todos/a.md')]));
+  });
+});
+
+describe('fileAtHead', () => {
+  test('the content the last commit holds — not what the working tree holds now', () => {
+    const root = tempDir();
+    write(root, 'todos/a.md', 'committed');
+    commitAll(root, 'base');
+    write(root, 'todos/a.md', 'edited since');
+    expect(fileAtHead(root, 'todos/a.md')).toBe('committed');
+  });
+
+  test('null where the last commit cannot say: a new file, no commit yet, no repository', () => {
+    const root = tempDir();
+    git(root, 'init', '-q');
+    write(root, 'todos/a.md', 'a');
+    expect(fileAtHead(root, 'todos/a.md')).toBeNull();
+    commitAll(root, 'base');
+    write(root, 'todos/new.md', 'new');
+    expect(fileAtHead(root, 'todos/new.md')).toBeNull();
+    expect(fileAtHead(tempDir(), 'todos/a.md')).toBeNull();
+  });
+
+  test('a path is relative to the project, also in a sub-folder of the repository', () => {
+    const repo = tempDir();
+    write(repo, 'app/todos/a.md', 'in the app');
+    commitAll(repo, 'base');
+    expect(fileAtHead(join(repo, 'app'), 'todos/a.md')).toBe('in the app');
+    expect(fileAtHead(join(repo, 'app'), 'todos\\a.md')).toBe('in the app');
   });
 });

@@ -27,19 +27,6 @@ export function fileAtHead(root: string, rel: string): string | null {
 }
 
 /**
- * Every file under `rel` (relative to `root`) that differs from the last commit — changed, staged,
- * new or untracked — as absolute paths.
- */
-export function changedSinceHead(root: string, rel: string): Set<string> | null {
-  const tracked = git(root, ['diff', '--name-only', '-z', '--relative', 'HEAD', '--', rel]);
-  const untracked = git(root, ['ls-files', '-z', '--others', '--exclude-standard', '--', rel]);
-  if (tracked === null || untracked === null) return null;
-  return new Set(
-    [...tracked.split('\0'), ...untracked.split('\0')].filter(Boolean).map((path) => resolve(root, path)),
-  );
-}
-
-/**
  * Every file under `rel` (relative to `root`) that the last commit holds and that has not changed
  * since — not in the index, not in the working tree — as absolute paths. In a repository with no
  * commit yet, nothing is unchanged: the empty set. Null when git cannot tell (no git, not a

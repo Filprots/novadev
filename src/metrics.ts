@@ -16,7 +16,7 @@
 // so the change is in the commit's diff; a derived file, so `sync --check` fails while it is stale).
 // It compares the numbers with the last commit's snapshot and lists what GREW under NEXT ACTIONS
 // until a record of the round explains it. A missing or failing command is a warning, never a
-// sync failure.
+// sync failure — but a debt budget that nothing can be checked against fails `sync --check`.
 //
 // What can be judged from the files alone — doctor's view and the wiki budgets block — is
 // metrics-audit.ts.
@@ -28,16 +28,17 @@ import {
   type BrokenRaise,
   type DebtBudget,
   type RaiseOutcome,
+  type RecordHistory,
   type RecordRaise,
   collectRaises,
   debtNotes,
   ledgerEntryFor,
   parseBudget,
   planRaises,
-  recordRounds,
+  recordHistory,
   writeBudget,
 } from './debt-budget.ts';
-import { changedSinceHead, fileAtHead } from './git.ts';
+import { fileAtHead } from './git.ts';
 import {
   type Fix,
   type Parsed,
@@ -264,7 +265,18 @@ export function runMetricsCommand(root: string, command: string, timeoutSeconds:
   const shown = `\`${displayCommand(command)}\``;
   const ms = Math.min(Math.max(1, Math.round(timeoutSeconds * 1000)), MAX_TIMER_MS);
   return new Promise((done) => {
-    let child: ChildProcess;
+    // novadev is being stopped (Ctrl+C, a closed terminal): stop the command's group with it. The
+    // group gets SIGTERM whatever novadev got — a shell's background jobs ignore SIGINT. The
+    // handlers go in BEFORE the command starts: the command may run before spawn() returns here,
+    // and a signal that came in between would stop novadev and leave the command running. A JS
+    // signal handler runs only once spawn() has returned, so `child` is set by then.
+    let child: ChildProcess | undefined;
+    const passOn = (signal: NodeJS.Signals) => {
+      if (child) killGroup(child, 'SIGTERM');
+      process.exit(128 + (constants.signals[signal] ?? 1));
+    };
+    const signals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGHUP'];
+    for (const signal of signals) process.on(signal, passOn);
     try {
       child = spawn(command, {
         cwd: root,
@@ -274,9 +286,11 @@ export function runMetricsCommand(root: string, command: string, timeoutSeconds:
         windowsHide: true,
       });
     } catch (error) {
+      for (const signal of signals) process.off(signal, passOn);
       done(refuse(`${shown} could not run: ${error instanceof Error ? error.message : String(error)}`));
       return;
     }
+    const started = child;
 
     const out: Buffer[] = [];
     let outBytes = 0;
@@ -288,25 +302,17 @@ export function runMetricsCommand(root: string, command: string, timeoutSeconds:
     // SIGTERM first; SIGKILL for whatever is still there after the grace period. The check runs
     // often, so novadev does not wait the whole grace period for processes that are already gone.
     const stopGroup = () => {
-      killGroup(child, 'SIGTERM');
+      killGroup(started, 'SIGTERM');
       const deadline = Date.now() + KILL_GRACE_MS;
       const check = setInterval(() => {
-        if (!groupAlive(child)) {
+        if (!groupAlive(started)) {
           clearInterval(check);
         } else if (Date.now() >= deadline) {
-          killGroup(child, 'SIGKILL');
+          killGroup(started, 'SIGKILL');
           clearInterval(check);
         }
       }, 50);
     };
-    // novadev is being stopped (Ctrl+C, a closed terminal): stop the command's group with it. The
-    // group gets SIGTERM whatever novadev got — a shell's background jobs ignore SIGINT.
-    const passOn = (signal: NodeJS.Signals) => {
-      killGroup(child, 'SIGTERM');
-      process.exit(128 + (constants.signals[signal] ?? 1));
-    };
-    const signals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGHUP'];
-    for (const signal of signals) process.on(signal, passOn);
     const timer = setTimeout(() => {
       stopped = 'timeout';
       stopGroup();
@@ -335,7 +341,7 @@ export function runMetricsCommand(root: string, command: string, timeoutSeconds:
       }
     };
 
-    child.stdout!.on('data', (chunk: Buffer) => {
+    started.stdout!.on('data', (chunk: Buffer) => {
       outBytes += chunk.length;
       if (outBytes <= MAX_OUTPUT_BYTES) {
         out.push(chunk);
@@ -344,24 +350,24 @@ export function runMetricsCommand(root: string, command: string, timeoutSeconds:
         stopGroup();
       }
     });
-    child.stderr!.on('data', (chunk: Buffer) => {
+    started.stderr!.on('data', (chunk: Buffer) => {
       errTail = (errTail + chunk.toString('utf8')).slice(-4096);
     });
-    child.on('error', (error) => finish(refuse(`${shown} could not run: ${error.message}`)));
-    child.on('exit', (code, signal) => {
+    started.on('error', (error) => finish(refuse(`${shown} could not run: ${error.message}`)));
+    started.on('exit', (code, signal) => {
       if (settled) return;
       // The command finished in time, so the timeout no longer applies: a timeout that fired now
       // would throw away good output. A process it left behind may still hold its output open:
       // give the pipes a moment to drain, then read what there is and stop what was left behind.
       clearTimeout(timer);
       drain = setTimeout(() => {
-        child.stdout?.destroy();
-        child.stderr?.destroy();
+        started.stdout?.destroy();
+        started.stderr?.destroy();
         stopGroup();
         settle(code, signal);
       }, DRAIN_MS);
     });
-    child.on('close', (code, signal) => settle(code, signal));
+    started.on('close', (code, signal) => settle(code, signal));
   });
 }
 
@@ -598,7 +604,7 @@ export function change(from: number, to: number): string {
 
 /**
  * What the wiki block and the audit are judged against: the snapshot as this sync stores it (or
- * would, with --check), and the budget novadev.json holds once this sync is done.
+ * would, with --check), and the budget novadev.json holds once this sync is done (or would).
  */
 export type MetricsView = { snapshot: SnapshotRead; budget: DebtBudget | null };
 
@@ -607,17 +613,29 @@ export type MetricsRun = {
   headline: string | null;
   /** The lines under it: every change, the budget state, warnings. */
   lines: string[];
-  /** NEXT ACTIONS: what grew without an explanation, a budget that is exceeded, a broken snapshot. */
+  /**
+   * NEXT ACTIONS: what grew without an explanation, a budget that is exceeded or cannot be
+   * checked, a gain the budget does not keep yet, a broken snapshot.
+   */
   actions: string[];
   /** Known debt is over the budget (after the raises records ask for) — fails `sync --check`. */
   overBudget: boolean;
   /** The snapshot, when it changes: derived content, written by sync beside the link files. */
   fixes: Fix[];
-  /** Further reasons `sync --check` fails: a snapshot nobody can read. */
+  /**
+   * Further reasons `sync --check` fails: a snapshot nobody can read, a raise sync has not written
+   * into novadev.json yet, a debt budget nothing can be checked against.
+   */
   failures: string[];
   /** The state the wiki block and the audit must be judged against. */
   view: MetricsView;
 };
+
+/**
+ * Where the numbers the budget is checked against come from: the command, this run; the stored
+ * snapshot; or the last commit's snapshot, when none is stored (deleted on a merge conflict, say).
+ */
+type Basis = 'fresh' | 'stored' | 'committed';
 
 /**
  * The metrics half of `novadev sync`: run the command, compare, apply budget raises. The new
@@ -640,22 +658,33 @@ export async function refreshMetrics(
   const failures: string[] = [];
   let headline: string | null = null;
   let snapshot: SnapshotRead = stored;
+  // The last commit: what this round is compared with, and what sync falls back on when no
+  // snapshot is stored. One view of git for the whole run, for the records too.
+  const committed = config.command !== null || config.budget !== null ? committedSnapshot(root) : null;
+  const history = recordHistory(root);
 
-  // What the budget is checked against: fresh numbers when the command worked, else the stored ones.
-  let measured: Metrics | null = storedSnapshot;
-  let fresh = false;
+  // The debt count sync must not lose: the stored snapshot's — or, with a debt budget, the last
+  // commit's when the stored one is gone or has none. (Without a budget, deleting the snapshot is
+  // how a project that stopped counting debt on purpose starts again.)
+  const kept = storedSnapshot?.debt ? storedSnapshot : config.budget !== null && committed?.debt ? committed : null;
+  // What the budget is checked against: fresh numbers when the command works; else that count;
+  // else the stored snapshot, else the last commit's.
+  const fallback = kept ?? storedSnapshot ?? committed;
+  let measured: Metrics | null = fallback;
+  let basis: Basis | null = fallback === null ? null : fallback === storedSnapshot ? 'stored' : 'committed';
 
   if (config.command !== null) {
     opts.onRun?.(config.command);
     const result = await runMetricsCommand(root, config.command, config.timeoutSeconds);
     // Output that stopped reporting the debt is incomplete, not "no debt": storing it would drop the
-    // count from the snapshot, and the budget gate would pass without anyone noticing.
-    const lostDebt = result.ok && storedSnapshot?.debt !== undefined && result.value.debt === undefined;
+    // count from the snapshot, and the budget gate would pass without anyone noticing. The checks
+    // then use the count kept above.
+    const lostDebt = result.ok && result.value.debt === undefined && kept !== null;
     if (!result.ok || lostDebt) {
       headline = result.ok
-        ? `metrics: ⚠ the command no longer prints "debt" — the stored snapshot has known debt ${fmt(storedSnapshot!.debt!.known)}`
+        ? `metrics: ⚠ the command no longer prints "debt" — ${basis === 'stored' ? 'the stored snapshot' : "the last commit's snapshot"} has known debt ${fmt(kept!.debt!.known)}`
         : `metrics: ⚠ the command failed — ${result.error}`;
-      lines.push(keptLine(stored));
+      lines.push(keptLine(stored, basis));
       if (lostDebt) {
         lines.push(
           'if the project stopped counting debt on purpose, remove "debtBudget" from novadev.json and delete the snapshot; `novadev sync` then stores a new one',
@@ -663,7 +692,7 @@ export async function refreshMetrics(
       }
     } else {
       measured = result.value;
-      fresh = true;
+      basis = 'fresh';
       const blocked = metricsFolderIsFile(nd)
         ? `${ROOT_DIR_NAME}/${METRICS_DIR} is a file, not a folder`
         : stored.state === 'blocked'
@@ -680,7 +709,7 @@ export async function refreshMetrics(
           fixes.push({ path: snapshotPath(nd), label: `${METRICS_DIR}/${METRICS_SNAPSHOT}: ${state}`, next: renderSnapshot(next) });
         }
         headline = freshHeadline(stored, changed, opts.check, where);
-        const growth = growthSince(root, nd, storedSnapshot, result.value);
+        const growth = growthSince(nd, committed, storedSnapshot, result.value, history);
         lines.push(...growth.lines);
         actions.push(...growth.actions);
       }
@@ -704,46 +733,61 @@ export async function refreshMetrics(
   let overBudget = false;
   if (budget !== null) {
     const known = measured?.debt?.known ?? null;
-    const found = collectRaises(nd, recordRounds(root));
+    const found = collectRaises(nd, history);
     const plan = planRaises(budget, found.raises, known, today);
     for (const outcome of plan.outcomes) {
       const line = describeRaise(outcome, budget.maxKnown, !opts.check);
       if (line !== null) lines.push(line);
+      // The budget is derived from the records, like the snapshot: `--check` judges it as sync
+      // would write it, and fails while sync has not. A raise committed before sync writes it is
+      // an earlier round's raise at once, so the commit's own check would pass and the next fail.
+      if (opts.check && outcome.status === 'applied') {
+        failures.push(
+          `the raise in ${outcome.raise.ref} is not written to novadev.json yet — run \`novadev sync\`, then commit novadev.json with the record`,
+        );
+      }
     }
     if (plan.changed && !opts.check) writeBudget(nd, plan.budget);
     budget = plan.budget;
 
-    const source = fresh ? '' : ' (stored snapshot)';
-    if (measured === null) {
-      lines.push('debt budget: not checked — there are no metrics to check it against');
-    } else if (known === null) {
-      lines.push('debt budget: not checked — the metrics have no "debt" count');
+    const source = basis === 'stored' ? ' (stored snapshot)' : basis === 'committed' ? " (the last commit's snapshot)" : '';
+    if (known === null) {
+      // A budget nothing measures is a gate that is off without anyone saying so.
+      const why =
+        measured !== null
+          ? 'the metrics have no "debt" count'
+          : config.command === null
+            ? 'no "metrics" command is set, and no snapshot is stored'
+            : 'the metrics command gave no numbers, and no snapshot is stored';
+      const fix =
+        config.command === null
+          ? 'set a "metrics" command that prints "debt"'
+          : measured !== null
+            ? 'make the metrics command print "debt"'
+            : 'make the metrics command work';
+      lines.push(`debt budget: not checked — ${why}`);
+      actions.push(`the debt budget cannot be checked: ${why} — ${fix}, or set "debtBudget" to null in novadev.json`);
+      failures.push('the debt budget cannot be checked');
     } else if (known > budget.maxKnown) {
       overBudget = true;
       lines.push(`✗ known debt ${fmt(known)} is over the budget ${fmt(budget.maxKnown)}${source}`);
       actions.push(overBudgetAction(budget, found.raises, found.broken, known));
     } else {
       lines.push(`debt budget: known debt ${fmt(known)} of ${fmt(budget.maxKnown)} ✓${source}`);
-      if (known < budget.maxKnown) {
-        lines.push(
-          `debt budget: ${fmt(budget.maxKnown - known)} under it — set "maxKnown" to ${known} in novadev.json to keep that gain`,
+      // The budget only moves down by hand, so a gain is kept only when someone lowers it. Only
+      // fresh numbers ask for that: a stored count can be older than the code.
+      if (known < budget.maxKnown && basis === 'fresh') {
+        actions.push(
+          `known debt ${fmt(known)} is under the budget ${fmt(budget.maxKnown)} — lower "maxKnown" to ${known} in novadev.json, so the gain is kept`,
         );
       }
     }
   }
 
-  // The view is what the files hold once this sync is done. With --check the snapshot is judged
-  // as sync would store it (it is derived, so a stale one fails the gate), but novadev.json keeps
-  // its budget: --check accepts a raise at once, so a raise sync has yet to write is not "stale".
-  return {
-    headline,
-    lines,
-    actions,
-    overBudget,
-    fixes,
-    failures,
-    view: { snapshot, budget: opts.check ? config.budget : budget },
-  };
+  // The view is what the files hold once this sync is done: the snapshot sync stores, and the
+  // budget it writes. With --check nothing is written, and both are judged as sync would write
+  // them — so a stale snapshot, and a wiki block that does not show a raise yet, fail the gate.
+  return { headline, lines, actions, overBudget, fixes, failures, view: { snapshot, budget } };
 }
 
 function freshHeadline(stored: SnapshotRead, changed: boolean, check: boolean, where: string): string {
@@ -763,39 +807,42 @@ function freshHeadline(stored: SnapshotRead, changed: boolean, check: boolean, w
     : `metrics: snapshot updated — ${where}`;
 }
 
-function keptLine(stored: SnapshotRead): string {
-  if (stored.state === 'ok') {
+/** What the checks use when the command gave no numbers this run. */
+function keptLine(stored: SnapshotRead, basis: Basis | null): string {
+  if (basis === 'stored' && stored.state === 'ok') {
     const when = stored.snapshot.updated ? ` (${stored.snapshot.updated})` : '';
     return `the snapshot was not updated; the checks below use the stored one${when}`;
   }
-  if (stored.state === 'invalid' || stored.state === 'blocked') {
-    return `the stored ${METRICS_SNAPSHOT} cannot be read either (${stored.error})`;
-  }
-  return 'there is no stored snapshot yet';
+  const why =
+    stored.state === 'invalid' || stored.state === 'blocked'
+      ? `the stored ${METRICS_SNAPSHOT} cannot be read either (${stored.error})`
+      : stored.state === 'ok'
+        ? 'the stored snapshot has no "debt" count'
+        : 'no snapshot is stored';
+  if (basis === 'committed') return `${why}; the checks below use the last commit's`;
+  return stored.state === 'absent' ? 'there is no stored snapshot yet' : why;
 }
 
 /**
  * What changed in this round, and what grew with no explanation yet. The round is everything since
  * the last commit: compared with the committed snapshot, a hub that grew stays on the list on every
- * sync until a record changed in this round names it in a `## Debt` section — or the growth is
- * undone. Without git (or before the first snapshot is committed), the comparison is with the
- * stored snapshot, and a change is listed once.
+ * sync until a record names it in a `## Debt` section in words the last commit does not hold — or
+ * the growth is undone. Without git (or before the first snapshot is committed), the comparison is
+ * with the stored snapshot, and a change is listed once.
  */
 function growthSince(
-  root: string,
   nd: string,
+  committed: Metrics | null,
   stored: Snapshot | null,
   fresh: Metrics,
+  history: RecordHistory,
 ): { lines: string[]; actions: string[] } {
-  const committed = committedSnapshot(root);
   const base = committed ?? stored;
   if (base === null) return { lines: [], actions: [] };
   const deltas = diffMetrics(base, fresh);
   if (deltas.length === 0) return { lines: [], actions: [] };
 
-  const notes = committed
-    ? debtNotes(nd, changedSinceHead(root, `${ROOT_DIR_NAME}/todos`) ?? new Set())
-    : debtNotes(nd);
+  const notes = committed ? debtNotes(nd, history) : debtNotes(nd);
   const lines = committed ? ['since the last commit:'] : [];
   const actions: string[] = [];
   for (const delta of deltas) {
@@ -809,8 +856,9 @@ function growthSince(
 }
 
 /**
- * One line about one raise a record asks for, or null when there is nothing to say (a raise from an
- * earlier round is history). `written`: plain sync, which writes the budget; `--check` does not.
+ * One line about one raise a record asks for, or null when there is nothing to say (sync no longer
+ * reads a raise the last commit holds). `written`: plain sync, which writes the budget; `--check`
+ * does not.
  */
 export function describeRaise(outcome: RaiseOutcome, budget: number, written: boolean): string | null {
   const { raise } = outcome;
@@ -822,14 +870,14 @@ export function describeRaise(outcome: RaiseOutcome, budget: number, written: bo
           : '';
       return written
         ? `debt budget raised ${fmt(raise.from)} → ${fmt(outcome.applied)} by ${raise.ref}${capped}`
-        : `debt budget: ${raise.ref} raises it ${fmt(raise.from)} → ${fmt(outcome.applied)}${capped} — \`novadev sync\` writes that to novadev.json`;
+        : `debt budget: ${raise.ref} raises it ${fmt(raise.from)} → ${fmt(outcome.applied)}${capped} — not written yet: \`novadev sync\` writes it to novadev.json`;
     }
     case 'stale':
       return `debt budget: ${raise.ref} raises it from ${fmt(raise.from)}, but the budget is ${fmt(budget)} — not applied; if it is still needed, make it "**Raise:** ${budget} → <the new budget>"`;
     case 'not-needed':
       return outcome.spent
         ? `debt budget: ${raise.ref} asks for ${fmt(raise.to)}, but known debt is within the budget — not needed, so not applied; without git, sync cannot tell one round from the next, so ${written ? 'this raise is used up now' : '`novadev sync` marks this raise used up'} and it does not count later`
-        : `debt budget: ${raise.ref} asks for ${fmt(raise.to)}, but known debt is within the budget — not needed now; it still counts in this round, until its record is committed`;
+        : `debt budget: ${raise.ref} asks for ${fmt(raise.to)}, but known debt is within the budget — not needed now; it still counts until it is committed`;
     case 'unmeasured':
       return `debt budget: ${raise.ref} asks for ${fmt(raise.to)} — not applied: there is no debt count to check it against`;
     case 'earlier':
@@ -878,7 +926,7 @@ function overBudgetAction(
   // does not count. One that applied in its own round needs no word — the budget already holds it.
   const earlier = found.find((raise) => raise.round === 'earlier' && !ledgerEntryFor(budget, raise));
   const note = earlier
-    ? ` (the raise in ${earlier.ref} does not count: its record was committed in an earlier round)`
+    ? ` (the raise in ${earlier.ref} does not count: it was committed in an earlier round)`
     : '';
   return `${over}reduce it, or raise the budget in this round's record: add a "## Debt" section with "${wanted}" and the reason${note}`;
 }

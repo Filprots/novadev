@@ -40,13 +40,16 @@ known debt goes over `maxKnown`, `novadev sync` lists it as a NEXT ACTION and
 gets a `## Debt` section with a `**Raise:** 230 → 238` line and the reason. The raise starts
 at the current budget, stops at the measured debt, and counts only in the round it is written
 in. Sync then writes the new budget and remembers the raise under `debtBudget.raises`, so it
-counts once.
+counts once. `novadev sync --check` fails until sync has written it: commit `../novadev.json`
+together with the record. When known debt drops under the budget, sync asks you to lower
+`maxKnown`, so the gain is kept.
 
 **The wiki block.** Sync also keeps a generated "Budgets" block in
 `../wiki/architecture.md` (or the page named by `"metricsWikiPage"`): the debt count, the
 budget and the hub table.
 
 On a merge conflict in `latest.json`: keep either side, or delete the file, then run
-`novadev sync`.
+`novadev sync`. On a merge conflict in `../novadev.json`: keep the higher `maxKnown` and the
+raises of both sides.
 
 All the rules are in `../skills/novadev-work.md` (loop phases 4 and 10).

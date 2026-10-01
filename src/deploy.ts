@@ -15,7 +15,9 @@ import {
   deployedVersion,
   isDirectory,
   isNovadevManaged,
+  manifestPath,
   packageDir,
+  readManifest,
   todayStamp,
 } from './lib.ts';
 import { pendingMigrations } from './migrations.ts';
@@ -42,6 +44,15 @@ export function deploy(cwd: string = process.cwd()): void {
   const refreshed: string[] = [];
   const kept: string[] = [];
   const blocked: string[] = [];
+
+  // novadev.json holds the project's settings — the debt budget and its raises among them. One
+  // that cannot be read (a merge conflict, most likely) is never replaced by a fresh one.
+  if (existsSync(manifestPath(root)) && readManifest(root) === null) {
+    console.error(
+      `novadev: ${ROOT_DIR_NAME}/novadev.json is not a valid JSON object (a merge conflict?) — fix it, then run \`novadev deploy\` again. Nothing was changed.`,
+    );
+    process.exit(1);
+  }
 
   // A repo on an older layout migrates FIRST. Deploy stamps the installed version, and a stamp
   // that is already current makes `migrate-repo` skip the very migrations the repo still needs.
@@ -141,13 +152,9 @@ export function deploy(cwd: string = process.cwd()): void {
   }
 
   // 3. Manifest — merge, never clobber: it carries user settings like archiveGraceDays.
-  const firstDeploy = !existsSync(join(root, 'novadev.json'));
-  let manifest: Record<string, unknown> = {};
-  try {
-    manifest = JSON.parse(readFileSync(join(root, 'novadev.json'), 'utf8'));
-  } catch {
-    /* first deploy, or unreadable — start fresh */
-  }
+  // It is readable or absent: an unreadable one stopped the deploy before anything was written.
+  const firstDeploy = !existsSync(manifestPath(root));
+  const manifest = readManifest(root) ?? {};
   // A new project starts with the opt-in settings visible and off, exactly like a repo that
   // `migrate-repo` brought to 0.10.0. Only on the FIRST deploy: someone who deleted them meant it.
   const seeded = firstDeploy ? { metrics: null, debtBudget: null } : {};

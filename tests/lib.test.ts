@@ -1,5 +1,5 @@
-// Shared helpers in lib.ts that the derived-content writers stand on: fenced code, the block
-// locator, and folder listing that survives a file where a folder belongs.
+// Shared helpers in lib.ts that the derived-content writers stand on: fenced code, the prose a
+// reader sees, the block locator, and folder listing that survives a file where a folder belongs.
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import {
@@ -10,6 +10,7 @@ import {
   isMarkerLine,
   listDirs,
   listFiles,
+  proseLines,
   writeBlock,
 } from '../src/lib.ts';
 import { tempDir, write } from './helpers.ts';
@@ -49,6 +50,33 @@ describe('fenced code', () => {
       { open: 4, close: null },
     ]);
     expect(fenceRanges(['no', 'fences'])).toEqual([]);
+  });
+});
+
+describe('the prose a reader sees', () => {
+  const prose = (text: string) => proseLines(text.split('\n'));
+
+  test('blanks fenced code and keeps the line count', () => {
+    expect(prose('a\n```\ncode\n```\nb')).toEqual(['a', '', '', '', 'b']);
+  });
+
+  test('removes a comment on one line, and keeps the text around it', () => {
+    expect(prose('keep <!-- gone --> this <!-- and gone -->')).toEqual(['keep  this ']);
+  });
+
+  test('a comment over several lines blanks them all, up to the text after "-->"', () => {
+    expect(prose('<!--\n**Raise:** 1 → 2\n-->\nafter')).toEqual(['', '', '', 'after']);
+    expect(prose('a <!-- starts here\nhidden\nends --> b\nc')).toEqual(['a ', '', ' b', 'c']);
+  });
+
+  test('a comment that never closes runs to the end only when it starts a line', () => {
+    expect(prose('text\n<!-- never closed\nhidden\nhidden')).toEqual(['text', '', '', '']);
+    // Mid-line, with no "-->" before the paragraph ends, "<!--" is plain text — as markdown shows it.
+    expect(prose('Use `<!--` to start one.\n\nNext paragraph.')).toEqual(['Use `<!--` to start one.', '', 'Next paragraph.']);
+  });
+
+  test('a "<!--" inside fenced code is code, not a comment', () => {
+    expect(prose('```\n<!--\n```\nafter')).toEqual(['', '', '', 'after']);
   });
 });
 

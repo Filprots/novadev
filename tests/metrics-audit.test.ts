@@ -334,7 +334,7 @@ describe('raises in records', () => {
       '2026-10-01_1/04-d/ai_completed.md: the "**Raise:**" line in "## Debt" must look like `**Raise:** 230 → 238` — the budget now, an arrow, then the new budget, in whole numbers',
     ]);
     expect(audit.notes).toContain(
-      'debt budget: 2026-10-01_1/02-b raises it 225 → 230 (it asks for 300, above the measured debt — a raise stops there) — `novadev sync` writes that to novadev.json',
+      'debt budget: 2026-10-01_1/02-b raises it 225 → 230 (it asks for 300, above the measured debt — a raise stops there) — not written yet: `novadev sync` writes it to novadev.json',
     );
     expect(audit.notes).toContain(
       'debt budget: 2026-10-01_1/03-c raises it from 230, but the budget is 225 — not applied; if it is still needed, make it "**Raise:** 225 → <the new budget>"',
@@ -374,7 +374,7 @@ describe('raises in records', () => {
     ]);
   });
 
-  test('a raise from an earlier round is history: doctor says nothing about it', () => {
+  test('a raise the last commit holds is an earlier round\'s: doctor says nothing about it', () => {
     const root = withSnapshot({ debtBudget: { maxKnown: 200 } });
     todo(root, '2026-10-01_1/01-a', { 'ai_completed.md': completed('01-a', debt.replace('230 → 238', '200 → 230')) });
     expect(auditMetrics(root).notes.join('\n')).toContain('2026-10-01_1/01-a raises it 200 → 230');
@@ -382,6 +382,14 @@ describe('raises in records', () => {
     const notes = auditMetrics(root).notes.join('\n');
     expect(notes).not.toContain('2026-10-01_1/01-a');
     expect(notes).toContain('known debt 230 in metrics/latest.json is over the budget 200');
+  });
+
+  test('with a view from sync there are no budget notes: sync prints its own lines from fresh numbers', () => {
+    const root = withSnapshot({ debtBudget: { maxKnown: 200 } });
+    todo(root, '2026-10-01_1/01-a', { 'ai_completed.md': completed('01-a', debt.replace('230 → 238', '200 → 230')) });
+    const view = { snapshot: { state: 'ok' as const, snapshot: { updated: '2026-10-01', debt: { known: 230 }, hubs: [] } }, budget: { maxKnown: 230, raises: [] } };
+    expect(auditMetrics(root, view).notes.join('\n')).not.toContain('debt budget');
+    expect(auditMetrics(root).notes.join('\n')).toContain('2026-10-01_1/01-a raises it 200 → 230 — not written yet');
   });
 
   test('settings are untouched by an audit', () => {

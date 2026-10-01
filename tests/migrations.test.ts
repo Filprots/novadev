@@ -21,6 +21,21 @@ describe('the migration list', () => {
   });
 });
 
+describe('a novadev.json migrate-repo cannot read', () => {
+  test('is refused, not taken for "no version recorded" — and left as it is', () => {
+    const root = project();
+    const conflicted = '{\n  "novadev": true,\n<<<<<<< HEAD\n  "version": "0.9.0"\n=======\n  "version": "0.10.0"\n>>>>>>> other\n}\n';
+    write(root, '.novadev/novadev.json', conflicted);
+    const result = run(root, 'migrate-repo', '--force');
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain(
+      'novadev: .novadev/novadev.json is not a valid JSON object (a merge conflict?) — fix it, then run `novadev migrate-repo` again. Nothing was changed.',
+    );
+    expect(result.stdout).not.toContain('run `novadev deploy` first');
+    expect(read(root, '.novadev/novadev.json')).toBe(conflicted);
+  });
+});
+
 describe('0.9.0 → 0.10.0', () => {
   test('adds "metrics" and "debtBudget" as null, keeps every other setting, stamps the version', () => {
     const root = project({ version: '0.9.0', archiveGraceDays: 5 });

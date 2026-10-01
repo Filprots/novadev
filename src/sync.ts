@@ -8,7 +8,8 @@
 //
 // `--check` is the gate (a hook, CI): it writes nothing, and fails on problems, on any stale
 // derived file — the metrics snapshot and the wiki budgets block included — on a metrics
-// snapshot nobody can read, and on known debt over its budget.
+// snapshot nobody can read, on a budget raise sync has not written into novadev.json yet, on a
+// debt budget nothing can be checked against, and on known debt over its budget.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { sweepDone } from './archive.ts';
@@ -79,7 +80,9 @@ export async function sync(args: string[]): Promise<void> {
     }
     console.log(`derived: regenerated ${fixes.length} file(s)`);
   } else if (check && fixes.length > 0) {
-    console.log(`derived: ${fixes.length} file(s) are stale`);
+    // Name each one: a hook or CI log is often all anyone sees of this run.
+    console.log(`derived: ${fixes.length} file(s) are stale — \`novadev sync\` writes them:`);
+    for (const fix of fixes) console.log(`  ✗ ${fix.label}`);
   }
 
   // 2. Archive whatever is finished.
@@ -134,9 +137,10 @@ export async function sync(args: string[]): Promise<void> {
         : '\nsync: clean. ✓',
     );
   }
-  // `--check` is the gate: a stale derived file, an unreadable snapshot, or a debt budget that is
-  // exceeded (and not raised in a record) fails it. Plain `sync` writes the files and lists the
-  // rest as NEXT ACTIONS instead, like any other unfinished work.
+  // `--check` is the gate: a stale derived file, an unreadable snapshot, a raise sync has not
+  // written yet, a budget nothing can be checked against, or a debt budget that is exceeded (and
+  // not raised in a record) fails it. Plain `sync` writes the files and lists the rest as NEXT
+  // ACTIONS instead, like any other unfinished work.
   if (check) {
     const reasons = [
       problems.length > 0 ? `${problems.length} problem(s)` : '',

@@ -1,6 +1,6 @@
 // `novadev sync` with the metrics hook, driven through the real CLI on fixture trees.
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { todayStamp } from '../src/lib.ts';
 import {
@@ -9,6 +9,7 @@ import {
   commitAll,
   completed,
   exists,
+  git,
   metricsOutput,
   metricsProject,
   project,
@@ -238,6 +239,35 @@ describe('growth is listed until this round explains it (with git)', () => {
     expect(actions(result.stdout)).toHaveLength(2);
   });
 
+  test("an old record edited after its commit (a **Commits:** line) does not explain this round's growth", () => {
+    const root = committedProject();
+    const old = read(root, '.novadev/todos/2026-09-30_1/01-old/ai_completed.md');
+    todo(root, '2026-09-30_1/01-old', { 'ai_completed.md': old.replace('**Feature:**', `**Commits:** ${git(root, 'rev-parse', '--short', 'HEAD').stdout.trim()}\n**Feature:**`) });
+    const result = run(root, 'sync');
+    expect(result.stdout).not.toContain('explained in 2026-09-30_1/01-old');
+    expect(actions(result.stdout)).toHaveLength(2);
+  });
+
+  test('a line this round adds to an old record explains what it names', () => {
+    const root = committedProject();
+    const old = read(root, '.novadev/todos/2026-09-30_1/01-old/ai_completed.md');
+    todo(root, '2026-09-30_1/01-old', {
+      'ai_completed.md': `${old}This round the Workbench grew again: the kit registry moved in.\n`,
+    });
+    const result = run(root, 'sync');
+    expect(result.stdout).toContain('  ↑ hub Workbench 11,019 → 11,140 (+121) — explained in 2026-09-30_1/01-old');
+    expect(result.stdout).toContain('  ↑ known debt 230 → 238 (+8) — explained in 2026-09-30_1/01-old');
+  });
+
+  test('a section that only says there is no new debt explains nothing', () => {
+    const root = committedProject();
+    todo(root, '2026-10-01_1/01-kits', { 'ai_completed.md': completed('01-kits', '\n## Debt\nNo new debt was added in this round.\n') });
+    expect(actions(run(root, 'sync').stdout)).toEqual([
+      `known debt 230 → 238 (+8) — ${DEBT_ACTION}`,
+      `hub Workbench 11,019 → 11,140 (+121) — ${HUB_ACTION}`,
+    ]);
+  });
+
   test('once the round is committed, the list is clean', () => {
     const root = committedProject();
     run(root, 'sync');
@@ -304,6 +334,9 @@ describe('a missing or failing command is a warning, never a failure', () => {
     const pid = Number(readFileSync(pidFile, 'utf8'));
     sync.kill('SIGINT');
     expect(await sync.exited).toBe(130);
+    // novadev exited through its handler, which stops the command; killed by the signal itself,
+    // it would also show 130, and leave the command running.
+    expect(sync.signalCode).toBeNull();
     const stopped = await until(() => !alive(pid));
     if (!stopped) process.kill(pid, 'SIGKILL');
     expect(stopped).toBe(true);
@@ -339,6 +372,59 @@ describe('a missing or failing command is a warning, never a failure', () => {
     expect(plain.code).toBe(0);
     expect(plain.stdout).toContain('if the project stopped counting debt on purpose');
     expect(read(root, SNAPSHOT)).toBe(stored);
+  });
+
+  test('with a debt budget, output that lost "debt" keeps the last commit\'s count when no snapshot is stored', () => {
+    const root = metricsProject(GROWN, { debtBudget: { maxKnown: 230 } });
+    run(root, 'sync');
+    commitAll(root, 'base');
+    rmSync(join(root, SNAPSHOT)); // the README's advice for a merge conflict
+    metricsOutput(root, { hubs: GROWN.hubs });
+    const plain = run(root, 'sync');
+    expect(plain.stdout).toContain(
+      'metrics: ⚠ the command no longer prints "debt" — the last commit\'s snapshot has known debt 238',
+    );
+    expect(plain.stdout).toContain("no snapshot is stored; the checks below use the last commit's");
+    expect(plain.stdout).toContain("✗ known debt 238 is over the budget 230 (the last commit's snapshot)");
+    expect(exists(root, SNAPSHOT)).toBe(false);
+    expect(run(root, 'sync', '--check').code).toBe(1);
+  });
+
+  test('a stored snapshot without "debt" does not hide the last commit\'s count from the budget', () => {
+    const root = metricsProject(GROWN, { debtBudget: { maxKnown: 230 } });
+    run(root, 'sync');
+    commitAll(root, 'base');
+    write(root, SNAPSHOT, JSON.stringify({ updated: '2026-10-01', hubs: [] }));
+    for (const command of ['cat metrics-out.json', 'exit 1']) {
+      setManifest(root, { metrics: command });
+      metricsOutput(root, { hubs: [] });
+      const result = run(root, 'sync', '--check');
+      expect(result.code).toBe(1);
+      expect(result.stdout).toContain('the stored snapshot has no "debt" count; the checks below use the last commit\'s');
+      expect(result.stdout).toContain("✗ known debt 238 is over the budget 230 (the last commit's snapshot)");
+    }
+  });
+
+  test('without a debt budget, deleting the snapshot starts again: output with no "debt" is stored', () => {
+    const root = metricsProject(GROWN);
+    run(root, 'sync');
+    commitAll(root, 'base');
+    rmSync(join(root, SNAPSHOT));
+    metricsOutput(root, { hubs: GROWN.hubs });
+    expect(run(root, 'sync').stdout).toContain('metrics: first snapshot stored');
+    expect(readJson(root, SNAPSHOT).debt).toBeUndefined();
+  });
+
+  test('a failing command with no stored snapshot checks the budget against the last commit\'s', () => {
+    const root = metricsProject(GROWN, { debtBudget: { maxKnown: 238 } });
+    run(root, 'sync');
+    commitAll(root, 'base');
+    rmSync(join(root, SNAPSHOT));
+    setManifest(root, { metrics: 'exit 1', debtBudget: { maxKnown: 230 } });
+    const result = run(root, 'sync', '--check');
+    expect(result.code).toBe(1);
+    expect(result.stdout).toContain("no snapshot is stored; the checks below use the last commit's");
+    expect(result.stdout).toContain("✗ known debt 238 is over the budget 230 (the last commit's snapshot)");
   });
 
   test('a conflicted snapshot with a failing command: a NEXT ACTION for sync, a failure for --check', () => {
@@ -415,12 +501,28 @@ describe('the debt budget', () => {
     expect(read(root, '.novadev/wiki/architecture.md')).toContain('**Known debt:** 230 (budget 230)');
   });
 
-  test('under budget: a hint to lower it, so the gain is kept', () => {
+  test('under budget: a NEXT ACTION to lower it, so the gain is kept — following it settles', () => {
     const root = metricsProject(BASE, { debtBudget: { maxKnown: 240 } });
     const result = run(root, 'sync');
+    expect(result.code).toBe(0);
     expect(result.stdout).toContain('debt budget: known debt 230 of 240 ✓');
-    expect(result.stdout).toContain('debt budget: 10 under it — set "maxKnown" to 230 in novadev.json to keep that gain');
-    expect(result.stdout).toContain('sync: clean. ✓');
+    expect(actions(result.stdout)).toEqual([
+      'known debt 230 is under the budget 240 — lower "maxKnown" to 230 in novadev.json, so the gain is kept',
+    ]);
+    // Not a gate failure: a loose budget is the project's choice until someone lowers it.
+    expect(run(root, 'sync', '--check').code).toBe(0);
+
+    setManifest(root, { debtBudget: { ...readJson(root, '.novadev/novadev.json').debtBudget, maxKnown: 230 } });
+    expect(run(root, 'sync').stdout).toContain('sync: clean. ✓');
+  });
+
+  test('under budget on stored numbers only (the command failed): no NEXT ACTION to lower it', () => {
+    const root = metricsProject(BASE, { debtBudget: { maxKnown: 230 } });
+    run(root, 'sync');
+    setManifest(root, { metrics: 'exit 1', debtBudget: { maxKnown: 240 } });
+    const result = run(root, 'sync');
+    expect(result.stdout).toContain('debt budget: known debt 230 of 240 ✓ (stored snapshot)');
+    expect(result.stdout).not.toContain('lower "maxKnown"');
   });
 
   test('over budget: a NEXT ACTION for sync, a failure for sync --check', () => {
@@ -446,19 +548,26 @@ describe('the debt budget', () => {
     expect(recheck.stdout).toContain('sync --check: ✗ known debt is over the budget');
   });
 
-  test('a record raises it: --check accepts the raise at once, sync writes it once', () => {
+  test('a record raises it: --check fails until sync has written the raise, and sync writes it once', () => {
     const root = metricsProject(GROWN, { debtBudget: { maxKnown: 230 } });
     run(root, 'sync');
     todo(root, '2026-10-01_1/01-kits', { 'ai_completed.md': completed('01-kits', DEBT) });
     const manifestBefore = read(root, '.novadev/novadev.json');
     const pageBefore = read(root, '.novadev/wiki/architecture.md');
 
+    // The budget is derived from the records: --check judges it as sync would write it, and fails
+    // while sync has not — committed unwritten, the raise would no longer count.
     const check = run(root, 'sync', '--check');
-    expect(check.code).toBe(0);
+    expect(check.code).toBe(1);
     expect(check.stdout).toContain(
-      'debt budget: 2026-10-01_1/01-kits raises it 230 → 238 — `novadev sync` writes that to novadev.json',
+      'debt budget: 2026-10-01_1/01-kits raises it 230 → 238 — not written yet: `novadev sync` writes it to novadev.json',
     );
     expect(check.stdout).toContain('debt budget: known debt 238 of 238 ✓');
+    expect(check.stdout).not.toContain('known debt is over the budget');
+    expect(check.stdout).toContain('  ✗ wiki/architecture.md: budgets block out of date');
+    expect(check.stdout).toContain(
+      'sync --check: ✗ 1 stale derived file(s); the raise in 2026-10-01_1/01-kits is not written to novadev.json yet — run `novadev sync`, then commit novadev.json with the record',
+    );
     expect(read(root, '.novadev/novadev.json')).toBe(manifestBefore);
     expect(read(root, '.novadev/wiki/architecture.md')).toBe(pageBefore);
 
@@ -478,6 +587,43 @@ describe('the debt budget', () => {
     expect(again.stdout).not.toContain('raised');
     expect(readJson(root, '.novadev/novadev.json').debtBudget.raises).toHaveLength(1);
     expect(run(root, 'sync', '--check').code).toBe(0);
+  });
+
+  test('the hook and CI agree: --check refuses an unwritten raise, and after sync and a commit both pass', () => {
+    const root = metricsProject(BASE, { debtBudget: { maxKnown: 230 } });
+    run(root, 'sync');
+    commitAll(root, 'before the round');
+    metricsOutput(root, GROWN);
+    todo(root, '2026-10-01_1/01-kits', { 'ai_completed.md': completed('01-kits', DEBT) });
+
+    const hook = run(root, 'sync', '--check');
+    expect(hook.code).toBe(1);
+    expect(hook.stdout).toContain('the raise in 2026-10-01_1/01-kits is not written to novadev.json yet');
+
+    expect(run(root, 'sync').stdout).toContain('debt budget raised 230 → 238 by 2026-10-01_1/01-kits');
+    expect(run(root, 'sync', '--check').code).toBe(0); // the hook, again
+    commitAll(root, 'round 1');
+    expect(run(root, 'sync', '--check').code).toBe(0); // CI, on the commit
+
+    // The close-out adds the commit to the record afterwards: nothing changes.
+    const record = read(root, '.novadev/todos/2026-10-01_1/01-kits/ai_completed.md');
+    todo(root, '2026-10-01_1/01-kits', { 'ai_completed.md': record.replace('**Feature:**', '**Commits:** abc1234\n**Feature:**') });
+    expect(run(root, 'sync', '--check').code).toBe(0);
+    expect(readJson(root, '.novadev/novadev.json').debtBudget.maxKnown).toBe(238);
+  });
+
+  test('a raise committed without being written no longer counts, and the NEXT ACTION says so', () => {
+    const root = metricsProject(BASE, { debtBudget: { maxKnown: 230 } });
+    run(root, 'sync');
+    commitAll(root, 'before the round');
+    metricsOutput(root, GROWN);
+    todo(root, '2026-10-01_1/01-kits', { 'ai_completed.md': completed('01-kits', DEBT) });
+    commitAll(root, 'round 1, committed past the hook');
+    const result = run(root, 'sync');
+    expect(readJson(root, '.novadev/novadev.json').debtBudget.maxKnown).toBe(230);
+    expect(actions(result.stdout)).toContain(
+      'known debt 238 is over the budget 230 — reduce it, or raise the budget in this round\'s record: add a "## Debt" section with "**Raise:** 230 → 238" and the reason (the raise in 2026-10-01_1/01-kits does not count: it was committed in an earlier round)',
+    );
   });
 
   test('a raise stops at the measured debt: one record cannot switch the gate off', () => {
@@ -514,7 +660,7 @@ describe('the debt budget', () => {
     todo(root, '2026-10-01_1/01-kits', { 'ai_completed.md': completed('01-kits', DEBT) });
     const early = run(root, 'sync');
     expect(early.stdout).toContain(
-      'debt budget: 2026-10-01_1/01-kits asks for 238, but known debt is within the budget — not needed now; it still counts in this round, until its record is committed',
+      'debt budget: 2026-10-01_1/01-kits asks for 238, but known debt is within the budget — not needed now; it still counts until it is committed',
     );
     expect(readJson(root, '.novadev/novadev.json').debtBudget).toEqual({ maxKnown: 230 });
 
@@ -546,7 +692,7 @@ describe('the debt budget', () => {
     const plain = run(root, 'sync');
     expect(plain.stdout).not.toContain('2026-10-01_1/01-kits asks');
     expect(actions(plain.stdout)).toContain(
-      'known debt 5,000 is over the budget 230 — reduce it, or raise the budget in this round\'s record: add a "## Debt" section with "**Raise:** 230 → 5000" and the reason (the raise in 2026-10-01_1/01-kits does not count: its record was committed in an earlier round)',
+      'known debt 5,000 is over the budget 230 — reduce it, or raise the budget in this round\'s record: add a "## Debt" section with "**Raise:** 230 → 5000" and the reason (the raise in 2026-10-01_1/01-kits does not count: it was committed in an earlier round)',
     );
     commitAll(root, 'round 2');
     expect(run(root, 'sync', '--check').code).toBe(1);
@@ -681,11 +827,33 @@ describe('the debt budget', () => {
     expect(result.stdout).toContain('✗ known debt 238 is over the budget 230 (stored snapshot)');
   });
 
-  test('metrics without a debt count cannot check a budget, and say so', () => {
+  test('a budget the metrics cannot check is a NEXT ACTION for sync, and a failure for --check', () => {
     const root = metricsProject({ hubs: [] }, { debtBudget: { maxKnown: 1 } });
-    run(root, 'sync');
-    const result = run(root, 'sync', '--check');
-    expect(result.code).toBe(0);
-    expect(result.stdout).toContain('debt budget: not checked — the metrics have no "debt" count');
+    const plain = run(root, 'sync');
+    expect(plain.code).toBe(0);
+    expect(plain.stdout).toContain('debt budget: not checked — the metrics have no "debt" count');
+    expect(actions(plain.stdout)).toEqual([
+      'the debt budget cannot be checked: the metrics have no "debt" count — make the metrics command print "debt", or set "debtBudget" to null in novadev.json',
+    ]);
+    const check = run(root, 'sync', '--check');
+    expect(check.code).toBe(1);
+    expect(check.stdout).toContain('sync --check: ✗ the debt budget cannot be checked');
+
+    // Nothing measured at all: no command and no snapshot, or a command that fails before any
+    // snapshot is stored.
+    const none = project({ debtBudget: { maxKnown: 1 } });
+    const off = run(none, 'sync');
+    expect(actions(off.stdout)).toEqual([
+      'the debt budget cannot be checked: no "metrics" command is set, and no snapshot is stored — set a "metrics" command that prints "debt", or set "debtBudget" to null in novadev.json',
+    ]);
+    expect(run(none, 'sync', '--check').code).toBe(1);
+    setManifest(none, { metrics: 'exit 3' });
+    expect(actions(run(none, 'sync').stdout)).toEqual([
+      'the debt budget cannot be checked: the metrics command gave no numbers, and no snapshot is stored — make the metrics command work, or set "debtBudget" to null in novadev.json',
+    ]);
+
+    // Turned off, there is nothing to check.
+    setManifest(root, { debtBudget: null });
+    expect(run(root, 'sync', '--check').code).toBe(0);
   });
 });

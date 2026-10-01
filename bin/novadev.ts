@@ -11,7 +11,8 @@ usage:
                             links, archive what is finished, validate, and print what the agent
                             + the human still have to do; --check writes nothing and fails on
                             problems, stale derived files (the metrics snapshot and the wiki
-                            block included), an unreadable snapshot, or known debt over its budget
+                            block included), an unreadable snapshot, a budget raise sync has not
+                            written yet, a debt budget it cannot check, or known debt over budget
   novadev deploy            create/upgrade .novadev/ + the playbook + agent adapters
                             (on an older layout, run migrate-repo first)
   novadev new [slug…]       scaffold today's next batch (todos/YYYY-MM-DD_N/), optional todo folders

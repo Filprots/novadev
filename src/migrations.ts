@@ -35,6 +35,7 @@ import {
   isNovadevManaged,
   listDirs,
   listFiles,
+  manifestPath,
   novadevDir,
   readFrontmatter,
   readManifest,
@@ -99,6 +100,14 @@ export function migrateRepo(args: string[]): void {
 
   const root = requireProjectRoot();
   const nd = novadevDir(root);
+  // An unreadable novadev.json is not "no version recorded": `novadev deploy` would then be the
+  // advice, and the project's settings would be lost with it.
+  if (existsSync(manifestPath(nd)) && readManifest(nd) === null) {
+    console.error(
+      'novadev: .novadev/novadev.json is not a valid JSON object (a merge conflict?) — fix it, then run `novadev migrate-repo` again. Nothing was changed.',
+    );
+    process.exit(1);
+  }
   const from = deployedVersion(nd);
 
   if (!from) {
@@ -184,16 +193,11 @@ function isDirty(root: string): boolean {
 }
 
 function stampVersion(nd: string): void {
-  const path = join(nd, 'novadev.json');
-  let manifest: Record<string, unknown> = { novadev: true };
-  try {
-    manifest = JSON.parse(readFileSync(path, 'utf8'));
-  } catch {
-    /* recreate it */
-  }
+  // migrateRepo refused an unreadable manifest before anything ran, so this keeps every setting.
+  const manifest = readManifest(nd) ?? { novadev: true };
   manifest.version = NOVADEV_VERSION;
   manifest.migratedAt = todayStamp();
-  writeFileSync(path, JSON.stringify(manifest, null, 2) + '\n');
+  writeManifest(nd, manifest);
 }
 
 function move(ctx: MigrationContext, from: string, to: string, label: string): void {

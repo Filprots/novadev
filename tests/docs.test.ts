@@ -104,6 +104,17 @@ describe('the README', () => {
     expect(readme).toContain('a code fence that\nis never closed');
     expect(readme).toContain('novadev waits 2 seconds, reads the output, and stops that process');
   });
+
+  test('states the rules of the third review: the gate and the budget, raise lines, explanations, conflicts', () => {
+    expect(readme).toContain('Until sync has\nwritten the raise, `sync --check` fails');
+    expect(readme).toContain('A raise line the last commit already holds');
+    expect(readme).toContain('A raise line in a quote (`> **Raise:** …`) is never\nread');
+    expect(readme).toContain('a bare "None.", "No new debt." or "n/a" explains\nnothing');
+    expect(readme).toContain('on a budget raise that plain `sync` has not written yet, on a\ndebt budget it cannot check');
+    expect(readme).toContain('sync lists a NEXT ACTION to\nlower `maxKnown` to it');
+    expect(readme).toContain('keep the higher `maxKnown` and the raises of both sides');
+    expect(readme).toContain('`novadev deploy` and `novadev migrate-repo` refuse a `novadev.json` they\ncannot read');
+  });
 });
 
 describe('the templates', () => {
@@ -116,6 +127,10 @@ describe('the templates', () => {
     expect(playbook).toContain('Keep ONE raise line in a record');
     expect(playbook).toContain('A raise counts only in the round you write it in.');
     expect(playbook).toContain('Close every code fence on that page');
+    expect(playbook).toContain('Run `novadev sync` before you commit');
+    expect(playbook).toContain('"None." or "No new debt." is not a reason');
+    expect(playbook).toContain('Known debt under the budget is a NEXT ACTION');
+    expect(playbook).toContain('keep the\nhigher `maxKnown` and the raises of both sides');
   });
 
   test('the playbook defines the words it uses for metrics', () => {
@@ -137,6 +152,7 @@ describe('the templates', () => {
     expect(folderReadme).toContain('debtBudget');
     expect(folderReadme).toContain('counts only in the round it is written');
     expect(folderReadme).toContain('(no `..`)');
+    expect(folderReadme).toContain('`novadev sync --check` fails until sync has written it');
     expect(rootReadme).toContain('`metrics/`');
   });
 

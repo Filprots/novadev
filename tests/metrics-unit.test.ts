@@ -11,6 +11,7 @@ import {
   debtSections,
   pendingRaises,
   planRaises,
+  saysWhy,
 } from '../src/debt-budget.ts';
 import { renderBudgetsBlock } from '../src/metrics-audit.ts';
 import {
@@ -358,6 +359,59 @@ describe('the ## Debt raise in a record', () => {
     const sections = debtSections(record('## Debt\nOne.\n```\nhidden\n```\n\n## Debt\nTwo.\n'));
     expect(sections.map((lines) => lines.join(' ').replace(/\s+/g, ' ').trim())).toEqual(['One.', 'Two.']);
   });
+
+  test('a raise kept in an HTML comment is not read — over several lines, or on one', () => {
+    expect(raise('<!--\n**Raise:** 230 → 238\n-->', 'No new debt this round.')).toBeNull();
+    expect(raise('<!-- **Raise:** 230 → 238 -->', 'Old plan.')).toBeNull();
+    expect(raise('Kept for later: <!--\n**Raise:** 230 → 238\n-->', 'Old plan.')).toBeNull();
+    // A comment after the numbers is no part of the raise; a heading in a comment starts no section.
+    expect(raise('**Raise:** 230 → 238 <!-- was 220 -->')).toEqual({ from: 230, to: 238 });
+    expect(debtRaiseIn(record('<!--\n## Debt\n**Raise:** 230 → 238\nWhy.\n-->\n'))).toBeNull();
+  });
+
+  test('a raise in a numbered item is read like one in a bullet', () => {
+    expect(raise('1. **Raise:** 230 → 238')).toEqual({ from: 230, to: 238 });
+    expect(raise('2) Raise: 230 → 238')).toEqual({ from: 230, to: 238 });
+  });
+
+  test('a raise in a quote is never read — it may be someone else\'s — and never skipped without a word', () => {
+    for (const line of ['> **Raise:** 230 → 238', '>**Raise:** 230 → 238', '> > Raise: 230 → 238', '> - **Raise:** 230 → 238', '- > **Raise:** 230 → 238']) {
+      expect(raise(line, '> The kit registry adds eight findings.')).toEqual({
+        error: expect.stringContaining('is inside a quote (">"), so it is not read'),
+      });
+    }
+    // A quote beside a real raise line is a second raise line.
+    expect(raise('**Raise:** 230 → 238\n> **Raise:** 200 → 210')).toEqual({ error: expect.stringContaining('has 2') });
+  });
+
+  test('a raise whose only reason says there is nothing to explain gives no reason', () => {
+    expect(raise('**Raise:** 230 → 238', 'None.')).toEqual({ error: expect.stringContaining('gives no reason') });
+  });
+});
+
+describe('what says why', () => {
+  test('a bare negative explains nothing, in its common forms', () => {
+    for (const text of ['None.', 'none', 'No.', 'N/A', 'n/a', 'Nothing to report.', 'No new debt.', 'No new debt was added in this round.', "We didn't add any debt.", 'There is no new debt.', 'Zero new findings.', 'None. Nothing new.', '- None', '**None**']) {
+      expect(saysWhy([text])).toBe(false);
+    }
+  });
+
+  test('a reason explains, even when it has a "no" in it', () => {
+    for (const text of ['The kit registry adds eight findings.', 'No refactor is possible before todo 19 splits the registry.', 'None of the old findings were fixed; the importer adds two.']) {
+      expect(saysWhy([text])).toBe(true);
+    }
+  });
+
+  test('a raise line gives only what follows its numbers', () => {
+    expect(saysWhy(['**Raise:** 230 → 238'])).toBe(false);
+    expect(saysWhy(['**Raise:** 230 to 238'])).toBe(false);
+    expect(saysWhy(['**Raise:** 230 → 238 because the importer adds eight findings'])).toBe(true);
+    expect(saysWhy(['**Raise:** 230 → 238', 'The importer adds eight findings.'])).toBe(true);
+  });
+
+  test('comments, placeholders and empty lines say nothing', () => {
+    expect(saysWhy(['', '<!-- fill in -->', '<why the debt grew>'])).toBe(false);
+  });
 });
 
 describe('the raise plan and ledger', () => {
@@ -455,7 +509,7 @@ describe('the raise plan and ledger', () => {
     const asked = raise('b/01-a', 230, 238);
     expect(describeRaise({ status: 'earlier', raise: asked }, 230, true)).toBeNull();
     expect(describeRaise({ status: 'not-needed', raise: asked, spent: false }, 230, true)).toContain(
-      'it still counts in this round, until its record is committed',
+      'it still counts until it is committed',
     );
     expect(describeRaise({ status: 'not-needed', raise: asked, spent: true }, 230, true)).toContain(
       'this raise is used up now and it does not count later',

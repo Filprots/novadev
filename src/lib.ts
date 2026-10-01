@@ -502,6 +502,63 @@ export function fencedLines(lines: readonly string[]): boolean[] {
   return fenced;
 }
 
+/**
+ * The lines of a markdown text as a reader sees the prose: fenced code and HTML comments blanked,
+ * the line count kept. A comment runs from `<!--` to the next `-->`, over several lines if need be.
+ * One that does not close on its own line counts only when it starts the line (markdown then runs
+ * it to the next `-->`, or to the end of the text) or closes before its paragraph ends; anywhere
+ * else a lone `<!--` is plain text, as it is when markdown shows it.
+ */
+export function proseLines(lines: readonly string[]): string[] {
+  const fenced = fencedLines(lines);
+  const out: string[] = [];
+  let open = false; // a comment from an earlier line is still open
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (fenced[i] && !open) {
+      out.push('');
+      continue;
+    }
+    let at = 0;
+    if (open) {
+      const end = line.indexOf('-->');
+      if (end === -1) {
+        out.push('');
+        continue;
+      }
+      at = end + 3;
+      open = false;
+    }
+    let kept = '';
+    for (;;) {
+      const start = line.indexOf('<!--', at);
+      if (start === -1) {
+        kept += line.slice(at);
+        break;
+      }
+      kept += line.slice(at, start);
+      const end = line.indexOf('-->', start + 4);
+      if (end !== -1) {
+        at = end + 3;
+        continue;
+      }
+      if (/^ {0,3}$/.test(line.slice(0, start)) || closesInParagraph(lines, i + 1)) open = true;
+      else kept += line.slice(start);
+      break;
+    }
+    out.push(kept);
+  }
+  return out;
+}
+
+/** True when a line from `from` on, before the next blank line, holds `-->`. */
+function closesInParagraph(lines: readonly string[], from: number): boolean {
+  for (let i = from; i < lines.length && lines[i]!.trim() !== ''; i++) {
+    if (lines[i]!.includes('-->')) return true;
+  }
+  return false;
+}
+
 /** True when `line` is `marker` on a line of its own: indented by at most three spaces, nothing else. */
 export function isMarkerLine(line: string, marker: string): boolean {
   const bare = line.replace(/[ \t\r]+$/, '');

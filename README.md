@@ -256,15 +256,20 @@ metrics: snapshot updated — .novadev/metrics/latest.json
   debt budget: known debt 238 of 238 ✓
 ```
 
-What GREW is a NEXT ACTION, and it stays on the list on every sync until a record changed in
-this round explains it in a `## Debt` section: any words there explain the debt, and a hub is
-explained when the section names it. What shrank is only reported. Without git (or before
-the first snapshot is committed), sync compares with the stored snapshot, and lists a change
-once.
+What GREW is a NEXT ACTION, and it stays on the list on every sync until a record explains it
+in a `## Debt` section, in lines this round wrote — lines the last commit does not hold. A
+section explains the debt when it says why: a bare "None.", "No new debt." or "n/a" explains
+nothing, and neither does a raise line with no reason. A hub is explained when the section
+names it. So an old record that only gets a **Commits:** line or a note never explains new
+growth. What shrank is only reported. Without git (or before the first snapshot is
+committed), sync compares with the stored snapshot, any reason in a `## Debt` section counts,
+and a change is listed once.
 
 A missing or failing command — a non-zero exit, a timeout, output that is not the agreed
-JSON — is a warning, never a sync failure. The stored snapshot then stays as it was. Output
-that stops printing `debt` while the snapshot has a count is treated the same way: novadev
+JSON — is a warning, never a sync failure. The stored snapshot then stays as it was, and
+the checks use it; when none is stored (it was deleted after a merge conflict, say), they use
+the last commit's. Output that stops printing `debt` while the snapshot has a count — or, with
+a `debtBudget`, while the last commit's snapshot has one — is treated the same way: novadev
 keeps the count and checks the budget against it. The command runs in a process group of its
 own: on a timeout, novadev stops it and every process it started, and so does Ctrl+C. The
 timeout is for the command itself. When it exits but leaves a process behind that keeps its
@@ -273,8 +278,9 @@ that leaves the group on purpose, like a daemon, is out of reach — and on Wind
 process whose parent has already exited.)
 
 `novadev sync --check` writes nothing. It is the gate for hooks and CI: it fails on any
-problem, on a stale derived file — the snapshot and the wiki block included — on a snapshot
-nobody can read, and on known debt over its budget.
+problem, on a stale derived file — the snapshot and the wiki block included, each one named —
+on a snapshot nobody can read, on a budget raise that plain `sync` has not written yet, on a
+debt budget it cannot check, and on known debt over its budget.
 
 **The debt budget** is the most known debt the project accepts. Debt can only go above it
 on purpose. When `debt.known` is over `maxKnown`, `novadev sync` lists it as a NEXT ACTION,
@@ -291,21 +297,27 @@ The kit registry adds eight known findings. Todo 19 removes them again.
 
 The raise line is `**Raise:** <the budget now> → <the new budget>`, in whole numbers
 (`1,238` is fine; `1 238` and `1.238` are not, because they read differently by country).
-The reason may also follow the numbers on the same line. A record has at most one raise line:
-when a raise falls short, sync tells you to change its numbers, not to add a second line. In
-a project with a `debtBudget`, a raise line that sync cannot read for certain is a problem,
-and it is not applied. Without a `debtBudget`, a `## Debt` section is free text.
+The reason may also follow the numbers on the same line. The line may be a list item
+(`- **Raise:** …`, `1. **Raise:** …`). A raise line in a quote (`> **Raise:** …`) is never
+read, because a quote may hold someone else's raise; one inside an HTML comment or a code
+block does not count at all. A record has at most one raise line: when a raise falls short,
+sync tells you to change its numbers, not to add a second line. In a project with a
+`debtBudget`, a raise line that sync cannot read for certain is a problem, and it is not
+applied. Without a `debtBudget`, a `## Debt` section is free text.
 
-`--check` accepts the raise at once. Plain `sync` writes the new value into
-`debtBudget.maxKnown` and adds the raise to `debtBudget.raises`: the record, its two numbers,
-and the date. Keep that list. Four rules keep the budget honest:
+Plain `sync` writes the new value into `debtBudget.maxKnown` and adds the raise to
+`debtBudget.raises`: the record, its two numbers, and the date. Keep that list. Until sync has
+written the raise, `sync --check` fails: run `novadev sync`, then commit `novadev.json` with
+the record. Four rules keep the budget honest:
 
 - **A raise counts only in the round it is written in.** With git, the round is everything
-  since the last commit: a raise counts while its record is new or changed. Once the record
-  is committed, a raise that was never needed is history, and it can never lift a later
-  round's growth — that round raises the budget in its own record. Without git, sync cannot
-  tell one round from the next: a raise that is not needed when sync first sees it is used up
-  then, and the list notes it with `"applied"` equal to the budget it found.
+  since the last commit. A raise line the last commit already holds — the same two numbers,
+  in any of the todo's records — is from an earlier round, even when other lines of the
+  record changed since (a **Commits:** line, a note, `ai_progress.md` becoming
+  `ai_completed.md`). Once a raise is committed, sync no longer reads it. Growth in a later
+  round needs a raise in that round's own record. Without git, sync cannot tell one round
+  from the next: a raise that is not needed when sync first sees it is used up then, and the
+  list notes it with `"applied"` equal to the budget it found.
 - **A raise starts at the current budget.** One written against an older budget is not
   applied, and sync says so — a raise never overrides a change someone made since.
 - **A raise stops at the measured debt.** `**Raise:** 230 → 100000` with 238 known findings
@@ -314,9 +326,9 @@ and the date. Keep that list. Four rules keep the budget honest:
   record never raises a budget that someone lowered later. Edit the numbers, and it is a new
   request.
 
-Sync only reads raises from records still in `todos/`; once a batch is archived, its raise is
-history. To lower the budget, edit `maxKnown` by hand — that is always allowed, and sync tells
-you when known debt is under the budget, so the gain can be kept.
+Sync reads raises only from records still in `todos/`, never from the archive. The budget
+goes down only by hand: when known debt is under the budget, sync lists a NEXT ACTION to
+lower `maxKnown` to it, so the gain is kept. Lowering it by hand is always allowed.
 
 **The wiki budgets block.** sync also keeps a generated block in `wiki/architecture.md`,
 between `<!-- novadev:budgets:begin -->` and `<!-- novadev:budgets:end -->`: the known debt,
@@ -337,7 +349,10 @@ Two more settings, both optional:
 
 `novadev doctor` checks the settings, the snapshot, the raises and the block, and never runs
 the command. On a merge conflict in `latest.json`, keep either side, or delete the file, and
-run `novadev sync`: it writes the file again once the command works. `novadev deploy` writes a
+run `novadev sync`: it writes the file again once the command works. On a merge conflict in
+`novadev.json`, keep the higher `maxKnown` and the raises of both sides, then run
+`novadev sync`. `novadev deploy` and `novadev migrate-repo` refuse a `novadev.json` they
+cannot read, so its settings are never replaced by fresh ones. `novadev deploy` writes a
 README into `metrics/`, unless the folder already holds one of the project's own (a README
 without the "managed by `novadev deploy`" line); then it keeps that one.
 

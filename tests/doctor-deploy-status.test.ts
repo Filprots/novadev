@@ -88,6 +88,21 @@ describe('deploy', () => {
     expect(read(root, '.novadev/todos/README.md')).toContain('# todos — task batches');
   });
 
+  test('refuses a novadev.json it cannot read — a merge conflict, or JSON that is not an object — and changes nothing', () => {
+    for (const text of ['{\n  "novadev": true,\n<<<<<<< HEAD\n  "debtBudget": { "maxKnown": 238 }\n=======\n  "debtBudget": { "maxKnown": 235 }\n>>>>>>> other\n}\n', '[]\n']) {
+      const root = tempDir();
+      write(root, '.novadev/novadev.json', text);
+      const result = run(root, 'deploy');
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain(
+        'novadev: .novadev/novadev.json is not a valid JSON object (a merge conflict?) — fix it, then run `novadev deploy` again. Nothing was changed.',
+      );
+      expect(read(root, '.novadev/novadev.json')).toBe(text);
+      expect(exists(root, '.novadev/skills')).toBe(false);
+      expect(exists(root, 'AGENTS.md')).toBe(false);
+    }
+  });
+
   test('a file where a novadev folder belongs: the rest is deployed, then it fails and says what to move', () => {
     const root = tempDir();
     write(root, '.novadev/metrics', 'a file');
@@ -155,6 +170,15 @@ describe('doctor', () => {
     expect(result.code).toBe(1);
     expect(result.stderr).toBe('');
     expect(result.stdout).toContain('✗ metrics/latest.json: a folder, not a file');
+  });
+
+  test('a debt budget the stored snapshot cannot check is a note', () => {
+    const root = deployed();
+    setManifest(root, { metrics: 'cat metrics-out.json', debtBudget: { maxKnown: 230 } });
+    write(root, '.novadev/metrics/latest.json', '{"updated":"2026-10-01","hubs":[]}');
+    expect(run(root, 'doctor').stdout).toContain(
+      'debtBudget is set, but metrics/latest.json has no "debt" count to check it against — the metrics command must print one',
+    );
   });
 
   test('never runs the metrics command', () => {
