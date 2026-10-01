@@ -1,10 +1,14 @@
 // The debt budget: the most known debt a project accepts, and how a record raises it.
 //
 // The same idea as a framework baseline, one level up: known debt over `debtBudget.maxKnown`
-// fails `novadev sync --check` unless a record raises the budget in a `## Debt` section, with a
-// reason. Plain `sync` then writes the raise into novadev.json and remembers it in
+// fails `novadev sync --check` unless a record of THIS ROUND raises the budget in a `## Debt`
+// section, with a reason. Plain `sync` then writes the raise into novadev.json and remembers it in
 // `debtBudget.raises`. The rules that keep that safe:
 //
+//   - a raise counts only in the round it is written in. With git, a record the last commit holds
+//     unchanged is from an earlier round, and its raise is not applied. Without git, sync cannot
+//     tell one round from the next, so a raise that is not needed when sync first judges it is used
+//     up (the ledger notes it with "applied" equal to the budget it found);
 //   - a raise starts at the CURRENT budget (`**Raise:** 230 → 238`), or it is not applied — a raise
 //     written against an older budget never overrides a change made since;
 //   - it is applied only when the measured debt is over the budget, and never above that measured
@@ -16,10 +20,12 @@
 // this round names it there. The metrics that measure the debt are metrics.ts.
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { unchangedSinceHead } from './git.ts';
 import {
   RECORD_COMPLETED,
   RECORD_FAILED,
   RECORD_PROGRESS,
+  ROOT_DIR_NAME,
   type Parsed,
   byCodePoint,
   fencedLines,
@@ -35,14 +41,22 @@ import {
 export const DEBT_RECORDS = [RECORD_COMPLETED, RECORD_PROGRESS, RECORD_FAILED] as const;
 
 /**
- * One applied raise: which record asked, the budget it started from, the value it asked for, and
- * when. `applied` is the budget it set, when that is lower than `to` (a raise stops at the measured
- * debt).
+ * One raise sync has judged: which record asked, the budget it started from, the value it asked
+ * for, and when. `applied` is the budget it set, when that is lower than `to`: a raise stops at the
+ * measured debt, and a raise used up while it was not needed (no git) set the budget it found.
  */
 export type BudgetRaise = { by: string; from: number; to: number; applied?: number; on: string };
 export type DebtBudget = { maxKnown: number; raises: BudgetRaise[] };
-/** A `## Debt` raise found in a record. */
-export type RecordRaise = { ref: string; file: string; from: number; to: number };
+
+/**
+ * Which round a record belongs to. `this`: it changed since the last commit (or there is no commit
+ * yet). `earlier`: the last commit holds it unchanged. `unknown`: there is no git to ask.
+ */
+export type RecordRound = 'this' | 'earlier' | 'unknown';
+/** A `## Debt` raise found in a record. A raise without a `round` counts as this round's. */
+export type RecordRaise = { ref: string; file: string; from: number; to: number; round?: RecordRound };
+/** A record whose `**Raise:**` line cannot be read for certain. */
+export type BrokenRaise = { ref: string; file: string; error: string; round?: RecordRound };
 
 /** `debtBudget` from novadev.json: `{ "maxKnown": N, "raises": [...] }`. */
 export function parseBudget(raw: unknown): Parsed<DebtBudget> {
@@ -175,17 +189,42 @@ function hasWords(text: string): boolean {
  * history: its raise was applied by a sync while its batch waited out the grace period there.
  * Reading the archive too would let a budget that was switched off (and its `raises` list lost)
  * come back on with every old raise applied at once.
+ *
+ * With `roundOf` (see `recordRounds`), each raise says which round its record belongs to.
  */
-export function collectRaises(nd: string): { raises: RecordRaise[]; problems: string[] } {
+export function collectRaises(
+  nd: string,
+  roundOf?: (path: string) => RecordRound,
+): { raises: RecordRaise[]; problems: string[]; broken: BrokenRaise[] } {
   const raises: RecordRaise[] = [];
   const problems: string[] = [];
+  const broken: BrokenRaise[] = [];
   for (const record of openRecords(nd)) {
     const found = debtRaiseIn(record.text);
     if (found === null) continue;
-    if ('error' in found) problems.push(`${record.ref}/${record.file}: ${found.error}`);
-    else raises.push({ ref: record.ref, file: record.file, ...found });
+    const round = roundOf ? { round: roundOf(record.path) } : {};
+    if ('error' in found) {
+      problems.push(`${record.ref}/${record.file}: ${found.error}`);
+      broken.push({ ref: record.ref, file: record.file, error: found.error, ...round });
+    } else {
+      raises.push({ ref: record.ref, file: record.file, ...found, ...round });
+    }
   }
-  return { raises, problems };
+  return { raises, problems, broken };
+}
+
+/**
+ * Which round each work record belongs to, asked of git once, on first use: a record the last
+ * commit holds unchanged is from an earlier round; anything else (changed, staged, new) is this
+ * round's. Without git every record is `unknown`.
+ */
+export function recordRounds(root: string): (path: string) => RecordRound {
+  let unchanged: Set<string> | null | undefined;
+  return (path) => {
+    if (unchanged === undefined) unchanged = unchangedSinceHead(root, `${ROOT_DIR_NAME}/todos`);
+    if (unchanged === null) return 'unknown';
+    return unchanged.has(resolve(path)) ? 'earlier' : 'this';
+  };
 }
 
 /**
@@ -251,10 +290,15 @@ export type RaiseOutcome =
   | { status: 'applied'; raise: RecordRaise; applied: number }
   /** Its `from` is not the current budget — written against an older budget, so not applied. */
   | { status: 'stale'; raise: RecordRaise }
-  /** Known debt is within the budget: nothing to raise yet. It stays pending. */
-  | { status: 'not-needed'; raise: RecordRaise }
+  /**
+   * Known debt is within the budget: nothing to raise. With git it waits for the rest of this
+   * round. Without git it is `spent`: used up now, so it can never lift a later round's growth.
+   */
+  | { status: 'not-needed'; raise: RecordRaise; spent: boolean }
   /** There is no debt count to check it against. It stays pending. */
-  | { status: 'unmeasured'; raise: RecordRaise };
+  | { status: 'unmeasured'; raise: RecordRaise }
+  /** Its record was committed in an earlier round: a raise counts only in the round it is written in. */
+  | { status: 'earlier'; raise: RecordRaise };
 
 export type RaisePlan = { budget: DebtBudget; outcomes: RaiseOutcome[]; changed: boolean };
 
@@ -274,12 +318,17 @@ export function planRaises(
   const raises = [...budget.raises];
   let maxKnown = budget.maxKnown;
   for (const raise of pendingRaises(budget, found)) {
-    if (raise.from !== budget.maxKnown) {
+    const round = raise.round ?? 'this';
+    if (round === 'earlier') {
+      outcomes.push({ status: 'earlier', raise });
+    } else if (raise.from !== budget.maxKnown) {
       outcomes.push({ status: 'stale', raise });
     } else if (known === null) {
       outcomes.push({ status: 'unmeasured', raise });
     } else if (known <= budget.maxKnown) {
-      outcomes.push({ status: 'not-needed', raise });
+      const spent = round === 'unknown';
+      outcomes.push({ status: 'not-needed', raise, spent });
+      if (spent) raises.push({ by: raise.ref, from: raise.from, to: raise.to, applied: raise.from, on: today });
     } else {
       const applied = Math.min(raise.to, known);
       outcomes.push({ status: 'applied', raise, applied });

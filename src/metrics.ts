@@ -21,10 +21,11 @@
 // What can be judged from the files alone — doctor's view and the wiki budgets block — is
 // metrics-audit.ts.
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, statSync } from 'node:fs';
 import { constants } from 'node:os';
 import { join } from 'node:path';
 import {
+  type BrokenRaise,
   type DebtBudget,
   type RaiseOutcome,
   type RecordRaise,
@@ -33,6 +34,7 @@ import {
   ledgerEntryFor,
   parseBudget,
   planRaises,
+  recordRounds,
   writeBudget,
 } from './debt-budget.ts';
 import { changedSinceHead, fileAtHead } from './git.ts';
@@ -60,7 +62,10 @@ const MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 const MAX_TIMER_MS = 2_147_483_647;
 /** After a timeout: how long the command's processes get to stop before they are killed. */
 const KILL_GRACE_MS = 1_000;
-/** After the command exits: how long a process it left behind may keep its output open. */
+/**
+ * After the command exits: how long a process it left behind may keep its output open. After
+ * that, novadev reads what the command printed and stops the processes it left behind.
+ */
 const DRAIN_MS = 2_000;
 const WINDOWS = process.platform === 'win32';
 /** Control characters: never part of a hub name, a budget name or a path. */
@@ -207,7 +212,9 @@ export function normalizeMetrics(raw: unknown): Parsed<Metrics> {
       if (entry.path !== undefined && entry.path !== null) {
         const path = typeof entry.path === 'string' ? repoPath(entry.path) : null;
         if (path === null) {
-          return refuse(`hub "${name}": "path" must be a path inside the project, relative to its root, like "src/wb/"`);
+          return refuse(
+            `hub "${name}": "path" must be a path inside the project, relative to its root and without "..", like "src/wb/"`,
+          );
         }
         hub.path = path;
       }
@@ -219,16 +226,21 @@ export function normalizeMetrics(raw: unknown): Parsed<Metrics> {
 }
 
 /**
- * A hub path as the snapshot stores it: forward slashes, no leading "./", no doubled slashes — so
- * the same script gives the same snapshot on Windows and on Linux. Null for a path that is empty,
- * absolute (it would differ from one machine to the next), or not one line of text.
+ * A hub path as the snapshot stores it: forward slashes, no "." segments, no doubled slashes — so
+ * the same script gives the same snapshot on Windows and on Linux, and other tools can match it
+ * against the paths in records and features. A trailing slash (a folder) is kept. Null for a path
+ * that is empty, absolute (it would differ from one machine to the next), leaves the project with
+ * "..", or is not one line of text.
  */
 export function repoPath(raw: string): string | null {
   if (CONTROL.test(raw)) return null;
-  let path = raw.trim().replace(/\\/g, '/').replace(/\/{2,}/g, '/');
-  while (path.startsWith('./')) path = path.slice(2);
-  if (path === '' || path.startsWith('/') || /^[A-Za-z]:/.test(path)) return null;
-  return path;
+  const path = raw.trim().replace(/\\/g, '/');
+  if (path.startsWith('/') || /^[A-Za-z]:/.test(path)) return null;
+  const parts = path.split('/');
+  if (parts.includes('..')) return null;
+  const kept = parts.filter((part) => part !== '' && part !== '.');
+  if (kept.length === 0) return null;
+  return kept.join('/') + (path.endsWith('/') ? '/' : '');
 }
 
 export type CommandResult = { ok: true; value: Metrics } | { ok: false; error: string };
@@ -241,9 +253,12 @@ export function displayCommand(command: string): string {
 /**
  * Run the configured command from the project root and read its JSON. It never throws and never
  * leaves the command running: the command runs in a process group of its own, and on a timeout
- * the whole group is stopped — the command AND every process it started. When novadev itself is
+ * the whole group is stopped — the command AND every process it started. The timeout is for the
+ * command itself: once it exits, a process it left behind that still holds its output open gets
+ * DRAIN_MS, then the output is read and that process is stopped too. When novadev itself is
  * stopped while the command runs (Ctrl+C), it stops that group too. A process the command moves
- * out of its group on purpose (a daemon) is the one thing this cannot reach.
+ * out of its group on purpose (a daemon) is the one thing this cannot reach — and on Windows,
+ * where taskkill finds a process tree through its parents, neither is one whose parent has exited.
  */
 export function runMetricsCommand(root: string, command: string, timeoutSeconds: number): Promise<CommandResult> {
   const shown = `\`${displayCommand(command)}\``;
@@ -270,9 +285,19 @@ export function runMetricsCommand(root: string, command: string, timeoutSeconds:
     let settled = false;
     let drain: ReturnType<typeof setTimeout> | undefined;
 
+    // SIGTERM first; SIGKILL for whatever is still there after the grace period. The check runs
+    // often, so novadev does not wait the whole grace period for processes that are already gone.
     const stopGroup = () => {
       killGroup(child, 'SIGTERM');
-      setTimeout(() => killGroup(child, 'SIGKILL'), KILL_GRACE_MS);
+      const deadline = Date.now() + KILL_GRACE_MS;
+      const check = setInterval(() => {
+        if (!groupAlive(child)) {
+          clearInterval(check);
+        } else if (Date.now() >= deadline) {
+          killGroup(child, 'SIGKILL');
+          clearInterval(check);
+        }
+      }, 50);
     };
     // novadev is being stopped (Ctrl+C, a closed terminal): stop the command's group with it. The
     // group gets SIGTERM whatever novadev got — a shell's background jobs ignore SIGINT.
@@ -325,16 +350,30 @@ export function runMetricsCommand(root: string, command: string, timeoutSeconds:
     child.on('error', (error) => finish(refuse(`${shown} could not run: ${error.message}`)));
     child.on('exit', (code, signal) => {
       if (settled) return;
-      // The command is done. A process it left behind may still hold its output open: give the
-      // pipes a moment to drain, then stop waiting for them.
+      // The command finished in time, so the timeout no longer applies: a timeout that fired now
+      // would throw away good output. A process it left behind may still hold its output open:
+      // give the pipes a moment to drain, then read what there is and stop what was left behind.
+      clearTimeout(timer);
       drain = setTimeout(() => {
         child.stdout?.destroy();
         child.stderr?.destroy();
+        stopGroup();
         settle(code, signal);
       }, DRAIN_MS);
     });
     child.on('close', (code, signal) => settle(code, signal));
   });
+}
+
+/** True while any process of the command's group is still running (always false on Windows). */
+function groupAlive(child: ChildProcess): boolean {
+  if (WINDOWS || child.pid === undefined) return false;
+  try {
+    process.kill(-child.pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Stop the command and every process in its group. Quiet when they are already gone. */
@@ -365,14 +404,32 @@ export function metricsFolderIsFile(nd: string): boolean {
   return existsSync(path) && !isDirectory(path);
 }
 
+/**
+ * The stored snapshot as the files hold it. `invalid`: a file that is not a snapshot (sync writes
+ * it again once the command works). `blocked`: something that is not a file stands where the
+ * snapshot belongs (a folder, a link to nowhere) — sync never writes over it.
+ */
 export type SnapshotRead =
   | { state: 'absent' }
   | { state: 'invalid'; error: string }
+  | { state: 'blocked'; error: string }
   | { state: 'ok'; snapshot: Snapshot };
 
 export function readSnapshot(nd: string): SnapshotRead {
   const path = snapshotPath(nd);
-  if (!existsSync(path)) return { state: 'absent' };
+  try {
+    lstatSync(path);
+  } catch {
+    return { state: 'absent' }; // nothing there, or .novadev/metrics is a file (metricsFolderIsFile)
+  }
+  let kind: string;
+  try {
+    const stat = statSync(path);
+    kind = stat.isFile() ? 'file' : stat.isDirectory() ? 'a folder, not a file' : 'not a plain file';
+  } catch {
+    kind = 'a link that points nowhere';
+  }
+  if (kind !== 'file') return { state: 'blocked', error: kind };
   let raw: unknown;
   try {
     raw = JSON.parse(readFileSync(path, 'utf8'));
@@ -607,8 +664,13 @@ export async function refreshMetrics(
     } else {
       measured = result.value;
       fresh = true;
-      if (metricsFolderIsFile(nd)) {
-        headline = `metrics: ⚠ the snapshot cannot be stored — ${ROOT_DIR_NAME}/${METRICS_DIR} is a file, not a folder`;
+      const blocked = metricsFolderIsFile(nd)
+        ? `${ROOT_DIR_NAME}/${METRICS_DIR} is a file, not a folder`
+        : stored.state === 'blocked'
+          ? `${where} is ${stored.error}`
+          : null;
+      if (blocked !== null) {
+        headline = `metrics: ⚠ the snapshot cannot be stored — ${blocked}`;
       } else {
         const changed = storedSnapshot === null || !sameMetrics(storedSnapshot, result.value);
         const next: Snapshot = changed || storedSnapshot === null ? { ...result.value, updated: today } : storedSnapshot;
@@ -642,9 +704,12 @@ export async function refreshMetrics(
   let overBudget = false;
   if (budget !== null) {
     const known = measured?.debt?.known ?? null;
-    const found = collectRaises(nd).raises;
-    const plan = planRaises(budget, found, known, today);
-    for (const outcome of plan.outcomes) lines.push(describeRaise(outcome, budget.maxKnown, !opts.check));
+    const found = collectRaises(nd, recordRounds(root));
+    const plan = planRaises(budget, found.raises, known, today);
+    for (const outcome of plan.outcomes) {
+      const line = describeRaise(outcome, budget.maxKnown, !opts.check);
+      if (line !== null) lines.push(line);
+    }
     if (plan.changed && !opts.check) writeBudget(nd, plan.budget);
     budget = plan.budget;
 
@@ -656,7 +721,7 @@ export async function refreshMetrics(
     } else if (known > budget.maxKnown) {
       overBudget = true;
       lines.push(`✗ known debt ${fmt(known)} is over the budget ${fmt(budget.maxKnown)}${source}`);
-      actions.push(overBudgetAction(budget, found, known));
+      actions.push(overBudgetAction(budget, found.raises, found.broken, known));
     } else {
       lines.push(`debt budget: known debt ${fmt(known)} of ${fmt(budget.maxKnown)} ✓${source}`);
       if (known < budget.maxKnown) {
@@ -703,7 +768,9 @@ function keptLine(stored: SnapshotRead): string {
     const when = stored.snapshot.updated ? ` (${stored.snapshot.updated})` : '';
     return `the snapshot was not updated; the checks below use the stored one${when}`;
   }
-  if (stored.state === 'invalid') return `the stored ${METRICS_SNAPSHOT} cannot be read either (${stored.error})`;
+  if (stored.state === 'invalid' || stored.state === 'blocked') {
+    return `the stored ${METRICS_SNAPSHOT} cannot be read either (${stored.error})`;
+  }
   return 'there is no stored snapshot yet';
 }
 
@@ -741,8 +808,11 @@ function growthSince(
   return { lines, actions };
 }
 
-/** One line about one raise a record asks for. `written`: plain sync, which writes it. */
-export function describeRaise(outcome: RaiseOutcome, budget: number, written: boolean): string {
+/**
+ * One line about one raise a record asks for, or null when there is nothing to say (a raise from an
+ * earlier round is history). `written`: plain sync, which writes the budget; `--check` does not.
+ */
+export function describeRaise(outcome: RaiseOutcome, budget: number, written: boolean): string | null {
   const { raise } = outcome;
   switch (outcome.status) {
     case 'applied': {
@@ -757,23 +827,60 @@ export function describeRaise(outcome: RaiseOutcome, budget: number, written: bo
     case 'stale':
       return `debt budget: ${raise.ref} raises it from ${fmt(raise.from)}, but the budget is ${fmt(budget)} — not applied; if it is still needed, make it "**Raise:** ${budget} → <the new budget>"`;
     case 'not-needed':
-      return `debt budget: ${raise.ref} asks for ${fmt(raise.to)}, but known debt is within the budget — not needed, so not applied`;
+      return outcome.spent
+        ? `debt budget: ${raise.ref} asks for ${fmt(raise.to)}, but known debt is within the budget — not needed, so not applied; without git, sync cannot tell one round from the next, so ${written ? 'this raise is used up now' : '`novadev sync` marks this raise used up'} and it does not count later`
+        : `debt budget: ${raise.ref} asks for ${fmt(raise.to)}, but known debt is within the budget — not needed now; it still counts in this round, until its record is committed`;
     case 'unmeasured':
       return `debt budget: ${raise.ref} asks for ${fmt(raise.to)} — not applied: there is no debt count to check it against`;
+    case 'earlier':
+      return null;
   }
 }
 
-function overBudgetAction(budget: DebtBudget, found: readonly RecordRaise[], known: number): string {
+/**
+ * The NEXT ACTION for known debt over the budget. It never asks for something the records cannot
+ * give: when a record of this round already has a raise line, it says to change that line, not to
+ * add a second one (two raise lines are an error).
+ */
+function overBudgetAction(
+  budget: DebtBudget,
+  found: readonly RecordRaise[],
+  broken: readonly BrokenRaise[],
+  known: number,
+): string {
   const over = `known debt ${fmt(known)} is over the budget ${fmt(budget.maxKnown)} — `;
+  const wanted = `**Raise:** ${budget.maxKnown} → ${known}`;
+  const current = found.filter((raise) => raise.round !== 'earlier');
   // The one raise a record cannot repeat: the exact one it already made, before someone lowered the
-  // budget again. Asking for it once more would send the agent in a circle, so say why instead.
-  for (const raise of found) {
+  // budget again (or, without git, the one sync used up while it was not needed). Asking for it once
+  // more would send the agent in a circle, so say why instead.
+  for (const raise of current) {
     if (raise.from !== budget.maxKnown || raise.to !== known) continue;
     const entry = ledgerEntryFor(budget, raise);
     if (!entry) continue;
-    return `${over}${raise.ref} already raised it ${fmt(raise.from)} → ${fmt(raise.to)} on ${entry.on}, and the budget was lowered after that, so that raise does not count again: reduce the debt, or raise the budget in another record, with the reason`;
+    const why =
+      entry.applied === entry.from
+        ? `asked for ${fmt(raise.from)} → ${fmt(raise.to)} on ${entry.on}, while known debt was within the budget; without git, sync cannot tell one round from the next, so that raise was used up then`
+        : `already raised it ${fmt(raise.from)} → ${fmt(raise.to)} on ${entry.on}, and the budget was lowered after that, so that raise does not count again`;
+    return `${over}${raise.ref} ${why}: reduce the debt, or raise the budget in another record, with the reason`;
   }
-  return `${over}reduce it, or raise the budget in this round's record: add a "## Debt" section with "**Raise:** ${budget.maxKnown} → ${known}" and the reason`;
+  const unreadable = broken.find((raise) => raise.round !== 'earlier');
+  if (unreadable) {
+    return `${over}reduce it, or fix the raise line in ${unreadable.ref}/${unreadable.file} (see PROBLEMS) so it reads "${wanted}"`;
+  }
+  // A record of this round already raises the budget, but not far enough (or from another budget):
+  // its line gets new numbers. The highest raise is the one the agent meant last.
+  const mine = [...current].sort((a, b) => b.to - a.to || byCodePoint(b.ref, a.ref))[0];
+  if (mine) {
+    return `${over}reduce it, or change the raise line in ${mine.ref}/${mine.file} to "${wanted}" and say why — keep one raise line`;
+  }
+  // A raise of an earlier round that never applied is easy to mistake for this round's: say why it
+  // does not count. One that applied in its own round needs no word — the budget already holds it.
+  const earlier = found.find((raise) => raise.round === 'earlier' && !ledgerEntryFor(budget, raise));
+  const note = earlier
+    ? ` (the raise in ${earlier.ref} does not count: its record was committed in an earlier round)`
+    : '';
+  return `${over}reduce it, or raise the budget in this round's record: add a "## Debt" section with "${wanted}" and the reason${note}`;
 }
 
 function lastLines(text: string, count: number): string {

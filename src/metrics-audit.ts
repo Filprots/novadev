@@ -1,16 +1,18 @@
 // Everything about metrics that can be judged from the files alone, never by running the
 // command: the settings, the stored snapshot, budget raises, and the generated wiki budgets block.
 // `novadev sync` writes the block and reports the problems; `novadev doctor` reports both.
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { type DebtBudget, collectRaises, planRaises } from './debt-budget.ts';
+import { type DebtBudget, collectRaises, planRaises, recordRounds } from './debt-budget.ts';
 import {
   type Fix,
   blockBegin,
   blockEnd,
   blockTrouble,
   byCodePoint,
+  fenceRanges,
   findBlock,
+  isMarkerLine,
   isNovadevManaged,
   listDirs,
   listFiles,
@@ -25,7 +27,6 @@ import {
   type MetricsView,
   type Snapshot,
   type SnapshotRead,
-  currentSnapshot,
   describeRaise,
   fmt,
   metricsFolderIsFile,
@@ -73,17 +74,27 @@ export function auditMetrics(root: string, view?: MetricsView): MetricsAudit {
       `${METRICS_DIR}/${METRICS_SNAPSHOT}: ${snapshot.error} — run \`novadev sync\` to write it again; if it holds merge-conflict markers and the metrics command cannot run, keep one side or delete the file`,
     );
   }
+  // Something that is not a file where the snapshot belongs: sync never writes over it.
+  if (snapshot.state === 'blocked') {
+    problems.push(
+      `${METRICS_DIR}/${METRICS_SNAPSHOT}: ${snapshot.error} — novadev keeps its snapshot in a plain file of that name; move it away`,
+    );
+  }
   for (const file of listFiles(join(nd, METRICS_DIR))) {
     if (file === METRICS_SNAPSHOT) continue;
     if (file === 'README.md' && isNovadevManaged(join(nd, METRICS_DIR, file))) continue;
     notes.push(`${METRICS_DIR}/${file}: not a novadev file (tolerated) — novadev keeps only ${METRICS_SNAPSHOT} here`);
   }
   for (const dir of listDirs(join(nd, METRICS_DIR))) {
+    if (dir === METRICS_SNAPSHOT) continue; // a problem, above
     notes.push(`${METRICS_DIR}/${dir}/: not a novadev folder (tolerated)`);
   }
 
-  const found = collectRaises(nd);
-  problems.push(...found.problems);
+  // A raise line only means something to a project with a debt budget. Without one, a "## Debt"
+  // section is free text — a line that happens to start with "Raise:" there is nobody's problem.
+  // (Nor is git asked which round a record belongs to.)
+  const found = collectRaises(nd, config.budget !== null ? recordRounds(root) : undefined);
+  if (config.budget !== null) problems.push(...found.problems);
 
   if (config.command === null && snapshot.state === 'ok') {
     notes.push(
@@ -98,7 +109,10 @@ export function auditMetrics(root: string, view?: MetricsView): MetricsAudit {
     if (config.command === null) notes.push('debtBudget is set, but no "metrics" command measures the debt');
     const known = snapshot.state === 'ok' ? (snapshot.snapshot.debt?.known ?? null) : null;
     const plan = planRaises(budget, found.raises, known, '');
-    for (const outcome of plan.outcomes) notes.push(describeRaise(outcome, budget.maxKnown, false));
+    for (const outcome of plan.outcomes) {
+      const line = describeRaise(outcome, budget.maxKnown, false);
+      if (line !== null) notes.push(line);
+    }
     if (known !== null && known > plan.budget.maxKnown) {
       notes.push(
         `known debt ${fmt(known)} in ${METRICS_DIR}/${METRICS_SNAPSHOT} is over the budget ${fmt(plan.budget.maxKnown)} — \`novadev sync --check\` fails until it is reduced or the budget is raised in a record`,
@@ -133,25 +147,44 @@ function budgetsBlockFix(
       ? { note: `wiki/${page}: missing, so the budgets block has nowhere to go — create the page, or set "metricsWikiPage"` }
       : {};
   }
+  if (!statSync(path).isFile()) return { problem: `wiki/${page}: not a file — the budgets block needs a page of that name` };
   // A snapshot that cannot be read says nothing about the numbers: leave the block as it is.
-  if (snapshot.state === 'invalid') return {};
+  if (snapshot.state === 'invalid' || snapshot.state === 'blocked') return {};
 
   // Work on LF text and write back in the page's own line endings: a CRLF checkout
   // (core.autocrlf) must not read as "out of date" on every run.
   const raw = readFileSync(path, 'utf8');
   const crlf = raw.includes('\r\n');
   const current = crlf ? raw.replace(/\r\n/g, '\n') : raw;
+  const lines = current.split('\n');
   // The page is hand-written: only marker LINES outside code count (see findBlock), so a page that
   // quotes the markers is never rewritten between the quote and the real block. Broken markers are
   // a problem, and the page is not touched — a second block would make the next rewrite span from
   // a stray marker to the new one and delete whatever a person wrote in between.
-  const spot = findBlock(current.split('\n'), BUDGETS_BLOCK);
+  const spot = findBlock(lines, BUDGETS_BLOCK);
   if (spot.state === 'broken') {
     return {
       problem: `wiki/${page}: ${blockTrouble(current, BUDGETS_BLOCK)} — repair them, or delete both and \`novadev sync\` adds the block again`,
     };
   }
-  if (spot.state === 'absent' && snapshot.state !== 'ok') return {};
+  if (spot.state === 'absent') {
+    if (snapshot.state !== 'ok') return {};
+    // A code fence can hide a block: one that never closes swallows everything after it. Adding a
+    // block then would add one more on every run, so say what is wrong and leave the page alone.
+    const fences = fenceRanges(lines);
+    const hidden = hiddenBlock(lines, fences);
+    if (hidden) {
+      return {
+        problem: `wiki/${page}: the budgets block on line ${hidden.line + 1} is inside a code fence that opens on line ${hidden.fence + 1}, so sync cannot see it — close that fence, and sync rewrites the block where it is`,
+      };
+    }
+    const open = fences.find((fence) => fence.close === null);
+    if (open) {
+      return {
+        problem: `wiki/${page}: the code fence that opens on line ${open.open + 1} is never closed, so a budgets block added at the end of the page would be part of it — close the fence, and \`novadev sync\` adds the block`,
+      };
+    }
+  }
   const body =
     snapshot.state === 'ok'
       ? renderBudgetsBlock(snapshot.snapshot, budget)
@@ -161,6 +194,12 @@ function budgetsBlockFix(
     spot.state === 'found'
       ? writeBlock(current, BUDGETS_BLOCK, body)!
       : `${handWritten ? `${handWritten}\n\n` : ''}## Budgets\n\n${blockBegin(BUDGETS_BLOCK)}\n${body}\n${blockEnd(BUDGETS_BLOCK)}\n`;
+  // Never write a block the next run cannot find: it would be added again on every run.
+  if (findBlock(next.split('\n'), BUDGETS_BLOCK).state !== 'found') {
+    return {
+      problem: `wiki/${page}: a budgets block written into this page could not be found again — check its code fences and markers`,
+    };
+  }
   if (next === current) return {};
   return {
     fix: {
@@ -169,6 +208,22 @@ function budgetsBlockFix(
       next: crlf ? next.replace(/\n/g, '\r\n') : next,
     },
   };
+}
+
+/**
+ * A block sync wrote, now inside fenced code — its begin marker line, then the generated note. A
+ * fenced EXAMPLE of the markers is not this: only sync writes the note.
+ */
+function hiddenBlock(lines: readonly string[], fences: ReturnType<typeof fenceRanges>): { line: number; fence: number } | null {
+  for (const fence of fences) {
+    const last = fence.close ?? lines.length;
+    for (let i = fence.open + 1; i < last; i++) {
+      if (isMarkerLine(lines[i]!, blockBegin(BUDGETS_BLOCK)) && lines[i + 1]?.trim() === BLOCK_NOTE) {
+        return { line: i, fence: fence.open };
+      }
+    }
+  }
+  return null;
 }
 
 /** The generated wiki block: the debt line, then the hubs, biggest first. */
@@ -203,7 +258,11 @@ export function renderBudgetsBlock(snapshot: Snapshot, budget: DebtBudget | null
 /** One line for `novadev status`. */
 export function metricsStatusLine(nd: string): string {
   const config = readMetricsConfig(nd);
-  const snapshot = currentSnapshot(nd);
+  const read = readSnapshot(nd);
+  if (read.state === 'invalid' || read.state === 'blocked') {
+    return `metrics — ⚠ ${METRICS_DIR}/${METRICS_SNAPSHOT} cannot be read (${read.error}); \`novadev doctor\` says more`;
+  }
+  const snapshot = read.state === 'ok' ? read.snapshot : null;
   if (config.command === null && snapshot === null) {
     return 'metrics — off (no "metrics" command in novadev.json)';
   }

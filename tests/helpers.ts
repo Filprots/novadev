@@ -1,6 +1,6 @@
-// Fixture trees for the novadev tests. Every project lives in its own temp folder and is removed
-// after the test file; nothing here ever touches a real repository.
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+// Fixture trees for the novadev tests. Every project lives in its own temp folder, removed when the
+// test run ends; nothing here ever touches a real repository.
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { NOVADEV_VERSION, WIKI_PAGES } from '../src/lib.ts';
@@ -8,17 +8,25 @@ import { NOVADEV_VERSION, WIKI_PAGES } from '../src/lib.ts';
 export const REPO = resolve(import.meta.dir, '..');
 export const CLI = join(REPO, 'bin', 'novadev.ts');
 
-// Removed when the test process exits — a module-level hook, so it holds however the test runner
-// shares this module between test files.
-const made: string[] = [];
-process.on('exit', () => {
-  for (const dir of made.splice(0)) rmSync(dir, { recursive: true, force: true });
-});
+/**
+ * Every fixture folder of this test run starts with this name, so the run can find and remove its
+ * own folders — and only its own: a run beside it has another process id.
+ */
+const PREFIX = `novadev-test-${process.pid}-`;
 
 export function tempDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'novadev-test-'));
-  made.push(dir);
-  return dir;
+  return mkdtempSync(join(tmpdir(), PREFIX));
+}
+
+/**
+ * Remove the fixture folders of this test run. tests/setup.ts (a preload, see bunfig.toml) calls it
+ * once, after every test file: bun test fires no process "exit" hook, and an afterAll in this shared
+ * module would run only for the first test file that loads it.
+ */
+export function removeTempDirs(): void {
+  for (const name of readdirSync(tmpdir())) {
+    if (name.startsWith(PREFIX)) rmSync(join(tmpdir(), name), { recursive: true, force: true });
+  }
 }
 
 export function write(root: string, rel: string, content: string): void {

@@ -1,11 +1,13 @@
 // The review of novadev 0.10.0 (thph-consumer-test batch 2026-09-30_2/31), kept as written: each
 // test here failed before the fixes. The themed test files cover the same behaviour in more detail.
+// One change since: the last test runs git through the helpers (no hooks, no signing, no GIT_*
+// variables from a parent process), as every fixture must.
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { debtRaiseIn } from '../src/debt-budget.ts';
 import { normalizeMetrics } from '../src/metrics.ts';
-import { completed, metricsProject, project, read, readJson, run, setManifest, todo, write } from './helpers.ts';
+import { commitAll, completed, metricsProject, project, read, readJson, run, setManifest, todo, write } from './helpers.ts';
 
 const SNAP = '{"updated":"2026-10-01","debt":{"known":1},"hubs":[]}';
 function blockProject(page: string, out = '{"debt":{"known":2},"hubs":[]}'): string {
@@ -109,8 +111,8 @@ describe('[minor] the metrics command and its output', () => {
   });
   test('a hub that grew is still a NEXT ACTION on the next sync of the same uncommitted round', () => {
     const root = metricsProject({ hubs: [{ name: 'Workbench', measure: 100 }] });
-    const git = (...a: string[]) => Bun.spawnSync({ cmd: ['git', '-c', 'user.email=t@t', '-c', 'user.name=t', ...a], cwd: root });
-    git('init', '-q'); run(root, 'sync'); git('add', '-A'); git('commit', '-qm', 'base');
+    run(root, 'sync');
+    commitAll(root, 'base');
     write(root, 'metrics-out.json', '{"hubs":[{"name":"Workbench","measure":150}]}');
     run(root, 'sync');
     expect(run(root, 'sync').stdout).toContain('hub Workbench 100 → 150 (+50)');

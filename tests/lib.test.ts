@@ -2,7 +2,16 @@
 // locator, and folder listing that survives a file where a folder belongs.
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { blockTrouble, fencedLines, findBlock, listDirs, listFiles, writeBlock } from '../src/lib.ts';
+import {
+  blockTrouble,
+  fenceRanges,
+  fencedLines,
+  findBlock,
+  isMarkerLine,
+  listDirs,
+  listFiles,
+  writeBlock,
+} from '../src/lib.ts';
 import { tempDir, write } from './helpers.ts';
 
 const BEGIN = '<!-- novadev:x:begin -->';
@@ -26,6 +35,30 @@ describe('fenced code', () => {
 
   test('a fence indented by four spaces is not a fence', () => {
     expect(fencedLines(['    ```', 'out'])).toEqual([false, false]);
+  });
+
+  test('fenceRanges says where each fence opens and closes — null when it never closes', () => {
+    expect(fenceRanges(['a', '```md', 'in', '```', 'b', '~~~', 'in'])).toEqual([
+      { open: 1, close: 3 },
+      { open: 5, close: null },
+    ]);
+    // A markdown example with a fence inside it: the inner "```sh" cannot close the outer fence,
+    // the inner closing line does, and the outer closing line opens a new fence that never closes.
+    expect(fenceRanges(['```markdown', '```sh', 'x', '```', '```', 'text'])).toEqual([
+      { open: 0, close: 3 },
+      { open: 4, close: null },
+    ]);
+    expect(fenceRanges(['no', 'fences'])).toEqual([]);
+  });
+});
+
+describe('marker lines', () => {
+  test('a marker counts on a line of its own, indented by at most three spaces', () => {
+    expect(isMarkerLine('<!-- m -->', '<!-- m -->')).toBe(true);
+    expect(isMarkerLine('   <!-- m -->  \r', '<!-- m -->')).toBe(true);
+    expect(isMarkerLine('    <!-- m -->', '<!-- m -->')).toBe(false);
+    expect(isMarkerLine('see `<!-- m -->`', '<!-- m -->')).toBe(false);
+    expect(isMarkerLine('> <!-- m -->', '<!-- m -->')).toBe(false);
   });
 });
 
@@ -70,6 +103,14 @@ describe('writing a block', () => {
     const quoted = `Use \`${BEGIN}\` … \`${END}\`.\n\nHand-written.\n`;
     expect(writeBlock(quoted, 'x', 'new')).toBeNull();
     expect(writeBlock(`${BEGIN}\nkeep me\n`, 'x', 'new')).toBeNull();
+  });
+
+  test('a CRLF file stays CRLF, and an up-to-date one comes back byte for byte', () => {
+    const page = `# A\r\n\r\n${BEGIN}\r\nold\r\n${END}\r\n\r\nOutro.\r\n`;
+    const next = writeBlock(page, 'x', 'new\nrows');
+    expect(next).toBe(`# A\r\n\r\n${BEGIN}\r\nnew\r\nrows\r\n${END}\r\n\r\nOutro.\r\n`);
+    expect(writeBlock(next!, 'x', 'new\nrows')).toBe(next);
+    expect(blockTrouble(page, 'x')).toBeNull();
   });
 
   test('a quote above the real block survives a rewrite', () => {

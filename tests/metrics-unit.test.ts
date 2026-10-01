@@ -1,10 +1,12 @@
 // The pure parts of the metrics hook: the agreed JSON shape, the snapshot format, the deltas,
 // the `## Debt` raise syntax, the raise plan and ledger, the settings, and the wiki block.
 import { describe, expect, test } from 'bun:test';
+import { mkdirSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   type DebtBudget,
   type RecordRaise,
+  type RecordRound,
   debtRaiseIn,
   debtSections,
   pendingRaises,
@@ -14,6 +16,7 @@ import { renderBudgetsBlock } from '../src/metrics-audit.ts';
 import {
   type Metrics,
   change,
+  describeRaise,
   diffMetrics,
   displayCommand,
   fmt,
@@ -112,19 +115,27 @@ describe('the agreed JSON shape', () => {
 });
 
 describe('hub paths', () => {
-  test('are stored with forward slashes and no leading "./", whatever the platform printed', () => {
+  test('are stored with forward slashes and no "." segments, whatever the platform printed', () => {
     expect(repoPath('.\\src\\wb\\')).toBe('src/wb/');
     expect(repoPath('./src/wb/')).toBe('src/wb/');
     expect(repoPath('././src//wb')).toBe('src/wb');
+    expect(repoPath('src/./wb/.')).toBe('src/wb');
     expect(repoPath('  src/wb.ts  ')).toBe('src/wb.ts');
-    expect(repoPath('../shared/x.ts')).toBe('../shared/x.ts');
+    expect(repoPath('src/wb...ts')).toBe('src/wb...ts');
   });
 
   test('an absolute or empty path is refused: it would differ from one machine to the next', () => {
-    for (const path of ['/home/me/repo/src', 'C:\\repo\\src', 'c:/repo', '\\\\server\\share', './', '']) {
+    for (const path of ['/home/me/repo/src', 'C:\\repo\\src', 'c:/repo', '\\\\server\\share', './', '.', '']) {
       expect(repoPath(path)).toBeNull();
     }
     expect(error({ hubs: [{ name: 'A', measure: 1, path: '/abs/src' }] })).toContain('relative to its root');
+  });
+
+  test('a path that leaves the project with ".." is refused', () => {
+    for (const path of ['../shared/x.ts', '..', 'src/../../other', '..\\other\\src']) {
+      expect(repoPath(path)).toBeNull();
+    }
+    expect(error({ hubs: [{ name: 'A', measure: 1, path: '../other-repo/src/' }] })).toContain('without ".."');
   });
 });
 
@@ -185,6 +196,17 @@ describe('the stored snapshot', () => {
     const root = tempDir();
     write(root, '.novadev/metrics', 'a file');
     expect(readSnapshot(join(root, '.novadev'))).toEqual({ state: 'absent' });
+  });
+
+  test('something that is not a file where the snapshot belongs is "blocked" — never written over', () => {
+    const folder = tempDir();
+    mkdirSync(join(folder, '.novadev/metrics/latest.json'), { recursive: true });
+    expect(readSnapshot(join(folder, '.novadev'))).toEqual({ state: 'blocked', error: 'a folder, not a file' });
+
+    const link = tempDir();
+    mkdirSync(join(link, '.novadev/metrics'), { recursive: true });
+    symlinkSync(join(link, 'nowhere.json'), join(link, '.novadev/metrics/latest.json'));
+    expect(readSnapshot(join(link, '.novadev'))).toEqual({ state: 'blocked', error: 'a link that points nowhere' });
   });
 });
 
@@ -339,7 +361,13 @@ describe('the ## Debt raise in a record', () => {
 });
 
 describe('the raise plan and ledger', () => {
-  const raise = (ref: string, from: number, to: number): RecordRaise => ({ ref, file: 'ai_completed.md', from, to });
+  const raise = (ref: string, from: number, to: number, round?: RecordRound): RecordRaise => ({
+    ref,
+    file: 'ai_completed.md',
+    from,
+    to,
+    ...(round ? { round } : {}),
+  });
   const budget = (maxKnown: number, raises: DebtBudget['raises'] = []): DebtBudget => ({ maxKnown, raises });
 
   test('a raise from the current budget applies when the debt is over it', () => {
@@ -395,6 +423,46 @@ describe('the raise plan and ledger', () => {
   test('pending raises come lowest value first, so the ledger reads in order', () => {
     const found = [raise('b/09-z', 230, 240), raise('b/01-a', 230, 236), raise('b/05-m', 230, 236)];
     expect(pendingRaises(budget(230), found).map((r) => r.ref)).toEqual(['b/01-a', 'b/05-m', 'b/09-z']);
+  });
+
+  test('a raise from an earlier round never applies, and is not recorded', () => {
+    const plan = planRaises(budget(230), [raise('b/01-a', 230, 100000, 'earlier')], 5000, 'd');
+    expect(plan.outcomes).toEqual([{ status: 'earlier', raise: raise('b/01-a', 230, 100000, 'earlier') }]);
+    expect(plan.budget).toEqual(budget(230));
+    expect(plan.changed).toBe(false);
+  });
+
+  test("this round's raise waits while it is not needed; without git it is used up at once", () => {
+    const waiting = planRaises(budget(230), [raise('b/01-a', 230, 238, 'this')], 229, 'd');
+    expect(waiting.outcomes.map((o) => o.status === 'not-needed' && o.spent)).toEqual([false]);
+    expect(waiting.changed).toBe(false);
+
+    const spent = planRaises(budget(230), [raise('b/01-a', 230, 238, 'unknown')], 229, '2026-10-01');
+    expect(spent.outcomes.map((o) => o.status === 'not-needed' && o.spent)).toEqual([true]);
+    expect(spent.budget).toEqual(budget(230, [{ by: 'b/01-a', from: 230, to: 238, applied: 230, on: '2026-10-01' }]));
+    expect(spent.changed).toBe(true);
+    // Used up: the same raise never applies later, however far the debt grows.
+    expect(planRaises(spent.budget, [raise('b/01-a', 230, 238, 'unknown')], 5000, 'd').budget.maxKnown).toBe(230);
+  });
+
+  test('without git, a raise that is needed still applies the first time', () => {
+    const plan = planRaises(budget(230), [raise('b/01-a', 230, 238, 'unknown')], 238, 'd');
+    expect(plan.outcomes.map((o) => o.status)).toEqual(['applied']);
+    expect(plan.budget.maxKnown).toBe(238);
+  });
+
+  test('a raise from an earlier round has no line of its own; the others say what happened', () => {
+    const asked = raise('b/01-a', 230, 238);
+    expect(describeRaise({ status: 'earlier', raise: asked }, 230, true)).toBeNull();
+    expect(describeRaise({ status: 'not-needed', raise: asked, spent: false }, 230, true)).toContain(
+      'it still counts in this round, until its record is committed',
+    );
+    expect(describeRaise({ status: 'not-needed', raise: asked, spent: true }, 230, true)).toContain(
+      'this raise is used up now and it does not count later',
+    );
+    expect(describeRaise({ status: 'not-needed', raise: asked, spent: true }, 230, false)).toContain(
+      '`novadev sync` marks this raise used up',
+    );
   });
 });
 

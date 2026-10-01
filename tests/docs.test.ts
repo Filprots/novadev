@@ -94,6 +94,16 @@ describe('the README', () => {
   test('says that deploy waits for migrate-repo', () => {
     expect(readme).toContain('`novadev migrate-repo`, then `novadev deploy`');
   });
+
+  test('states the rules the code enforces: rounds, one raise line, paths, fences', () => {
+    expect(readme).toContain('**A raise counts only in the round it is written in.**');
+    expect(readme).toContain('Without git, sync cannot');
+    expect(readme).toContain('A record has at most one raise line');
+    expect(readme).toContain('Without a `debtBudget`, a `## Debt` section is free text.');
+    expect(readme).toContain('and so is a path with `..`');
+    expect(readme).toContain('a code fence that\nis never closed');
+    expect(readme).toContain('novadev waits 2 seconds, reads the output, and stops that process');
+  });
 });
 
 describe('the templates', () => {
@@ -103,6 +113,9 @@ describe('the templates', () => {
     expect(playbook).toContain('novadev sync --check');
     expect(playbook).toContain('metrics/latest.json');
     expect(playbook).toContain('novadev:budgets:');
+    expect(playbook).toContain('Keep ONE raise line in a record');
+    expect(playbook).toContain('A raise counts only in the round you write it in.');
+    expect(playbook).toContain('Close every code fence on that page');
   });
 
   test('the playbook defines the words it uses for metrics', () => {
@@ -122,6 +135,8 @@ describe('the templates', () => {
     const example = fences(folderReadme, 'json').find((body) => body.includes('"hubs"'));
     expect(parseMetricsOutput(example!).ok).toBe(true);
     expect(folderReadme).toContain('debtBudget');
+    expect(folderReadme).toContain('counts only in the round it is written');
+    expect(folderReadme).toContain('(no `..`)');
     expect(rootReadme).toContain('`metrics/`');
   });
 

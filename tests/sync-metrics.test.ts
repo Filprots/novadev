@@ -1,6 +1,6 @@
 // `novadev sync` with the metrics hook, driven through the real CLI on fixture trees.
 import { describe, expect, test } from 'bun:test';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { todayStamp } from '../src/lib.ts';
 import {
@@ -361,6 +361,38 @@ describe('a missing or failing command is a warning, never a failure', () => {
     expect(check.stdout).toContain('sync --check: ✗ metrics/latest.json cannot be read');
   });
 
+  test('a process the command leaves behind does not cost the output, and is stopped', () => {
+    const root = metricsProject(BASE, { metricsTimeoutSeconds: 1 });
+    setManifest(root, { metrics: '(sleep 30 & echo $! > left.pid); cat metrics-out.json; sleep 0.3' });
+    const started = Date.now();
+    const result = run(root, 'sync');
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain('metrics: first snapshot stored');
+    // The command took 0.3 s; the process it left holds the output open, so sync waits the 2 s
+    // drain, then reads the output and stops that process — it never waits for the 30 s.
+    expect(Date.now() - started).toBeLessThan(10_000);
+    const pid = Number(read(root, 'left.pid'));
+    const stopped = !alive(pid);
+    if (!stopped) process.kill(pid, 'SIGKILL');
+    expect(stopped).toBe(true);
+  });
+
+  test('a folder where the snapshot belongs is a PROBLEM, never a crash, and stays as it is', () => {
+    const root = metricsProject(BASE);
+    mkdirSync(join(root, SNAPSHOT), { recursive: true });
+    for (const args of [['sync'], ['sync', '--check']]) {
+      const result = run(root, ...args);
+      expect(result.stderr).toBe('');
+      expect(result.code).toBe(1);
+      expect(result.stdout).toContain(
+        'metrics: ⚠ the snapshot cannot be stored — .novadev/metrics/latest.json is a folder, not a file',
+      );
+      expect(result.stdout).toContain('✗ metrics/latest.json: a folder, not a file — novadev keeps its snapshot in a plain file of that name; move it away');
+    }
+    expect(statSync(join(root, SNAPSHOT)).isDirectory()).toBe(true);
+    expect(read(root, '.novadev/wiki/architecture.md')).not.toContain('novadev:budgets');
+  });
+
   test('a file where the metrics folder belongs is a PROBLEM, never a crash', () => {
     const root = metricsProject(BASE);
     write(root, '.novadev/metrics', 'a file');
@@ -475,12 +507,14 @@ describe('the debt budget', () => {
     expect(result.stdout).toContain('✗ known debt 238 is over the budget 225');
   });
 
-  test('a raise written before the debt grew waits, then applies once it is needed', () => {
+  test('with git, a raise written before the debt grew waits for the rest of the round, then applies', () => {
     const root = metricsProject(BASE, { debtBudget: { maxKnown: 230 } });
+    run(root, 'sync');
+    commitAll(root, 'before the round');
     todo(root, '2026-10-01_1/01-kits', { 'ai_completed.md': completed('01-kits', DEBT) });
     const early = run(root, 'sync');
     expect(early.stdout).toContain(
-      'debt budget: 2026-10-01_1/01-kits asks for 238, but known debt is within the budget — not needed, so not applied',
+      'debt budget: 2026-10-01_1/01-kits asks for 238, but known debt is within the budget — not needed now; it still counts in this round, until its record is committed',
     );
     expect(readJson(root, '.novadev/novadev.json').debtBudget).toEqual({ maxKnown: 230 });
 
@@ -488,6 +522,87 @@ describe('the debt budget', () => {
     const later = run(root, 'sync');
     expect(later.stdout).toContain('debt budget raised 230 → 238 by 2026-10-01_1/01-kits');
     expect(readJson(root, '.novadev/novadev.json').debtBudget.maxKnown).toBe(238);
+
+    // The next round grows again: the raise that applied in its own round is not mentioned.
+    commitAll(root, 'round 1');
+    metricsOutput(root, { ...GROWN, debt: { known: 240, new: 0 } });
+    expect(actions(run(root, 'sync').stdout)).toContain(
+      'known debt 240 is over the budget 238 — reduce it, or raise the budget in this round\'s record: add a "## Debt" section with "**Raise:** 238 → 240" and the reason',
+    );
+  });
+
+  test("with git, a raise from an earlier round never lifts a later round's growth", () => {
+    const root = metricsProject(BASE, { debtBudget: { maxKnown: 230 } });
+    run(root, 'sync');
+    commitAll(root, 'before round 1');
+    todo(root, '2026-10-01_1/01-kits', {
+      'ai_completed.md': completed('01-kits', DEBT.replace('230 → 238', '230 → 100000')),
+    });
+    run(root, 'sync');
+    commitAll(root, 'round 1: the raise was not needed');
+
+    todo(root, '2026-10-01_1/02-next', { 'ai_completed.md': completed('02-next') });
+    metricsOutput(root, { ...GROWN, debt: { known: 5000 } });
+    const plain = run(root, 'sync');
+    expect(plain.stdout).not.toContain('2026-10-01_1/01-kits asks');
+    expect(actions(plain.stdout)).toContain(
+      'known debt 5,000 is over the budget 230 — reduce it, or raise the budget in this round\'s record: add a "## Debt" section with "**Raise:** 230 → 5000" and the reason (the raise in 2026-10-01_1/01-kits does not count: its record was committed in an earlier round)',
+    );
+    commitAll(root, 'round 2');
+    expect(run(root, 'sync', '--check').code).toBe(1);
+    expect(readJson(root, '.novadev/novadev.json').debtBudget).toEqual({ maxKnown: 230 });
+  });
+
+  test('without git, a raise that is not needed is used up at once — it never applies later', () => {
+    const root = metricsProject(BASE, { debtBudget: { maxKnown: 230 } });
+    todo(root, '2026-10-01_1/01-kits', { 'ai_completed.md': completed('01-kits', DEBT) });
+    const early = run(root, 'sync');
+    expect(early.stdout).toContain(
+      'debt budget: 2026-10-01_1/01-kits asks for 238, but known debt is within the budget — not needed, so not applied; without git, sync cannot tell one round from the next, so this raise is used up now and it does not count later',
+    );
+    expect(readJson(root, '.novadev/novadev.json').debtBudget).toEqual({
+      maxKnown: 230,
+      raises: [{ by: '2026-10-01_1/01-kits', from: 230, to: 238, applied: 230, on: todayStamp() }],
+    });
+
+    metricsOutput(root, GROWN);
+    const later = run(root, 'sync');
+    expect(readJson(root, '.novadev/novadev.json').debtBudget.maxKnown).toBe(230);
+    expect(actions(later.stdout)).toContain(
+      `known debt 238 is over the budget 230 — 2026-10-01_1/01-kits asked for 230 → 238 on ${todayStamp()}, while known debt was within the budget; without git, sync cannot tell one round from the next, so that raise was used up then: reduce the debt, or raise the budget in another record, with the reason`,
+    );
+  });
+
+  test('a raise that falls short: the NEXT ACTION says to change its line, and following it settles', () => {
+    const root = metricsProject(GROWN, { debtBudget: { maxKnown: 230 } });
+    todo(root, '2026-10-01_1/01-kits', { 'ai_completed.md': completed('01-kits', DEBT.replace('230 → 238', '230 → 235')) });
+    const short = run(root, 'sync');
+    expect(short.stdout).toContain('debt budget raised 230 → 235 by 2026-10-01_1/01-kits');
+    expect(actions(short.stdout)).toEqual([
+      'known debt 238 is over the budget 235 — reduce it, or change the raise line in 2026-10-01_1/01-kits/ai_completed.md to "**Raise:** 235 → 238" and say why — keep one raise line',
+    ]);
+    // Do exactly what it says.
+    todo(root, '2026-10-01_1/01-kits', { 'ai_completed.md': completed('01-kits', DEBT.replace('230 → 238', '235 → 238')) });
+    const fixed = run(root, 'sync');
+    expect(fixed.code).toBe(0);
+    expect(fixed.stdout).toContain('debt budget raised 235 → 238 by 2026-10-01_1/01-kits');
+    expect(fixed.stdout).toContain('sync: clean. ✓');
+  });
+
+  test('a raise from another budget, or one sync cannot read: the NEXT ACTION names that line', () => {
+    const stale = metricsProject(GROWN, { debtBudget: { maxKnown: 225 } });
+    todo(stale, '2026-10-01_1/01-kits', { 'ai_completed.md': completed('01-kits', DEBT) });
+    expect(actions(run(stale, 'sync').stdout)).toEqual([
+      'known debt 238 is over the budget 225 — reduce it, or change the raise line in 2026-10-01_1/01-kits/ai_completed.md to "**Raise:** 225 → 238" and say why — keep one raise line',
+    ]);
+
+    const unreadable = metricsProject(GROWN, { debtBudget: { maxKnown: 230 } });
+    todo(unreadable, '2026-10-01_1/01-kits', { 'ai_completed.md': completed('01-kits', DEBT.replace('230 → 238', '230 → 1 238')) });
+    const result = run(unreadable, 'sync');
+    expect(result.code).toBe(1);
+    expect(actions(result.stdout)).toEqual([
+      'known debt 238 is over the budget 230 — reduce it, or fix the raise line in 2026-10-01_1/01-kits/ai_completed.md (see PROBLEMS) so it reads "**Raise:** 230 → 238"',
+    ]);
   });
 
   test('an old raise never loosens a budget someone lowered later', () => {

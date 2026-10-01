@@ -231,12 +231,13 @@ else. Send logs to stderr.
 | `hubs[].name` | the hub's name; unique, because changes are compared by name |
 | `hubs[].measure` | its size, in the project's own unit (lines, members, …) |
 | `hubs[].over` | optional: the budgets it is over, e.g. `["loc"]` |
-| `hubs[].path` | optional: the path of its file or folder, relative to the project root |
+| `hubs[].path` | optional: the path of its file or folder, inside the project and relative to its root |
 
 `debt` and `hubs` are both optional, but at least one must be there. Other keys are ignored.
 Names, `over` entries and paths must each be one line of text. A path printed with
-backslashes is stored with `/`, so Windows and Linux give the same snapshot; an absolute path
-is refused, because it would differ from one machine to the next.
+backslashes is stored with `/`, and `./` parts are dropped, so Windows and Linux give the same
+snapshot. An absolute path is refused, because it would differ from one machine to the next,
+and so is a path with `..`, because it would leave the project.
 
 **Every `novadev sync`** runs the command and stores the result in
 `.novadev/metrics/latest.json`. The file is tracked, so each commit shows how the numbers
@@ -265,8 +266,11 @@ A missing or failing command — a non-zero exit, a timeout, output that is not 
 JSON — is a warning, never a sync failure. The stored snapshot then stays as it was. Output
 that stops printing `debt` while the snapshot has a count is treated the same way: novadev
 keeps the count and checks the budget against it. The command runs in a process group of its
-own: on a timeout, novadev stops it and every process it started, and so does Ctrl+C. (A
-process that leaves the group on purpose, like a daemon, is out of reach.)
+own: on a timeout, novadev stops it and every process it started, and so does Ctrl+C. The
+timeout is for the command itself. When it exits but leaves a process behind that keeps its
+output open, novadev waits 2 seconds, reads the output, and stops that process. (A process
+that leaves the group on purpose, like a daemon, is out of reach — and on Windows, so is a
+process whose parent has already exited.)
 
 `novadev sync --check` writes nothing. It is the gate for hooks and CI: it fails on any
 problem, on a stale derived file — the snapshot and the wiki block included — on a snapshot
@@ -275,8 +279,9 @@ nobody can read, and on known debt over its budget.
 **The debt budget** is the most known debt the project accepts. Debt can only go above it
 on purpose. When `debt.known` is over `maxKnown`, `novadev sync` lists it as a NEXT ACTION,
 and `novadev sync --check` fails. There are two ways out:
-reduce the debt, or raise the budget in the record of the work that caused it, with a
-reason:
+reduce the debt, or raise the budget in this round's record of the work that caused it, with
+a reason. That record is `ai_completed.md`, or `ai_progress.md` / `ai_failed.md` when the
+round ends with the work still in flight or set aside:
 
 ```markdown
 ## Debt
@@ -286,13 +291,21 @@ The kit registry adds eight known findings. Todo 19 removes them again.
 
 The raise line is `**Raise:** <the budget now> → <the new budget>`, in whole numbers
 (`1,238` is fine; `1 238` and `1.238` are not, because they read differently by country).
-The reason may also follow the numbers on the same line. A raise line that sync cannot read
-for certain is a problem, and it is not applied.
+The reason may also follow the numbers on the same line. A record has at most one raise line:
+when a raise falls short, sync tells you to change its numbers, not to add a second line. In
+a project with a `debtBudget`, a raise line that sync cannot read for certain is a problem,
+and it is not applied. Without a `debtBudget`, a `## Debt` section is free text.
 
 `--check` accepts the raise at once. Plain `sync` writes the new value into
 `debtBudget.maxKnown` and adds the raise to `debtBudget.raises`: the record, its two numbers,
-and the date. Keep that list. Three rules keep the budget honest:
+and the date. Keep that list. Four rules keep the budget honest:
 
+- **A raise counts only in the round it is written in.** With git, the round is everything
+  since the last commit: a raise counts while its record is new or changed. Once the record
+  is committed, a raise that was never needed is history, and it can never lift a later
+  round's growth — that round raises the budget in its own record. Without git, sync cannot
+  tell one round from the next: a raise that is not needed when sync first sees it is used up
+  then, and the list notes it with `"applied"` equal to the budget it found.
 - **A raise starts at the current budget.** One written against an older budget is not
   applied, and sync says so — a raise never overrides a change someone made since.
 - **A raise stops at the measured debt.** `**Raise:** 230 → 100000` with 238 known findings
@@ -301,10 +314,9 @@ and the date. Keep that list. Three rules keep the budget honest:
   record never raises a budget that someone lowered later. Edit the numbers, and it is a new
   request.
 
-A raise written before the debt grew waits until it is needed. Sync only reads raises from
-records still in `todos/`; once a batch is archived, its raise is history. To lower the
-budget, edit `maxKnown` by hand — that is always allowed, and sync tells you when known debt
-is under the budget, so the gain can be kept.
+Sync only reads raises from records still in `todos/`; once a batch is archived, its raise is
+history. To lower the budget, edit `maxKnown` by hand — that is always allowed, and sync tells
+you when known debt is under the budget, so the gain can be kept.
 
 **The wiki budgets block.** sync also keeps a generated block in `wiki/architecture.md`,
 between `<!-- novadev:budgets:begin -->` and `<!-- novadev:budgets:end -->`: the known debt,
@@ -312,7 +324,9 @@ the budget, and the hub table. The first time, it adds a `## Budgets` section at
 the page. You can move the block anywhere in the page; sync rewrites it where it is. Only
 marker LINES count — each marker on a line of its own, outside code — so the page can quote
 the markers in a sentence or a code example. Broken markers (one missing, or two of one) are
-a problem, and sync does not touch the page until they are repaired.
+a problem, and sync does not touch the page until they are repaired. So is a code fence that
+is never closed: everything after it is code, the block too. Sync then names the line where
+the fence opens and leaves the page alone, instead of adding the block again on every run.
 
 Two more settings, both optional:
 

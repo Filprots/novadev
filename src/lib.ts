@@ -461,32 +461,51 @@ export function blockEnd(name: string): string {
   return `<!-- novadev:${name}:end -->`;
 }
 
+/** A fenced code block (``` or ~~~): the line it opens on, and the line it closes on — null when it never closes. */
+export type Fence = { open: number; close: number | null };
+
 /**
- * Which lines of a markdown text are fenced code (``` or ~~~), the fence lines included. A fence
- * opens with three or more backticks or tildes (indented by at most three spaces) and closes with a
- * line of the same character, at least as long, and nothing else. An unclosed fence runs to the end
- * of the text — the way markdown renders it.
+ * The fenced code blocks of a markdown text, in order. A fence opens with three or more backticks
+ * or tildes (indented by at most three spaces) and closes with a line of the same character, at
+ * least as long, and nothing else. An unclosed fence runs to the end of the text — the way markdown
+ * renders it.
  */
-export function fencedLines(lines: readonly string[]): boolean[] {
-  const fenced: boolean[] = [];
-  let open: { char: string; length: number } | null = null;
-  for (const line of lines) {
+export function fenceRanges(lines: readonly string[]): Fence[] {
+  const out: Fence[] = [];
+  let open: { char: string; length: number; at: number } | null = null;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
     if (open === null) {
       const start = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
       // A backtick fence's info string may not contain a backtick: "```x```" is inline code.
       if (start && !(start[1]![0] === '`' && start[2]!.includes('`'))) {
-        open = { char: start[1]![0]!, length: start[1]!.length };
-        fenced.push(true);
-      } else {
-        fenced.push(false);
+        open = { char: start[1]![0]!, length: start[1]!.length, at: i };
       }
       continue;
     }
-    fenced.push(true);
     const end = /^ {0,3}(`{3,}|~{3,})[ \t]*\r?$/.exec(line);
-    if (end && end[1]![0] === open.char && end[1]!.length >= open.length) open = null;
+    if (end && end[1]![0] === open.char && end[1]!.length >= open.length) {
+      out.push({ open: open.at, close: i });
+      open = null;
+    }
+  }
+  if (open !== null) out.push({ open: open.at, close: null });
+  return out;
+}
+
+/** Which lines of a markdown text are fenced code, the fence lines included (see `fenceRanges`). */
+export function fencedLines(lines: readonly string[]): boolean[] {
+  const fenced = lines.map(() => false);
+  for (const fence of fenceRanges(lines)) {
+    for (let i = fence.open; i <= (fence.close ?? lines.length - 1); i++) fenced[i] = true;
   }
   return fenced;
+}
+
+/** True when `line` is `marker` on a line of its own: indented by at most three spaces, nothing else. */
+export function isMarkerLine(line: string, marker: string): boolean {
+  const bare = line.replace(/[ \t\r]+$/, '');
+  return bare.endsWith(marker) && /^ {0,3}$/.test(bare.slice(0, bare.length - marker.length));
 }
 
 /** Where a derived block sits in a text: nowhere, between two marker lines, or broken. */
@@ -504,16 +523,12 @@ export type BlockSpot =
  */
 export function findBlock(lines: readonly string[], name: string): BlockSpot {
   const fenced = fencedLines(lines);
-  const isLine = (line: string, marker: string) => {
-    const bare = line.replace(/[ \t\r]+$/, '');
-    return bare.endsWith(marker) && /^ {0,3}$/.test(bare.slice(0, bare.length - marker.length));
-  };
   const begins: number[] = [];
   const ends: number[] = [];
   lines.forEach((line, i) => {
     if (fenced[i]) return;
-    if (isLine(line, blockBegin(name))) begins.push(i);
-    else if (isLine(line, blockEnd(name))) ends.push(i);
+    if (isMarkerLine(line, blockBegin(name))) begins.push(i);
+    else if (isMarkerLine(line, blockEnd(name))) ends.push(i);
   });
   if (begins.length === 0 && ends.length === 0) return { state: 'absent' };
   if (begins.length === 1 && ends.length === 1 && begins[0]! < ends[0]!) {
@@ -524,7 +539,7 @@ export function findBlock(lines: readonly string[], name: string): BlockSpot {
 
 /** What is wrong with a block that cannot be rewritten, in words — null when it can be. */
 export function blockTrouble(text: string, name: string): string | null {
-  const spot = findBlock(text.split('\n'), name);
+  const spot = findBlock(text.replace(/\r\n/g, '\n').split('\n'), name);
   if (spot.state === 'found') return null;
   if (spot.state === 'absent') return `missing ${blockBegin(name)} … ${blockEnd(name)} block`;
   return `the ${name} block markers are broken — there must be one "${blockBegin(name)}" line, then one "${blockEnd(name)}" line, each on a line of its own (found ${spot.begins} and ${spot.ends})`;
@@ -533,12 +548,17 @@ export function blockTrouble(text: string, name: string): string | null {
 /**
  * Replace a block's content and keep both marker lines; everything outside them is left exactly as
  * it was. Returns null when there is no well-formed block (see `findBlock`).
+ *
+ * A file with CRLF line endings (a Windows checkout with core.autocrlf) keeps them: the block is
+ * written in LF and the result turned back into CRLF, so an up-to-date file never reads as stale.
  */
 export function writeBlock(text: string, name: string, body: string): string | null {
-  const lines = text.split('\n');
+  const crlf = text.includes('\r\n');
+  const lines = (crlf ? text.replace(/\r\n/g, '\n') : text).split('\n');
   const spot = findBlock(lines, name);
   if (spot.state !== 'found') return null;
-  return [...lines.slice(0, spot.begin + 1), body.trim(), ...lines.slice(spot.end)].join('\n');
+  const next = [...lines.slice(0, spot.begin + 1), body.trim(), ...lines.slice(spot.end)].join('\n');
+  return crlf ? next.replace(/\n/g, '\r\n') : next;
 }
 
 /** Walk up from cwd to find the directory that CONTAINS <root>/ (the project root). */

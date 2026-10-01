@@ -1,11 +1,11 @@
 // `auditMetrics`: what can be judged from the files alone — the settings, the stored snapshot,
 // raises in records, and the wiki budgets block. Shared by `novadev sync` and `novadev doctor`.
 import { describe, expect, test } from 'bun:test';
-import { rmSync } from 'node:fs';
+import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { collectRaises } from '../src/debt-budget.ts';
 import { auditMetrics } from '../src/metrics-audit.ts';
-import { completed, project, read, todo, write } from './helpers.ts';
+import { commitAll, completed, project, read, todo, write } from './helpers.ts';
 
 const SNAPSHOT = JSON.stringify({
   updated: '2026-10-01',
@@ -125,6 +125,63 @@ describe('the budgets block in the wiki', () => {
     }
   });
 
+  test('a code fence that never closes is a problem naming its line, and the page is not touched', () => {
+    const pages = [
+      // An unclosed fence: everything after it is code, the block sync would add too.
+      ['# Architecture\n\nAn example:\n\n```sh\nnovadev sync\n\nMore hand-written text.\n', 5],
+      // A markdown example with a fence inside it flips the fences: the last line of three
+      // backticks OPENS a fence that never closes.
+      ['# A\n\n```markdown\n```sh\nnovadev sync\n```\n```\n\nText.\n', 7],
+    ] as const;
+    for (const [text, line] of pages) {
+      const root = withSnapshot();
+      write(root, PAGE, text);
+      const audit = auditMetrics(root);
+      expect(audit.fixes).toEqual([]);
+      expect(audit.problems).toEqual([
+        `wiki/architecture.md: the code fence that opens on line ${line} is never closed, so a budgets block added at the end of the page would be part of it — close the fence, and \`novadev sync\` adds the block`,
+      ]);
+    }
+  });
+
+  test('a block sync wrote, hidden by a fence above it, is a problem — never a second block', () => {
+    const root = withSnapshot();
+    applyFixes(root); // the block, at the end of the page
+    const page = read(root, PAGE);
+    const at = page.indexOf('## Budgets');
+    // Someone adds a fence that never closes above the block, and a code example below it: the
+    // fences pair up across the block, so it is code now, and the page no longer ends in a fence.
+    const broken = `${page.slice(0, at)}\`\`\`sh\nnovadev sync\n\n${page.slice(at)}\nAn example:\n\n\`\`\`\nmore\n\`\`\`\n`;
+    write(root, PAGE, broken);
+    const lines = broken.split('\n');
+    const fence = lines.indexOf('```sh') + 1;
+    const block = lines.indexOf(BEGIN) + 1;
+    const audit = auditMetrics(root);
+    expect(audit.fixes).toEqual([]);
+    expect(audit.problems).toEqual([
+      `wiki/architecture.md: the budgets block on line ${block} is inside a code fence that opens on line ${fence}, so sync cannot see it — close that fence, and sync rewrites the block where it is`,
+    ]);
+    expect(read(root, PAGE)).toBe(broken);
+  });
+
+  test('a closed fence is no problem, and an unclosed one is none either while there is no snapshot', () => {
+    const closed = withSnapshot();
+    write(closed, PAGE, '# A\n\n```sh\nnovadev sync\n```\n');
+    expect(auditMetrics(closed).problems).toEqual([]);
+    expect(applyFixes(closed)).toContain('```\n\n## Budgets\n\n<!-- novadev:budgets:begin -->');
+
+    const off = project();
+    write(off, PAGE, '# A\n\n```sh\nnovadev sync\n');
+    expect(auditMetrics(off)).toEqual({ problems: [], notes: [], fixes: [] });
+  });
+
+  test('a folder where the page belongs is a problem, not a crash', () => {
+    const root = withSnapshot();
+    rmSync(join(root, PAGE));
+    mkdirSync(join(root, PAGE));
+    expect(auditMetrics(root).problems).toEqual(['wiki/architecture.md: not a file — the budgets block needs a page of that name']);
+  });
+
   test('goes to the page named in "metricsWikiPage", or nowhere when it is false', () => {
     const custom = withSnapshot({ metricsWikiPage: 'budgets.md' });
     write(custom, '.novadev/wiki/budgets.md', '# Budgets page\n');
@@ -195,6 +252,20 @@ describe('problems and notes', () => {
     expect(auditMetrics(root).problems).toEqual([
       'metrics: a file, not a folder — novadev keeps its metrics snapshot in a folder of that name; move the file away',
     ]);
+  });
+
+  test('a folder where the snapshot belongs is a problem — for sync too — and the block is left alone', () => {
+    const root = project({ metrics: 'cat metrics-out.json' });
+    write(root, PAGE, `# A\n\n${BEGIN}\nthe last good numbers\n${END}\n`);
+    mkdirSync(join(root, '.novadev/metrics/latest.json/old'), { recursive: true });
+    const problem =
+      'metrics/latest.json: a folder, not a file — novadev keeps its snapshot in a plain file of that name; move it away';
+    const doctor = auditMetrics(root);
+    expect(doctor.problems).toEqual([problem]);
+    expect(doctor.notes.join('\n')).not.toContain('latest.json/');
+    expect(doctor.fixes).toEqual([]);
+    const sync = auditMetrics(root, { snapshot: { state: 'blocked', error: 'a folder, not a file' }, budget: null });
+    expect(sync.problems).toEqual([problem]);
   });
 
   test('says when the command, the snapshot and the budget do not line up', () => {
@@ -283,6 +354,34 @@ describe('raises in records', () => {
     });
     todo(root, '2026-10-01_1/01-a', { 'ai_completed.md': completed('01-a', debt) });
     expect(auditMetrics(root).notes.join('\n')).not.toContain('2026-10-01_1/01-a');
+  });
+
+  test('a raise line it cannot read is only a problem in a project with a debt budget', () => {
+    const prose = '\n## Debt\n- Raise: the API client timeout should be configurable.\n';
+    const off = project();
+    todo(off, '2026-10-01_1/01-a', { 'ai_completed.md': completed('01-a', prose) });
+    expect(auditMetrics(off)).toEqual({ problems: [], notes: [], fixes: [] });
+
+    const metricsOnly = withSnapshot();
+    applyFixes(metricsOnly);
+    todo(metricsOnly, '2026-10-01_1/01-a', { 'ai_completed.md': completed('01-a', prose) });
+    expect(auditMetrics(metricsOnly).problems).toEqual([]);
+
+    const budgeted = withSnapshot({ debtBudget: { maxKnown: 230 } });
+    todo(budgeted, '2026-10-01_1/01-a', { 'ai_completed.md': completed('01-a', prose) });
+    expect(auditMetrics(budgeted).problems).toEqual([
+      expect.stringContaining('2026-10-01_1/01-a/ai_completed.md: the "**Raise:**" line in "## Debt" must look like'),
+    ]);
+  });
+
+  test('a raise from an earlier round is history: doctor says nothing about it', () => {
+    const root = withSnapshot({ debtBudget: { maxKnown: 200 } });
+    todo(root, '2026-10-01_1/01-a', { 'ai_completed.md': completed('01-a', debt.replace('230 → 238', '200 → 230')) });
+    expect(auditMetrics(root).notes.join('\n')).toContain('2026-10-01_1/01-a raises it 200 → 230');
+    commitAll(root, 'round 1');
+    const notes = auditMetrics(root).notes.join('\n');
+    expect(notes).not.toContain('2026-10-01_1/01-a');
+    expect(notes).toContain('known debt 230 in metrics/latest.json is over the budget 200');
   });
 
   test('settings are untouched by an audit', () => {

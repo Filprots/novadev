@@ -38,3 +38,25 @@ export function changedSinceHead(root: string, rel: string): Set<string> | null 
     [...tracked.split('\0'), ...untracked.split('\0')].filter(Boolean).map((path) => resolve(root, path)),
   );
 }
+
+/**
+ * Every file under `rel` (relative to `root`) that the last commit holds and that has not changed
+ * since — not in the index, not in the working tree — as absolute paths. In a repository with no
+ * commit yet, nothing is unchanged: the empty set. Null when git cannot tell (no git, not a
+ * repository).
+ */
+export function unchangedSinceHead(root: string, rel: string): Set<string> | null {
+  if (git(root, ['rev-parse', '--is-inside-work-tree'])?.trim() !== 'true') return null;
+  if (git(root, ['rev-parse', '--verify', '--quiet', 'HEAD^{commit}']) === null) return new Set();
+  const committed = git(root, ['ls-tree', '-r', '-z', '--name-only', 'HEAD', '--', rel]);
+  const changed = git(root, ['diff', '--name-only', '-z', '--relative', 'HEAD', '--', rel]);
+  if (committed === null || changed === null) return null;
+  const moved = new Set(changed.split('\0').filter(Boolean).map((path) => resolve(root, path)));
+  return new Set(
+    committed
+      .split('\0')
+      .filter(Boolean)
+      .map((path) => resolve(root, path))
+      .filter((path) => !moved.has(path)),
+  );
+}

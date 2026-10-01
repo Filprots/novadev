@@ -106,6 +106,28 @@ describe('sync', () => {
     expect(index).toContain('| [FEAT-0001](FEAT-0001-login/feature.md) |');
   });
 
+  test('link files with CRLF line endings stay CRLF, and up-to-date ones are not stale', () => {
+    const root = project();
+    write(root, '.novadev/features/FEAT-0001-login/feature.md', LOGIN);
+    expect(run(root, 'sync').code).toBe(0);
+    const files = ['features/INDEX.md', 'features/FEAT-0001-login/work.md', 'features/FEAT-0001-login/tests.md'];
+    for (const rel of files) write(root, `.novadev/${rel}`, read(root, `.novadev/${rel}`).replace(/\r?\n/g, '\r\n'));
+
+    const check = run(root, 'sync', '--check');
+    expect(check.code).toBe(0);
+    expect(check.stdout).not.toContain('stale');
+
+    // New derived content is written in the file's own line endings.
+    todo(root, '2026-10-01_1/01-login', {
+      'ai_completed.md': completed('01-login').replace('none — test fixture', 'FEAT-0001'),
+    });
+    expect(run(root, 'sync').stdout).toContain('derived: regenerated 1 file(s)');
+    const work = read(root, '.novadev/features/FEAT-0001-login/work.md');
+    expect(work).toContain('`2026-10-01_1/01-login`');
+    expect(work.replace(/\r\n/g, '')).not.toContain('\n');
+    expect(run(root, 'sync', '--check').code).toBe(0);
+  });
+
   test('a link problem fails sync', () => {
     const root = project();
     todo(root, '2026-10-01_1/01-thing', {

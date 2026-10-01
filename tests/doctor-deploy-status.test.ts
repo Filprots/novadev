@@ -1,6 +1,6 @@
 // `novadev deploy`, `novadev doctor` and `novadev status` around the metrics folder and settings.
 import { describe, expect, test } from 'bun:test';
-import { rmSync } from 'node:fs';
+import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { NOVADEV_VERSION, todayStamp } from '../src/lib.ts';
 import { exists, project, read, readJson, run, setManifest, tempDir, write } from './helpers.ts';
@@ -148,6 +148,15 @@ describe('doctor', () => {
     expect(result.stdout).toContain('✗ metrics: a file, not a folder');
   });
 
+  test('a folder where the snapshot belongs is a problem, not a crash', () => {
+    const root = deployed();
+    mkdirSync(join(root, '.novadev/metrics/latest.json'));
+    const result = run(root, 'doctor');
+    expect(result.code).toBe(1);
+    expect(result.stderr).toBe('');
+    expect(result.stdout).toContain('✗ metrics/latest.json: a folder, not a file');
+  });
+
   test('never runs the metrics command', () => {
     const root = deployed();
     setManifest(root, { metrics: 'touch doctor-ran' });
@@ -172,6 +181,11 @@ describe('status', () => {
     run(root, 'sync');
     expect(run(root, 'status').stdout).toContain(
       `metrics — known debt 238 of 240, 1 new, 2 hub(s), as of ${todayStamp()}`,
+    );
+
+    write(root, '.novadev/metrics/latest.json', '{\n<<<<<<< HEAD\n}\n');
+    expect(run(root, 'status').stdout).toContain(
+      'metrics — ⚠ metrics/latest.json cannot be read (not valid JSON); `novadev doctor` says more',
     );
   });
 });
