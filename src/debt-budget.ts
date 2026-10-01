@@ -21,27 +21,27 @@
 // The `## Debt` section also explains growth: sync stops listing it once a record says why in this
 // round's own words — the lines the last commit does not hold. The metrics that measure the debt
 // are metrics.ts.
-import { existsSync, readFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { fileAtHead, unchangedSinceHead } from './git.ts';
 import {
-  RECORD_COMPLETED,
-  RECORD_FAILED,
-  RECORD_PROGRESS,
   ROOT_DIR_NAME,
+  WORK_RECORDS,
   type Parsed,
   byCodePoint,
+  hasWords,
   isCount,
   isPlainObject,
-  listAllTodos,
-  proseLines,
+  markdownSections,
+  openWorkRecords,
+  type WorkRecord,
   readManifest,
   refuse,
+  withoutMarkup,
   writeManifest,
 } from './lib.ts';
 
 /** The work records a `## Debt` section may sit in — never a brief, never a test gate. */
-export const DEBT_RECORDS = [RECORD_COMPLETED, RECORD_PROGRESS, RECORD_FAILED] as const;
+export const DEBT_RECORDS = WORK_RECORDS;
 
 /**
  * One raise sync has judged: which record asked, the budget it started from, the value it asked
@@ -63,8 +63,7 @@ export type RecordRaise = { ref: string; file: string; from: number; to: number;
 export type BrokenRaise = { ref: string; file: string; error: string; round?: RecordRound };
 /** What one record's `## Debt` section holds: a raise, a raise line that cannot be read, or none. */
 export type RaiseRead = { from: number; to: number } | { error: string } | null;
-/** One work record of a todo still in `todos/`. */
-export type WorkRecord = { ref: string; dir: string; file: string; path: string; text: string };
+export type { WorkRecord } from './lib.ts';
 
 /** `debtBudget` from novadev.json: `{ "maxKnown": N, "raises": [...] }`. */
 export function parseBudget(raw: unknown): Parsed<DebtBudget> {
@@ -112,20 +111,7 @@ export function parseBudget(raw: unknown): Parsed<DebtBudget> {
  * comment, is never read as a real section.
  */
 export function debtSections(text: string): string[][] {
-  const lines = proseLines(text.replace(/\r\n?/g, '\n').split('\n'));
-  const sections: string[][] = [];
-  let current: string[] | null = null;
-  for (const line of lines) {
-    if (/^ {0,3}##[ \t]+Debt\b/i.test(line)) {
-      current = [];
-      sections.push(current);
-    } else if (/^ {0,3}#{1,2}[ \t]/.test(line)) {
-      current = null;
-    } else {
-      current?.push(line);
-    }
-  }
-  return sections;
+  return markdownSections(text, 'Debt');
 }
 
 const EMPHASIS = String.raw`(?:\*\*|__|\*|_)?`;
@@ -221,15 +207,6 @@ function reasonText(lines: readonly string[]): string {
     .join('\n');
 }
 
-/** True when the text says something: a letter, once comments and unfilled `<placeholders>` are gone. */
-function hasWords(text: string): boolean {
-  return /\p{L}/u.test(withoutMarkup(text));
-}
-
-function withoutMarkup(text: string): string {
-  return text.replace(/<!--[\s\S]*?-->/g, ' ').replace(/<[^<>\n]*>/g, ' ');
-}
-
 /** The words that answer "no": a `## Debt` text needs one of them to be an empty answer. */
 const NO_WORDS = new Set(['no', 'none', 'nothing', 'nil', 'not', 'n/a', 'na', 'zero', '0', 'without', 'nope']);
 /** Words that only fill out such an answer: "No new debt was added in this round." */
@@ -280,7 +257,7 @@ export function collectRaises(
   const raises: RecordRaise[] = [];
   const problems: string[] = [];
   const broken: BrokenRaise[] = [];
-  for (const record of openRecords(nd)) {
+  for (const record of openWorkRecords(nd)) {
     const found = debtRaiseIn(record.text);
     if (found === null) continue;
     const round = history ? { round: history.roundOf(record, found) } : {};
@@ -382,24 +359,9 @@ function withoutLines(lines: readonly string[], old: readonly string[]): string[
  */
 export function debtNotes(nd: string, history?: RecordHistory): { ref: string; text: string }[] {
   const out: { ref: string; text: string }[] = [];
-  for (const record of openRecords(nd)) {
+  for (const record of openWorkRecords(nd)) {
     const lines = history?.freshDebtLines(record) ?? debtSections(record.text).flat();
     if (saysWhy(lines)) out.push({ ref: record.ref, text: reasonText(lines) });
-  }
-  return out;
-}
-
-/** The work records of the todos still in `todos/`. */
-function openRecords(nd: string): WorkRecord[] {
-  const out: WorkRecord[] = [];
-  for (const todo of listAllTodos(nd)) {
-    if (todo.archived) continue;
-    for (const file of DEBT_RECORDS) {
-      const path = join(todo.dir, file);
-      if (existsSync(path)) {
-        out.push({ ref: todo.ref, dir: todo.dir, file, path, text: readFileSync(path, 'utf8') });
-      }
-    }
   }
   return out;
 }

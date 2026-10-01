@@ -81,6 +81,11 @@ export const MIGRATIONS: Migration[] = [
     title: 'metrics hook + debt budget: novadev.json gains "metrics" and "debtBudget", both off until set',
     run: migrateMetricsSettings,
   },
+  {
+    to: '0.11.0',
+    title: 'a "## Placement" section in records: novadev.json gains "hubs" (off until set) and "placementSince"',
+    run: migratePlacementSettings,
+  },
 ];
 
 /** The migrations a repo whose layout is at `from` still needs, in order. */
@@ -329,6 +334,31 @@ function migrateMetricsSettings(ctx: MigrationContext): void {
       `SKIP .novadev/${METRICS_DIR}/ — it already holds ${foreign.join(', ')}; from 0.10.0 novadev keeps its metrics snapshot there, so move those to another folder`,
     );
   }
+}
+
+// ---------------------------------------------------------------------------
+// 0.10.0 → 0.11.0
+// ---------------------------------------------------------------------------
+
+/**
+ * Two settings for the placement check. "hubs" is written as null — off: hub paths come from the
+ * metrics snapshot, and a list here is only for a project whose snapshot names none. "placementSince"
+ * is the day the migration runs: the records of earlier days were written before the record format
+ * had a `## Placement` section, so the check leaves them alone. A setting that is already there is
+ * never changed.
+ */
+function migratePlacementSettings(ctx: MigrationContext): void {
+  const manifest = readManifest(ctx.nd);
+  if (manifest === null) return;
+  const added: Record<string, unknown> = {};
+  if (!('hubs' in manifest)) added.hubs = null;
+  if (!('placementSince' in manifest)) added.placementSince = todayStamp();
+  const keys = Object.keys(added);
+  if (keys.length === 0) return;
+  ctx.log(
+    `add ${keys.map((key) => `"${key}": ${JSON.stringify(added[key])}`).join(' and ')} to novadev.json — records dated before "placementSince" are not checked for a "## Placement" section (README, "Placement")`,
+  );
+  if (!ctx.dryRun) writeManifest(ctx.nd, { ...manifest, ...added });
 }
 
 function featureFolderFor(nd: string, featureId: string): string | null {

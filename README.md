@@ -59,6 +59,8 @@ new version, and a current stamp would make `migrate-repo` skip the migrations.
 
 0.10.0 adds two settings to `novadev.json`, `metrics` and `debtBudget`. `migrate-repo` writes
 both as `null`, which means off; see *Metrics and the debt budget* below to turn them on.
+0.11.0 adds two more: `hubs`, written as `null` (off), and `placementSince`, set to the day
+`migrate-repo` runs; see *Placement* below.
 
 ## The system
 
@@ -88,7 +90,8 @@ number.
 **Records.** When an agent concludes a todo it writes `ai_completed.md`
 (what/verification/date) or `ai_failed.md` (deferred/cancelled/merged/blocked +
 why) into the todo folder; long-running work carries `ai_progress.md`. One record
-per todo, updated in place if status changes.
+per todo, updated in place if status changes. Every record also says where its new
+code went, in a `## Placement` section (see *Placement* below).
 
 **Human testing.** Agent-verified is not human-verified. When work lands that an
 agent could not check itself — how it renders, how it feels, a real device, a
@@ -165,9 +168,11 @@ a single loop the agent runs for every round of work:
 ```
 0 ORIENT   load the wiki, memories, features, and the queue
 1 INTAKE   any chat request that changes the repo becomes a todo, before work starts
-2 PLAN     batch waves + decisions up front; pre-flight new capabilities for duplicates
+2 PLAN     batch waves + decisions up front; pre-flight new capabilities for duplicates;
+           name the unit that will own a change to a hub
 3 WORK     do it by the project's own conventions
-4 RECORD   ai_completed / ai_failed / ai_progress, with **Feature:** and **Commits:**
+4 RECORD   ai_completed / ai_failed / ai_progress, with **Feature:**, **Commits:** and
+           a ## Placement section
 5 VERIFY   what an agent cannot check → a totest task + the ai_needstest gate
 6 REVIEW   the human left results → judge them, close the gate, file follow-ups
 7 REGISTER feature status, progress, touches
@@ -231,7 +236,7 @@ else. Send logs to stderr.
 | `hubs[].name` | the hub's name; unique, because changes are compared by name |
 | `hubs[].measure` | its size, in the project's own unit (lines, members, …) |
 | `hubs[].over` | optional: the budgets it is over, e.g. `["loc"]` |
-| `hubs[].path` | optional: the path of its file or folder, inside the project and relative to its root |
+| `hubs[].path` | optional: the path of its file or folder, inside the project and relative to its root — the placement check uses it (see *Placement*) |
 
 `debt` and `hubs` are both optional, but at least one must be there. Other keys are ignored.
 Names, `over` entries and paths must each be one line of text. A path printed with
@@ -355,6 +360,57 @@ run `novadev sync`: it writes the file again once the command works. On a merge 
 cannot read, so its settings are never replaced by fresh ones. `novadev deploy` writes a
 README into `metrics/`, unless the folder already holds one of the project's own (a README
 without the "managed by `novadev deploy`" line); then it keeps that one.
+
+## Placement — where new code goes
+
+Hubs grow when every change lands on them by default. So the loop asks "where does this go?"
+twice. In the PLAN phase, before any code is written: does this todo touch a hub? Then the agent
+names the smaller unit that will own the change. And in the record, after the work: every record
+has a `## Placement` section.
+
+```markdown
+## Placement
+- the kit registry → `src/kits/registry.ts` (new, 140 lines). Workbench 11,019 → 10,880:
+  the Workbench only calls the registry now.
+```
+
+For each new unit of state or behaviour, the section names its owner, its size before → after
+(in lines, or the measure the project uses), and why it is not on a hub. A record that adds
+nothing new says "nothing new placed".
+
+**The check.** `novadev doctor` and `novadev sync` report a problem when a record changed a hub
+and its `## Placement` section is missing or empty; `novadev sync --check` then fails. A record
+changed a hub when a commit on its `**Commits:**` line changed a file inside a hub path. novadev
+asks git which files each commit changed. A move counts its old path and its new path, and a
+merge counts what it brought in over its first parent. A commit that several records name
+counts for each of them. A commit git does not know (another repository's, say) is skipped. So
+the check sees a record once its `**Commits:**` line is written: run `novadev sync` again after
+you add it, as the playbook says. A `**Placement:**` line elsewhere in the record does not
+count: the section is a `## Placement` heading of its own.
+
+**Hub paths** come from the metrics snapshot: the `path` of each hub. When the snapshot names no
+hub path — there is no `metrics` command, or its hubs have no paths — they come from `hubs` in
+`novadev.json`:
+
+```json
+"hubs": ["src/editor/workbench/", "src/editor/stage3d.ts"]
+```
+
+A hub path is a file or a folder, relative to the project root, without `..`. A changed file
+counts when it is the hub path, or is inside it. `novadev sync` lists a hub path that is not in
+the project as a NEXT ACTION, because a typo there switches the check off for that hub.
+
+**Which records.** The work records (`ai_completed.md`, `ai_progress.md`, `ai_failed.md`) of
+todos still in `todos/`, dated (`**Date:**`) on or after `placementSince` in `novadev.json`.
+A record whose `**Date:**` line names no day is checked too. Archived records are not checked. `migrate-repo` sets `placementSince` to the day it runs, and a
+first `novadev deploy` to the day of the deploy, so records written before the section existed
+are left alone. `null` checks every record in `todos/`. If you turn on hub paths later, and the
+records of the days in between should not be checked, set `placementSince` to that later day.
+
+**CI needs the history.** The check asks git about the commits that records name. A shallow
+clone (many CI systems fetch only the newest commit) does not have them, and the check then
+skips them. Fetch the full history where `novadev sync --check` runs (for GitHub Actions:
+`fetch-depth: 0`).
 
 ## The three companion playbooks
 

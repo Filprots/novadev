@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from '
 import { dirname, join, resolve } from 'node:path';
 
 export const ROOT_DIR_NAME = '.novadev';
-export const NOVADEV_VERSION = '0.10.0';
+export const NOVADEV_VERSION = '0.11.0';
 
 /** Compare dotted versions: <0 when a is older, 0 when equal, >0 when a is newer. */
 export function compareVersions(a: string, b: string): number {
@@ -58,6 +58,11 @@ export const RECORD_PROGRESS = 'ai_progress.md';
 export const RECORD_NEEDSTEST = 'ai_needstest.md';
 /** The gate, closed: a person tested it and the results were reviewed. */
 export const RECORD_CONFIRMED = 'ai_confirmed.md';
+/**
+ * The records that say what work was done: the ones a `## Debt` or a `## Placement` section may sit
+ * in. Never a brief, never a test gate.
+ */
+export const WORK_RECORDS = [RECORD_COMPLETED, RECORD_PROGRESS, RECORD_FAILED] as const;
 
 /** The strict wiki page set. INDEX.md is the load-first map; the rest are the mandated pages. */
 export const WIKI_PAGES = [
@@ -411,10 +416,38 @@ export function listAllTodos(nd: string): TodoRef[] {
   return out;
 }
 
+/** One work record (see WORK_RECORDS) of a todo still in `todos/`. */
+export type WorkRecord = { ref: string; dir: string; file: string; path: string; text: string };
+
+/** The work records of the todos still in `todos/` — never the archive's. */
+export function openWorkRecords(nd: string): WorkRecord[] {
+  const out: WorkRecord[] = [];
+  for (const todo of listAllTodos(nd)) {
+    if (todo.archived) continue;
+    for (const file of WORK_RECORDS) {
+      const path = join(todo.dir, file);
+      if (existsSync(path)) {
+        out.push({ ref: todo.ref, dir: todo.dir, file, path, text: readFileSync(path, 'utf8') });
+      }
+    }
+  }
+  return out;
+}
+
 /** Pull `**Field:** value` out of a markdown document (the authored-link syntax). */
 export function readField(text: string, name: string): string | null {
   const m = text.match(new RegExp(`^\\*\\*${name}:\\*\\*[ \\t]*(.*)$`, 'mi'));
   return m ? m[1].trim() : null;
+}
+
+/**
+ * The day a record's `**Date:**` line names (YYYY-MM-DD) — the latest one, when it names several
+ * ("2026-09-11, updated 2026-10-02"): that is when the record last changed its account of the work.
+ * Null when the line names no day.
+ */
+export function recordDate(text: string): string | null {
+  const days = (readField(text, 'Date') ?? '').match(/\d{4}-\d{2}-\d{2}/g) ?? [];
+  return days.length === 0 ? null : [...days].sort().at(-1)!;
 }
 
 /** FEAT-IDs mentioned anywhere in a string — tolerant of prose around them. */
@@ -557,6 +590,48 @@ function closesInParagraph(lines: readonly string[], from: number): boolean {
     if (lines[i]!.includes('-->')) return true;
   }
   return false;
+}
+
+/**
+ * Each `## <title>` section of a markdown text, as lines, up to the next level-1 or level-2 heading.
+ * The heading may go on after the title ("## Placement notes"), but the title must be a word of its
+ * own ("## Debts" is not "## Debt"); a level-3 heading is not a section of its own. Fenced code and
+ * HTML comments are blanked first (see `proseLines`), so a text QUOTING a section — a template in a
+ * code block, an old section kept in a comment — is never read as one.
+ */
+export function markdownSections(text: string, title: string): string[][] {
+  const lines = proseLines(text.replace(/\r\n?/g, '\n').split('\n'));
+  // The title, then no letter, digit or "_": "## Debt:" and "## Debt budget" start a Debt section,
+  // "## Debts" does not.
+  const heading = new RegExp(`^ {0,3}##[ \\t]+${escapeRegExp(title)}(?![\\p{L}\\p{N}_])`, 'iu');
+  const sections: string[][] = [];
+  let current: string[] | null = null;
+  for (const line of lines) {
+    if (heading.test(line)) {
+      current = [];
+      sections.push(current);
+    } else if (/^ {0,3}#{1,2}[ \t]/.test(line)) {
+      current = null;
+    } else {
+      current?.push(line);
+    }
+  }
+  return sections;
+}
+
+/** `text` as a regular expression that matches exactly that text. */
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+}
+
+/** Text without HTML comments and without unfilled `<placeholders>` — what a reader would count as written. */
+export function withoutMarkup(text: string): string {
+  return text.replace(/<!--[\s\S]*?-->/g, ' ').replace(/<[^<>\n]*>/g, ' ');
+}
+
+/** True when the text says something: a letter, once comments and unfilled `<placeholders>` are gone. */
+export function hasWords(text: string): boolean {
+  return /\p{L}/u.test(withoutMarkup(text));
 }
 
 /** True when `line` is `marker` on a line of its own: indented by at most three spaces, nothing else. */

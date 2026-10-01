@@ -1,11 +1,11 @@
-// `novadev migrate-repo`: the 0.9.0 → 0.10.0 step (the metrics settings), and the invariants every
-// migration relies on.
+// `novadev migrate-repo`: the 0.9.0 → 0.10.0 step (the metrics settings), the 0.10.0 → 0.11.0 step
+// (the placement settings), and the invariants every migration relies on.
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { NOVADEV_VERSION, compareVersions } from '../src/lib.ts';
+import { NOVADEV_VERSION, compareVersions, todayStamp } from '../src/lib.ts';
 import { MIGRATIONS } from '../src/migrations.ts';
-import { REPO, exists, project, read, readJson, run, write } from './helpers.ts';
+import { REPO, commitAll, exists, git, project, read, readJson, run, setManifest, todo, write } from './helpers.ts';
 
 describe('the migration list', () => {
   test('is in ascending version order and ends at or below the installed version', () => {
@@ -108,5 +108,81 @@ describe('0.9.0 → 0.10.0', () => {
     const result = run(root, 'sync');
     expect(result.code).toBe(0);
     expect(result.stdout).toContain('sync: clean. ✓');
+  });
+});
+
+describe('0.10.0 → 0.11.0', () => {
+  test('adds "hubs" as null and "placementSince" as today, keeps every other setting, stamps the version', () => {
+    const root = project({ version: '0.10.0', metrics: 'bun scripts/metrics.ts', debtBudget: { maxKnown: 5 }, archiveGraceDays: 5 });
+    const result = run(root, 'migrate-repo', '--force');
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain('▸ 0.11.0 — a "## Placement" section in records');
+    expect(result.stdout).toContain(
+      `add "hubs": null and "placementSince": "${todayStamp()}" to novadev.json — records dated before "placementSince" are not checked for a "## Placement" section (README, "Placement")`,
+    );
+    expect(result.stdout).not.toContain('▸ 0.10.0');
+    expect(readJson(root, '.novadev/novadev.json')).toMatchObject({
+      version: NOVADEV_VERSION,
+      metrics: 'bun scripts/metrics.ts',
+      debtBudget: { maxKnown: 5 },
+      archiveGraceDays: 5,
+      hubs: null,
+      placementSince: todayStamp(),
+    });
+    expect(run(root, 'migrate-repo').stdout).toContain(`already at ${NOVADEV_VERSION}`);
+  });
+
+  test('never changes a setting that is already there — a list, a day, or null', () => {
+    const set = project({ version: '0.10.0', hubs: ['src/wb/'], placementSince: '2026-09-01' });
+    const quiet = run(set, 'migrate-repo', '--force');
+    expect(quiet.stdout).toContain('▸ 0.11.0');
+    expect(quiet.stdout).toContain('(nothing to do)');
+    expect(readJson(set, '.novadev/novadev.json')).toMatchObject({ hubs: ['src/wb/'], placementSince: '2026-09-01' });
+
+    const off = project({ version: '0.10.0', placementSince: null });
+    expect(run(off, 'migrate-repo', '--force').stdout).toContain('add "hubs": null to novadev.json');
+    expect(readJson(off, '.novadev/novadev.json').placementSince).toBeNull();
+  });
+
+  test('--dry-run says what it would do and changes nothing', () => {
+    const root = project({ version: '0.10.0' });
+    const before = read(root, '.novadev/novadev.json');
+    const result = run(root, 'migrate-repo', '--dry-run');
+    expect(result.stdout).toContain(`would add "hubs": null and "placementSince": "${todayStamp()}"`);
+    expect(read(root, '.novadev/novadev.json')).toBe(before);
+  });
+
+  test('a 0.9.0 repo runs both steps in one go', () => {
+    const root = project({ version: '0.9.0' });
+    const result = run(root, 'migrate-repo', '--force');
+    expect(result.stdout).toContain('2 migration(s) to apply: 0.10.0 → 0.11.0');
+    expect(readJson(root, '.novadev/novadev.json')).toMatchObject({
+      metrics: null,
+      debtBudget: null,
+      hubs: null,
+      placementSince: todayStamp(),
+    });
+  });
+
+  test('records written before the migration day are not checked; a new record that changed a hub is', () => {
+    const root = project({ version: '0.10.0' });
+    write(root, 'src/wb/workbench.ts', 'a\n');
+    commitAll(root, 'base');
+    write(root, 'src/wb/workbench.ts', 'b\n');
+    git(root, 'commit', '-q', '--no-verify', '-am', 'hub work');
+    const hash = git(root, 'rev-parse', '--short', 'HEAD').stdout.trim();
+    const record = (date: string) =>
+      `# ai_completed — x\n\n**Date:** ${date}\n**Feature:** none — fixture\n**Commits:** ${hash}\n\n## What I did\nWork.\n`;
+    todo(root, '2020-01-01_1/01-old', { 'ai_completed.md': record('2020-01-01') });
+    commitAll(root, 'old record');
+    expect(run(root, 'migrate-repo').code).toBe(0);
+    setManifest(root, { hubs: ['src/wb/'] });
+    expect(run(root, 'sync').stdout).not.toContain('## Placement');
+
+    todo(root, '2020-01-01_1/02-new', { 'ai_completed.md': record(todayStamp()) });
+    const synced = run(root, 'sync');
+    expect(synced.code).toBe(1);
+    expect(synced.stdout).toContain(`2020-01-01_1/02-new/ai_completed.md: commit ${hash} changed the hub src/wb/`);
+    expect(synced.stdout).not.toContain('01-old');
   });
 });

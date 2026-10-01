@@ -13,7 +13,8 @@ Inside a todo folder:
 - **the record** — written by the agent when work concludes: `ai_completed.md`
   (implemented + verified) or `ai_failed.md` (deferred / cancelled / merged /
   blocked — which case and why), or `ai_progress.md` while long-running work is
-  still in flight.
+  still in flight. Every record says where its new code went, in a `## Placement`
+  section.
 
 Todos are not only human-authored: when the human asks an agent in chat to
 implement/fix/change something that no open todo covers, the agent must FILE it

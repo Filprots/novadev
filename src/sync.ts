@@ -35,6 +35,7 @@ import {
 import { auditLinks } from './links.ts';
 import { displayCommand, refreshMetrics } from './metrics.ts';
 import { auditMetrics } from './metrics-audit.ts';
+import { auditPlacement } from './placement.ts';
 
 export async function sync(args: string[]): Promise<void> {
   const check = args.includes('--check');
@@ -69,6 +70,10 @@ export async function sync(args: string[]): Promise<void> {
   // Judged against what the files hold once this sync is done — the fresh snapshot, the budget
   // as novadev.json keeps it — so `--check` judges the wiki budgets block the way sync writes it.
   const metricsAudit = auditMetrics(root, metrics.view);
+  // A record whose commits changed a hub must say where its new units went. Judged on the tree as
+  // it is now, before anything is archived — the tree `--check` judges — with the hub paths of the
+  // snapshot this sync stores: a record is never archived out of sight before its problem is shown.
+  const placement = auditPlacement(root, metrics.view.snapshot);
 
   // 1. Derived content.
   const before = auditLinks(root);
@@ -96,7 +101,7 @@ export async function sync(args: string[]): Promise<void> {
 
   // 3. Validate what is left.
   const audit = auditLinks(root);
-  const problems = [...audit.problems, ...metricsAudit.problems];
+  const problems = [...audit.problems, ...metricsAudit.problems, ...placement.problems];
   if (problems.length > 0) {
     console.log(`\nPROBLEMS (${problems.length}):`);
     for (const p of problems) console.log(`  ✗ ${p}`);
@@ -118,7 +123,7 @@ export async function sync(args: string[]): Promise<void> {
   }
 
   // 4. What still needs doing, split by who has to do it.
-  const agent = [...agentActions(root, nd, audit.notes), ...metrics.actions];
+  const agent = [...agentActions(root, nd, audit.notes), ...metrics.actions, ...placement.actions];
   const human = humanActions(nd);
 
   if (agent.length > 0) {

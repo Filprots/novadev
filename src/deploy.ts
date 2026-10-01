@@ -156,8 +156,11 @@ export function deploy(cwd: string = process.cwd()): void {
   const firstDeploy = !existsSync(manifestPath(root));
   const manifest = readManifest(root) ?? {};
   // A new project starts with the opt-in settings visible and off, exactly like a repo that
-  // `migrate-repo` brought to 0.10.0. Only on the FIRST deploy: someone who deleted them meant it.
-  const seeded = firstDeploy ? { metrics: null, debtBudget: null } : {};
+  // `migrate-repo` brought to this version — and with "placementSince" set to today, as the 0.11.0
+  // migration sets it. Only on the FIRST deploy: someone who deleted them meant it.
+  const seeded = firstDeploy
+    ? { metrics: null, debtBudget: null, hubs: null, placementSince: todayStamp() }
+    : {};
   writeManaged(
     join(root, 'novadev.json'),
     JSON.stringify(

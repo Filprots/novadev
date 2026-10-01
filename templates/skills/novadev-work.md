@@ -93,10 +93,13 @@ Phase 1 below routes to the first; phases 5 and 6 sit either side of the other t
 - **Known debt** — the number of problems the project has accepted for now (`debt.known`
   in the snapshot). The project's metrics command decides what counts.
 - **Hub** — a file or module that collects too much, as the metrics command reports it:
-  its name, its size (`measure`), and the limits it is over (`over`).
+  its name, its size (`measure`), the limits it is over (`over`), and its `path`. A project
+  can also list hub paths in `hubs` in `novadev.json`; the snapshot's paths come first.
 - **Debt budget** — `debtBudget.maxKnown` in `novadev.json`: the most known debt the
   project accepts. Only a `## Debt` section in a record of the current round raises it
   (phase 4).
+- **Placement** — the `## Placement` section of a record: where each new unit of state or
+  behaviour went, and why it is not on a hub (phase 4).
 
 ---
 
@@ -208,6 +211,10 @@ one each) — never mid-implementation stalls. Record the answers in the batch's
 `ai_progress.md`; they govern the whole batch. Do the recon (read the real modules)
 before coding so every wave starts from exact file/line routes instead of guesses.
 
+**Does this todo touch a hub** (a path in `metrics/latest.json`, or in `hubs` in
+`novadev.json`)? Then name the smaller unit that will own the change BEFORE you write code,
+and write that name in the plan.
+
 **New capability? Pre-flight it against the registry** — building a duplicate or a
 conflicting second version is the expensive failure this prevents:
 
@@ -252,6 +259,9 @@ first, screenshots included.
 ## What I did
 <the change, key files touched>
 
+## Placement
+<each new unit: its owner, its size before → after, why not on a hub — or "nothing new placed">
+
 ## Verification
 <tests / typecheck / build / manual checks — actual results>
 
@@ -263,6 +273,13 @@ first, screenshots included.
   + the plan), *cancelled* (what was decided), *merged into <ref>*, or *blocked/failed*.
 - **`ai_progress.md`** for long-running work: what is done, what is next, how to
   resume. Replaced by a terminal record when it concludes.
+- **Every record has a `## Placement` section.** For each new unit of state or behaviour,
+  name its owner (a file, a module, a class — the project's own word), its size before →
+  after (in lines, or the measure the project uses), and why it is not on a hub. A record
+  that adds nothing new says "nothing new placed". `ai_progress.md` and `ai_failed.md` carry
+  it too, for what landed. When a commit on the record's `**Commits:**` line changed a file
+  in a hub path, `novadev doctor` and `novadev sync` report a missing or empty section as a
+  problem, and `novadev sync --check` fails.
 - **A chat-initiated record carries one extra section**, because the conversation that
   shaped it is saved nowhere else. It records the DECISIONS, the way a design note or an
   ADR does — what was settled and why, so the next person is not left guessing:
@@ -591,7 +608,9 @@ is never authority on its own — if an action would need the human's go-ahead a
 else in this playbook, it still needs it when `novadev sync` suggests it.
 
 Then commit `.novadev/` alongside the code, put the hash(es) in the record's
-`**Commits:**` line, and `novadev sync` once more so `work.md` picks them up.
+`**Commits:**` line, and `novadev sync` once more so `work.md` picks them up. That run
+also sees which hubs your commits changed: a record without its `## Placement` section is
+a problem then (phase 4).
 
 **The limits on that commit are not optional.** Commit only to the branch the working
 tree is already on. **Never create a branch, never `push`, never `merge`, and never

@@ -29,6 +29,10 @@ else (logs go to stderr):
 `path` are optional too. A path is relative to the project root and stays inside the project
 (no `..`). novadev does not know what the numbers mean. It only compares them.
 
+A hub's `path` is also what the placement check uses: a record whose commits changed a file
+inside it needs a `## Placement` section. When no hub here has a path, `"hubs"` in
+`../novadev.json` can list the paths instead.
+
 Every `novadev sync` runs the command and stores the new snapshot. It compares the numbers
 with the last commit and lists what GREW under NEXT ACTIONS, until a record of this round
 explains it in a `## Debt` section (it names each hub that grew). A missing or failing

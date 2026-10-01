@@ -83,9 +83,21 @@ export function setManifest(root: string, patch: Record<string, unknown>, replac
   write(root, path, JSON.stringify({ ...current, ...patch }, null, 2) + '\n');
 }
 
-/** What the project's metrics command will print: `cat metrics-out.json`. */
+/**
+ * What the project's metrics command will print: `cat metrics-out.json`. The hub paths it names are
+ * created in the project, as they would be in a real one: a folder (a path ending in "/") gets a
+ * `.keep` file, any other path becomes a file. A path that is already there is left as it is.
+ */
 export function metricsOutput(root: string, value: unknown): void {
   write(root, 'metrics-out.json', typeof value === 'string' ? value : JSON.stringify(value));
+  const hubs = (value as { hubs?: unknown } | null)?.hubs;
+  if (!Array.isArray(hubs)) return;
+  for (const hub of hubs) {
+    const path = (hub as { path?: unknown } | null)?.path;
+    if (typeof path !== 'string' || path === '' || path.includes('..') || path.startsWith('/')) continue;
+    if (exists(root, path)) continue;
+    write(root, path.endsWith('/') ? `${path}.keep` : path, '');
+  }
 }
 
 /** A project whose metrics command prints `value`. */

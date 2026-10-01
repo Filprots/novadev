@@ -26,6 +26,7 @@ import {
 } from './lib.ts';
 import { auditLinks } from './links.ts';
 import { auditMetrics } from './metrics-audit.ts';
+import { auditPlacement } from './placement.ts';
 
 export function doctor(): void {
   const root = requireProjectRoot();
@@ -262,6 +263,11 @@ export function doctor(): void {
   for (const fix of metricsAudit.fixes) {
     problems.push(`${fix.label} — run \`novadev sync\``);
   }
+
+  // --- placement: a record whose commits changed a hub says where its new units went ---
+  const placement = auditPlacement(root);
+  problems.push(...placement.problems);
+  notes.push(...placement.actions, ...placement.notes);
 
   // --- unknown top-level folders: tolerated, but surfaced ---
   const known = new Set([

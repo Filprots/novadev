@@ -5,13 +5,16 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { debtRaiseIn } from '../src/debt-budget.ts';
+import { parseHubsSetting } from '../src/hubs.ts';
 import { parseMetricsOutput } from '../src/metrics.ts';
+import { placementState } from '../src/placement.ts';
 import { REPO, commitAll, completed, metricsOutput, metricsProject, read, run, tempDir, todo } from './helpers.ts';
 
 const readme = readFileSync(join(REPO, 'README.md'), 'utf8');
 const playbook = readFileSync(join(REPO, 'templates/skills/novadev-work.md'), 'utf8');
 const folderReadme = readFileSync(join(REPO, 'templates/readmes/metrics.md'), 'utf8');
 const rootReadme = readFileSync(join(REPO, 'templates/readmes/root.md'), 'utf8');
+const todosReadme = readFileSync(join(REPO, 'templates/readmes/todos.md'), 'utf8');
 
 /** The bodies of the fenced blocks in a markdown text whose info string is `lang` ('' = none). */
 function fences(text: string, lang: string): string[] {
@@ -41,7 +44,8 @@ describe('the README', () => {
   });
 
   test('its example command output is valid for the real parser', () => {
-    const examples = fences(readme, 'json').filter((body) => body.includes('"hubs"'));
+    // The command's output names each hub's "measure"; the novadev.json examples do not.
+    const examples = fences(readme, 'json').filter((body) => body.includes('"measure"'));
     expect(examples.length).toBeGreaterThan(0);
     for (const body of examples) expect(parseMetricsOutput(body).ok).toBe(true);
   });
@@ -117,7 +121,61 @@ describe('the README', () => {
   });
 });
 
+describe('the README on placement', () => {
+  test('documents both settings, the section, the check and its limits', () => {
+    for (const text of [
+      '"hubs"',
+      '`placementSince`',
+      '## Placement',
+      '"nothing new placed"',
+      'A record\nchanged a hub when a commit on its `**Commits:**` line changed a file inside a hub path',
+      'A move counts its old path and its new path',
+      'first parent',
+      'Archived records are not checked',
+      '`fetch-depth: 0`',
+      '0.11.0 adds two more',
+    ]) {
+      expect(readme).toContain(text);
+    }
+  });
+
+  test('its "## Placement" example is a written section, and its "hubs" example is a valid list', () => {
+    const example = fences(readme, 'markdown').find((body) => body.includes('## Placement'));
+    expect(example).toBeDefined();
+    expect(placementState(example!)).toBe('written');
+    const hubs = fences(readme, 'json').find((body) => body.trimStart().startsWith('"hubs"'));
+    expect(hubs).toBeDefined();
+    const parsed = parseHubsSetting(JSON.parse(`{${hubs!}}`).hubs);
+    expect(parsed).toEqual({ ok: true, value: ['src/editor/workbench/', 'src/editor/stage3d.ts'] });
+  });
+});
+
 describe('the templates', () => {
+  test('the PLAN phase asks whether the todo touches a hub, before any code is written', () => {
+    const plan = playbook.split('## 2 · PLAN')[1]!.split('## 3 · WORK')[0]!;
+    expect(plan).toContain('**Does this todo touch a hub**');
+    expect(plan).toContain('name the smaller unit that will own the change BEFORE you write code');
+    expect(plan).toContain('`hubs` in\n`novadev.json`');
+  });
+
+  test('the record template has a Placement section — empty until it is filled in — and phase 4 says when it is checked', () => {
+    const record = playbook.split('## 4 · RECORD')[1]!.split('## 5 · VERIFY')[0]!;
+    const template = fences(record, 'markdown').find((body) => body.startsWith('# ai_completed'));
+    expect(template).toBeDefined();
+    expect(template!.indexOf('## Placement')).toBeGreaterThan(template!.indexOf('## What I did'));
+    expect(template!.indexOf('## Placement')).toBeLessThan(template!.indexOf('## Verification'));
+    expect(placementState(template!)).toBe('empty');
+    expect(record).toContain('**Every record has a `## Placement` section.**');
+    expect(record).toContain('"nothing new placed"');
+    expect(record).toContain('`novadev sync --check` fails');
+  });
+
+  test('the folder READMEs mention the section and what drives the check', () => {
+    expect(todosReadme).toContain('`## Placement`');
+    expect(folderReadme).toContain('placement check');
+    expect(folderReadme).toContain('`"hubs"`');
+  });
+
   test('the playbook tells agents about the record section, the check and the snapshot', () => {
     expect(playbook).toContain('## Debt');
     expect(playbook).toContain('**Raise:**');
@@ -133,9 +191,9 @@ describe('the templates', () => {
     expect(playbook).toContain('keep the\nhigher `maxKnown` and the raises of both sides');
   });
 
-  test('the playbook defines the words it uses for metrics', () => {
+  test('the playbook defines the words it uses for metrics and placement', () => {
     const vocabulary = playbook.split('## Vocabulary')[1]!.split('\n---')[0]!;
-    for (const term of ['**Snapshot**', '**Known debt**', '**Hub**', '**Debt budget**']) {
+    for (const term of ['**Snapshot**', '**Known debt**', '**Hub**', '**Debt budget**', '**Placement**']) {
       expect(vocabulary).toContain(term);
     }
   });

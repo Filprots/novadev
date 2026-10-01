@@ -14,7 +14,7 @@ function deployed(): string {
 }
 
 describe('deploy', () => {
-  test('a first deploy creates metrics/ with its README and shows both settings, off', () => {
+  test('a first deploy creates metrics/ with its README, shows the opt-in settings off, and starts the placement check today', () => {
     const root = tempDir();
     expect(run(root, 'deploy').code).toBe(0);
     expect(read(root, '.novadev/metrics/README.md')).toContain('# metrics — the project\'s own numbers');
@@ -24,6 +24,8 @@ describe('deploy', () => {
       deployedAt: todayStamp(),
       metrics: null,
       debtBudget: null,
+      hubs: null,
+      placementSince: todayStamp(),
     });
   });
 
@@ -42,11 +44,12 @@ describe('deploy', () => {
     const manifest = readJson(root, '.novadev/novadev.json');
     delete manifest.metrics;
     delete manifest.debtBudget;
+    delete manifest.hubs;
+    delete manifest.placementSince;
     write(root, '.novadev/novadev.json', JSON.stringify(manifest, null, 2) + '\n');
     run(root, 'deploy');
     const after = readJson(root, '.novadev/novadev.json');
-    expect('metrics' in after).toBe(false);
-    expect('debtBudget' in after).toBe(false);
+    for (const key of ['metrics', 'debtBudget', 'hubs', 'placementSince']) expect(key in after).toBe(false);
   });
 
   test('refuses a repo that still needs migrating, changes nothing, and goes ahead after migrate-repo', () => {

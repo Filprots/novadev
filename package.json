@@ -1,6 +1,6 @@
 {
   "name": "novadev",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "novadev — a framework/language/agent-agnostic structured development system: git-tracked todos, archive, postponed, sparks, wiki, memories, and a linked features registry, deployed into any project with one command.",
   "type": "module",
   "bin": {
