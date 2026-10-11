@@ -150,6 +150,15 @@ describe('0.11.0 → 0.12.0', () => {
     expect(clean.code).toBe(0);
   });
 
+  test('a header written in another tool\'s format keeps its nested values, exactly as written', () => {
+    const root = legacy();
+    write(root, '.novadev/memories/host.md', '---\nname: host\ndescription: Where the engines live\nmetadata:\n  type: reference\n  tags:\n    - voice\n---\nThe fact.\n');
+    run(root, 'migrate-repo', '--force');
+    const text = read(root, `${K}/memories/host.md`);
+    expect(text).toContain('name: host\nmetadata:\n  type: reference\n  tags:\n    - voice\n---');
+    expect(text).toContain('description: Where the engines live');
+  });
+
   test('a knowledge folder that already exists in the bundle is never overwritten', () => {
     const root = legacy();
     write(root, `${K}/memories/mine.md`, '---\ntype: Guide\n---\n');

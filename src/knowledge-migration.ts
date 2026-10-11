@@ -268,16 +268,27 @@ function withSummary(text: string, summary: string): string {
   return head + lines.join('\n');
 }
 
-/** An old novadev header: flat `key: value` lines, read the way 0.11.0 read them. */
-function legacyHeader(text: string): { keys: [string, string][]; body: string } {
+/**
+ * An old novadev header: flat `key: value` lines, read the way 0.11.0 read them — and, kept as they
+ * were written, the indented lines under a key (a nested value 0.11.0 never read, like a memory in
+ * another tool's format carrying `metadata:` with `type: reference` under it). Nothing is lost.
+ */
+function legacyHeader(text: string): { keys: [string, string][]; nested: Map<string, string[]>; body: string } {
   const split = splitFrontmatter(text);
-  if (split === null) return { keys: [], body: text };
+  const nested = new Map<string, string[]>();
+  if (split === null) return { keys: [], nested, body: text };
   const keys: [string, string][] = [];
+  let last: string | null = null;
   for (const line of split.header.split(/\r?\n/)) {
     const m = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
-    if (m) keys.push([m[1]!, m[2]!.trim()]);
+    if (m) {
+      keys.push([m[1]!, m[2]!.trim()]);
+      last = m[1]!;
+    } else if (last !== null && /^(?:[ \t]+\S|- )/.test(line)) {
+      nested.set(last, [...(nested.get(last) ?? []), line]);
+    }
   }
-  return { keys, body: split.body };
+  return { keys, nested, body: split.body };
 }
 
 const midnight = (day: string) => `${day}T00:00:00Z`;
@@ -332,7 +343,7 @@ export function convert(
     reviewDays: number | null;
   },
 ): { text: string; missing: string[] } {
-  const { keys, body } = legacyHeader(text);
+  const { keys, nested, body } = legacyHeader(text);
   const old = new Map(keys);
   const missing: string[] = [];
   const lines: string[] = [];
@@ -411,8 +422,11 @@ export function convert(
   }
   for (const [key, value] of keys) {
     if (consumed.has(key) || ['updated', 'kind', 'verified'].includes(key)) continue;
+    const under = nested.get(key) ?? [];
     // OKF's `tags` is a YAML list; a page or a memory that kept its own comma list gets one.
-    if (key === 'tags') lines.push(`tags: ${yamlFlowList(csvList(value.replace(/^\[|\]$/g, '')))}`);
+    if (key === 'tags' && under.length === 0) lines.push(`tags: ${yamlFlowList(csvList(value.replace(/^\[|\]$/g, '')))}`);
+    // A nested value is YAML already: it is carried exactly as it was written.
+    else if (under.length > 0) lines.push(value === '' ? `${key}:` : `${key}: ${value}`, ...under);
     else lines.push(`${key}: ${value === '' ? '' : yamlString(value)}`.trimEnd());
   }
   let nextBody = body;
