@@ -50,8 +50,8 @@ together with the record. When known debt drops under the budget, sync asks you 
 `maxKnown`, so the gain is kept.
 
 **The wiki block.** Sync also keeps a generated "Budgets" block in
-`../wiki/architecture.md` (or the page named by `"metricsWikiPage"`): the debt count, the
-budget and the hub table.
+`../knowledge/wiki/architecture.md` (or the page named by `"metricsWikiPage"`): the debt
+count, the budget and the hub table.
 
 On a merge conflict in `latest.json`: keep either side, or delete the file, then run
 `novadev sync`. On a merge conflict in `../novadev.json`: keep the higher `maxKnown` and the

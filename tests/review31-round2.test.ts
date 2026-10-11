@@ -5,31 +5,17 @@ import { describe, expect, test } from 'bun:test';
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { normalizeMetrics, runMetricsCommand } from '../src/metrics.ts';
-import {
-  REPO,
-  cleanEnv,
-  commitAll,
-  completed,
-  metricsOutput,
-  metricsProject,
-  project,
-  read,
-  readJson,
-  run,
-  tempDir,
-  todo,
-  write,
-} from './helpers.ts';
+import { cleanEnv, commitAll, completed, feature, metricsOutput, metricsProject, project, read, readJson, REPO, run, tempDir, todo, write } from './helpers.ts';
 
 describe('[major] findings', () => {
   test('no new block on every run with an unclosed fence', () => {
     const root = metricsProject({ debt: { known: 1 }, hubs: [] });
-    write(root, '.novadev/wiki/architecture.md', '# Architecture\n\nAn example:\n\n```sh\nnovadev sync\n\nMore hand-written text.\n');
+    write(root, '.novadev/knowledge/wiki/architecture.md', '# Architecture\n\nAn example:\n\n```sh\nnovadev sync\n\nMore hand-written text.\n');
     run(root, 'sync');
-    const first = read(root, '.novadev/wiki/architecture.md');
+    const first = read(root, '.novadev/knowledge/wiki/architecture.md');
     run(root, 'sync');
     run(root, 'sync');
-    const third = read(root, '.novadev/wiki/architecture.md');
+    const third = read(root, '.novadev/knowledge/wiki/architecture.md');
     expect(third.split('<!-- novadev:budgets:begin -->').length - 1).toBeLessThanOrEqual(1);
     expect(third).toBe(first);
   });
@@ -97,14 +83,10 @@ describe('[minor] findings', () => {
 
   test('link files in CRLF are not stale once they are up to date', () => {
     const root = project();
-    write(
-      root,
-      '.novadev/features/FEAT-0001-login/feature.md',
-      '---\nid: FEAT-0001\ntitle: Login\nstatus: planned\narea: auth\ncreated: 2026-10-01\nupdated: 2026-10-01\n---\n\n# Login\n',
-    );
+    feature(root, 'FEAT-0001', 'login', { title: 'Login', status: 'planned', area: 'auth' });
     expect(run(root, 'sync').code).toBe(0);
-    for (const rel of ['features/INDEX.md', 'features/FEAT-0001-login/work.md', 'features/FEAT-0001-login/tests.md']) {
-      const path = join(root, '.novadev', rel);
+    for (const rel of ['index.md', 'features/index.md', 'features/FEAT-0001-login/work.md', 'features/FEAT-0001-login/tests.md']) {
+      const path = join(root, '.novadev/knowledge', rel);
       writeFileSync(path, readFileSync(path, 'utf8').replace(/\r?\n/g, '\r\n'));
     }
     expect(run(root, 'sync', '--check').stdout).not.toContain('stale');

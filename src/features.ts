@@ -3,8 +3,10 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { printHubReport } from './feature-hubs.ts';
+import { yamlFlowList, yamlString } from './okf.ts';
 import {
   FEATURE_DOC,
+  FEATURE_STATUS_KEY,
   FEATURE_STATUSES,
   FEATURE_TESTS,
   FEATURE_WORK,
@@ -33,9 +35,9 @@ export function features(args: string[]): void {
   const all = listFeatures(nd);
   if (all.length === 0) {
     console.log(
-      existsSync(join(featuresDir(nd), 'INDEX.md'))
+      existsSync(join(featuresDir(nd), 'index.md'))
         ? 'features — registry is empty.'
-        : 'features — registry MISSING. An agent must create it: skills/novadev-work.md (phase 9)',
+        : 'features — registry MISSING (.novadev/knowledge/features/). An agent must create it: skills/novadev-work.md (phase 9)',
     );
     return;
   }
@@ -82,7 +84,7 @@ export function features(args: string[]): void {
 }
 
 function haystack(f: Feature): string {
-  return [f.id, f.title, f.area, f.tags.join(' '), f.touches.join(' '), f.text]
+  return [f.id, f.title, f.description, f.area, f.tags.join(' '), f.touches.join(' '), f.text]
     .join('\n')
     .toLowerCase();
 }
@@ -194,14 +196,20 @@ function scaffold(nd: string, opts: Options): void {
     join(featureDir, FEATURE_DOC),
     featureSkeleton({ id, title, today, tags: opts.tags, touches: opts.touches }),
   );
-  console.log(`created features/${folder}/${FEATURE_DOC}`);
+  console.log(`created .novadev/knowledge/features/${folder}/${FEATURE_DOC}`);
   console.log(
-    `  fill in area/tags/touches + the body, then \`novadev links --fix\` generates\n` +
-      `  features/${folder}/{${FEATURE_WORK},${FEATURE_TESTS}} and the index.`,
+    `  fill in its description, area, tags, touches and the body, then record its creation:\n` +
+      `  \`novadev knowledge log\` with { "path": "features/${folder}/${FEATURE_DOC}", "event": "create", … }.\n` +
+      `  \`novadev sync\` then writes ${FEATURE_WORK} and ${FEATURE_TESTS} beside it, and the index.`,
   );
 }
 
-/** The canonical feature file. Kept here so the CLI and the playbooks cannot drift. */
+/**
+ * The canonical feature file: an Open Knowledge Format concept (type, title, description) carrying
+ * novadev's own keys. No `generated` stamp yet — `novadev knowledge log` writes it when the agent
+ * records the feature's creation — and `status` is derived from `feature-status` by `novadev sync`.
+ * Kept here so the CLI and the playbooks cannot drift.
+ */
 export function featureSkeleton(o: {
   id: string;
   title: string;
@@ -210,19 +218,23 @@ export function featureSkeleton(o: {
   tags?: string;
   touches?: string;
 }): string {
+  const list = (csv: string | undefined) =>
+    yamlFlowList((csv ?? '').split(',').map((s) => s.trim()).filter(Boolean));
   return `---
+type: Feature
 id: ${o.id}
-title: ${o.title}
-status: planned
+title: ${yamlString(o.title)}
+description: <one line — what someone can do with it>
+${FEATURE_STATUS_KEY}: planned
+status: draft
 area: ${o.area ?? ''}
 created: ${o.today}
-updated: ${o.today}
-tags: ${o.tags ?? ''}
-touches: ${o.touches ?? ''}
-depends-on:
-supersedes:
-superseded-by:
-conflicts-with:
+tags: ${list(o.tags)}
+touches: ${list(o.touches)}
+depends-on: []
+supersedes: []
+superseded-by: []
+conflicts-with: []
 ---
 
 # ${o.id} — ${o.title}
@@ -243,8 +255,9 @@ conflicts-with:
 
 <what is undecided or unverified — delete the section when empty>
 
-<!-- The work that built this feature and the human test rounds that verified it are
-     DERIVED, in ${FEATURE_WORK} and ${FEATURE_TESTS} beside this file.
-     Regenerate them with \`novadev links --fix\`. -->
+---
+
+The work that built it and the human test rounds that checked it: [${FEATURE_WORK}](${FEATURE_WORK}) ·
+[${FEATURE_TESTS}](${FEATURE_TESTS}) — both derived by \`novadev sync\`.
 `;
 }

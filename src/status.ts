@@ -1,9 +1,11 @@
 // `novadev status` — stock-take of the novadev tree without an agent.
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { knowledgeStatusLine } from './knowledge.ts';
 import {
   FEATURE_STATUSES,
   batchIsDone,
+  featuresDir,
   listDirs,
   listFeatures,
   listFiles,
@@ -71,16 +73,14 @@ export function status(): void {
   const sparks = listFiles(join(nd, 'sparks')).filter((f) => f !== 'README.md');
   console.log(`\nsparks — ${sparks.length} file(s)`);
 
-  const memories = listFiles(join(nd, 'memories')).filter(
-    (f) => f.endsWith('.md') && f !== 'INDEX.md' && f !== 'README.md',
-  );
-  console.log(`memories — ${memories.length} memory file(s)`);
+  // The knowledge bundle: what it holds, how much of it is trusted, what is due for a re-check.
+  console.log(knowledgeStatusLine(nd));
 
   // Features by lifecycle state.
   const features = listFeatures(nd);
   if (features.length === 0) {
     console.log(
-      existsSync(join(nd, 'features', 'INDEX.md'))
+      existsSync(join(featuresDir(nd), 'index.md'))
         ? 'features — 0 entries'
         : 'features — MISSING (an agent must create it: skills/novadev-work.md (phase 9))',
     );
@@ -91,16 +91,6 @@ export function status(): void {
     const unknown = features.filter((f) => !(FEATURE_STATUSES as readonly string[]).includes(f.status));
     if (unknown.length) parts.push(`${unknown.length} unknown-status`);
     console.log(`features — ${features.length} (${parts.join(', ')})`);
-  }
-
-  const wikiIndex = join(nd, 'wiki', 'INDEX.md');
-  if (existsSync(wikiIndex)) {
-    const pages = listFiles(join(nd, 'wiki')).filter(
-      (f) => f.endsWith('.md') && f !== 'README.md',
-    );
-    console.log(`wiki — ${pages.length} page(s)`);
-  } else {
-    console.log('wiki — MISSING (an agent must create it: skills/novadev-work.md (phase 9))');
   }
 
   console.log(metricsStatusLine(nd));

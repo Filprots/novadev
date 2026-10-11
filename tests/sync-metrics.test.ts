@@ -98,7 +98,7 @@ describe('sync takes snapshots', () => {
         { name: 'Workbench', measure: 11019, over: ['loc'], path: 'src/wb/' },
       ],
     });
-    expect(read(root, '.novadev/wiki/architecture.md')).toContain('| Workbench | 11,019 | loc | `src/wb/` |');
+    expect(read(root, '.novadev/knowledge/wiki/architecture.md')).toContain('| Workbench | 11,019 | loc | `src/wb/` |');
   });
 
   test('without git: growth is listed once as NEXT ACTIONS, shrinking only reported, and the next pass settles', () => {
@@ -119,7 +119,7 @@ describe('sync takes snapshots', () => {
     ]);
     expect(second.stdout).not.toContain('sync: clean');
     expect(readJson(root, SNAPSHOT).debt).toEqual({ known: 238, new: 0 });
-    expect(read(root, '.novadev/wiki/architecture.md')).toContain('| Workbench | 11,140 |');
+    expect(read(root, '.novadev/knowledge/wiki/architecture.md')).toContain('| Workbench | 11,140 |');
 
     const third = run(root, 'sync');
     expect(third.stdout).toContain('metrics: no change since the last snapshot');
@@ -140,7 +140,7 @@ describe('sync takes snapshots', () => {
     const root = metricsProject(BASE, { debtBudget: { maxKnown: 230 } });
     run(root, 'sync');
     metricsOutput(root, { ...GROWN, debt: { known: 225, new: 0 } });
-    const files = [SNAPSHOT, '.novadev/novadev.json', '.novadev/wiki/architecture.md'];
+    const files = [SNAPSHOT, '.novadev/novadev.json', '.novadev/knowledge/wiki/architecture.md'];
     const before = files.map((f) => read(root, f));
 
     const check = run(root, 'sync', '--check');
@@ -431,7 +431,7 @@ describe('a missing or failing command is a warning, never a failure', () => {
     const root = metricsProject(BASE);
     run(root, 'sync');
     write(root, SNAPSHOT, '{\n<<<<<<< HEAD\n  "updated": "2026-10-01",\n=======\n  "updated": "2026-10-02",\n>>>>>>> other\n  "hubs": []\n}\n');
-    const page = read(root, '.novadev/wiki/architecture.md');
+    const page = read(root, '.novadev/knowledge/wiki/architecture.md');
     setManifest(root, { metrics: 'exit 1' });
 
     const plain = run(root, 'sync');
@@ -440,7 +440,7 @@ describe('a missing or failing command is a warning, never a failure', () => {
     expect(actions(plain.stdout)).toEqual([
       'metrics/latest.json cannot be read (not valid JSON) — if it holds merge-conflict markers, keep one side; or delete it, and `novadev sync` writes it again once the metrics command works',
     ]);
-    expect(read(root, '.novadev/wiki/architecture.md')).toBe(page);
+    expect(read(root, '.novadev/knowledge/wiki/architecture.md')).toBe(page);
 
     const check = run(root, 'sync', '--check');
     expect(check.code).toBe(1);
@@ -476,7 +476,7 @@ describe('a missing or failing command is a warning, never a failure', () => {
       expect(result.stdout).toContain('✗ metrics/latest.json: a folder, not a file — novadev keeps its snapshot in a plain file of that name; move it away');
     }
     expect(statSync(join(root, SNAPSHOT)).isDirectory()).toBe(true);
-    expect(read(root, '.novadev/wiki/architecture.md')).not.toContain('novadev:budgets');
+    expect(read(root, '.novadev/knowledge/wiki/architecture.md')).not.toContain('novadev:budgets');
   });
 
   test('a file where the metrics folder belongs is a PROBLEM, never a crash', () => {
@@ -498,7 +498,7 @@ describe('the debt budget', () => {
     expect(result.stdout).toContain('debt budget: known debt 230 of 230 ✓');
     expect(result.stdout).not.toContain('under it');
     expect(result.stdout).toContain('sync: clean. ✓');
-    expect(read(root, '.novadev/wiki/architecture.md')).toContain('**Known debt:** 230 (budget 230)');
+    expect(read(root, '.novadev/knowledge/wiki/architecture.md')).toContain('**Known debt:** 230 (budget 230)');
   });
 
   test('under budget: a NEXT ACTION to lower it, so the gain is kept — following it settles', () => {
@@ -553,7 +553,7 @@ describe('the debt budget', () => {
     run(root, 'sync');
     todo(root, '2026-10-01_1/01-kits', { 'ai_completed.md': completed('01-kits', DEBT) });
     const manifestBefore = read(root, '.novadev/novadev.json');
-    const pageBefore = read(root, '.novadev/wiki/architecture.md');
+    const pageBefore = read(root, '.novadev/knowledge/wiki/architecture.md');
 
     // The budget is derived from the records: --check judges it as sync would write it, and fails
     // while sync has not — committed unwritten, the raise would no longer count.
@@ -564,12 +564,12 @@ describe('the debt budget', () => {
     );
     expect(check.stdout).toContain('debt budget: known debt 238 of 238 ✓');
     expect(check.stdout).not.toContain('known debt is over the budget');
-    expect(check.stdout).toContain('  ✗ wiki/architecture.md: budgets block out of date');
+    expect(check.stdout).toContain('  ✗ knowledge/wiki/architecture.md: budgets block out of date');
     expect(check.stdout).toContain(
       'sync --check: ✗ 1 stale derived file(s); the raise in 2026-10-01_1/01-kits is not written to novadev.json yet — run `novadev sync`, then commit novadev.json with the record',
     );
     expect(read(root, '.novadev/novadev.json')).toBe(manifestBefore);
-    expect(read(root, '.novadev/wiki/architecture.md')).toBe(pageBefore);
+    expect(read(root, '.novadev/knowledge/wiki/architecture.md')).toBe(pageBefore);
 
     const plain = run(root, 'sync');
     expect(plain.code).toBe(0);
@@ -581,7 +581,7 @@ describe('the debt budget', () => {
     });
     // Every other setting survives the rewrite; the wiki block shows the new budget.
     expect(readJson(root, '.novadev/novadev.json').metrics).toBe('cat metrics-out.json');
-    expect(read(root, '.novadev/wiki/architecture.md')).toContain('**Known debt:** 238 (budget 238)');
+    expect(read(root, '.novadev/knowledge/wiki/architecture.md')).toContain('**Known debt:** 238 (budget 238)');
 
     const again = run(root, 'sync');
     expect(again.stdout).not.toContain('raised');

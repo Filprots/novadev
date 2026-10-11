@@ -42,6 +42,8 @@ novadev test-result tasks
 It answers with every open task: its id, its feature, the revision, whether results are
 already in, and each scenario's number, title and priority. Present the waiting tasks in
 a short numbered list: feature and scope in one line, then the scenarios as sub-items.
+When the feature's name alone says little, its one-line description in
+`.novadev/knowledge/features/index.md` says what it is, in the words the project uses.
 Put the tasks with NO results first — nobody has walked those. Where results exist, say
 which scenarios are already recorded so they do not repeat one. Keep it short: a menu,
 not a wall of text. End by asking which number they want.
@@ -76,7 +78,9 @@ novadev test-result write /tmp/result.json
   reads the image as the stronger evidence.
 
 Do not polish their wording into something they did not say, and do not invent a verdict
-they did not give. If what they said is ambiguous about pass or fail, ask one short
+they did not give. When what they saw contradicts what the feature is said to do ("it was
+never meant to snap"), keep that sentence in the result exactly as they said it: the agent
+who reviews the round corrects the feature's knowledge from it. If what they said is ambiguous about pass or fail, ask one short
 question first. After writing, confirm in one sentence which file you wrote — the command
 tells you — and offer the next scenario.
 
@@ -97,6 +101,8 @@ for it.
 ## Rules
 
 - **Never write a result the user did not report.** No guessing, no "presumably passed".
+- **Never edit `.novadev/knowledge/`** — not a feature, not its description. Their words
+  go into the result; the reviewing agent changes the knowledge and records why.
 - **The command APPENDS** to `scenario-<N>.txt`. A second walk adds to the first; it never
   erases it. Do not write the file by hand — that is exactly how a first walk gets lost.
 - **One scenario at a time.** Finish the loop before offering the next.

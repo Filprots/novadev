@@ -5,14 +5,14 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { collectRaises } from '../src/debt-budget.ts';
 import { auditMetrics } from '../src/metrics-audit.ts';
-import { commitAll, completed, project, read, todo, write } from './helpers.ts';
+import { commitAll, completed, project, read, todo, WIKI, wikiText, write } from './helpers.ts';
 
 const SNAPSHOT = JSON.stringify({
   updated: '2026-10-01',
   debt: { known: 230, new: 0 },
   hubs: [{ name: 'Workbench', measure: 11019, over: ['loc'] }],
 });
-const PAGE = '.novadev/wiki/architecture.md';
+const PAGE = '.novadev/knowledge/wiki/architecture.md';
 const BEGIN = '<!-- novadev:budgets:begin -->';
 const END = '<!-- novadev:budgets:end -->';
 
@@ -33,9 +33,9 @@ describe('the budgets block in the wiki', () => {
   test('is appended once as a "## Budgets" section, then left alone while it is current', () => {
     const root = withSnapshot({ debtBudget: { maxKnown: 230 } });
     const first = auditMetrics(root).fixes;
-    expect(first.map((f) => f.label)).toEqual(['wiki/architecture.md: budgets block missing']);
+    expect(first.map((f) => f.label)).toEqual(['knowledge/wiki/architecture.md: budgets block missing']);
     const page = applyFixes(root);
-    expect(page.startsWith('---\nupdated: 2026-10-01\n---\n\n# architecture.md\n\nHand-written text.\n\n## Budgets\n')).toBe(true);
+    expect(page.startsWith(`${wikiText('Architecture').trimEnd()}\n\n## Budgets\n`)).toBe(true);
     expect(page).toContain(BEGIN);
     expect(page).toContain('**Known debt:** 230 (budget 230) · **new:** 0 · as of 2026-10-01');
     expect(page).toContain('| Workbench | 11,019 | loc |');
@@ -46,7 +46,7 @@ describe('the budgets block in the wiki', () => {
   test('is rewritten in place — a block moved into the middle of the page stays there', () => {
     const root = withSnapshot();
     write(root, PAGE, `# Architecture\n\nIntro.\n\n${BEGIN}\nold numbers\n${END}\n\n## After\n\nKept.\n`);
-    expect(auditMetrics(root).fixes.map((f) => f.label)).toEqual(['wiki/architecture.md: budgets block out of date']);
+    expect(auditMetrics(root).fixes.map((f) => f.label)).toEqual(['knowledge/wiki/architecture.md: budgets block out of date']);
     const page = applyFixes(root);
     expect(page).toStartWith(`# Architecture\n\nIntro.\n\n${BEGIN}\n<!-- generated`);
     expect(page).toEndWith(`${END}\n\n## After\n\nKept.\n`);
@@ -139,7 +139,7 @@ describe('the budgets block in the wiki', () => {
       const audit = auditMetrics(root);
       expect(audit.fixes).toEqual([]);
       expect(audit.problems).toEqual([
-        `wiki/architecture.md: the code fence that opens on line ${line} is never closed, so a budgets block added at the end of the page would be part of it — close the fence, and \`novadev sync\` adds the block`,
+        `knowledge/wiki/architecture.md: the code fence that opens on line ${line} is never closed, so a budgets block added at the end of the page would be part of it — close the fence, and \`novadev sync\` adds the block`,
       ]);
     }
   });
@@ -159,7 +159,7 @@ describe('the budgets block in the wiki', () => {
     const audit = auditMetrics(root);
     expect(audit.fixes).toEqual([]);
     expect(audit.problems).toEqual([
-      `wiki/architecture.md: the budgets block on line ${block} is inside a code fence that opens on line ${fence}, so sync cannot see it — close that fence, and sync rewrites the block where it is`,
+      `knowledge/wiki/architecture.md: the budgets block on line ${block} is inside a code fence that opens on line ${fence}, so sync cannot see it — close that fence, and sync rewrites the block where it is`,
     ]);
     expect(read(root, PAGE)).toBe(broken);
   });
@@ -179,19 +179,19 @@ describe('the budgets block in the wiki', () => {
     const root = withSnapshot();
     rmSync(join(root, PAGE));
     mkdirSync(join(root, PAGE));
-    expect(auditMetrics(root).problems).toEqual(['wiki/architecture.md: not a file — the budgets block needs a page of that name']);
+    expect(auditMetrics(root).problems).toEqual(['knowledge/wiki/architecture.md: not a file — the budgets block needs a page of that name']);
   });
 
   test('goes to the page named in "metricsWikiPage", or nowhere when it is false', () => {
     const custom = withSnapshot({ metricsWikiPage: 'budgets.md' });
-    write(custom, '.novadev/wiki/budgets.md', '# Budgets page\n');
-    expect(auditMetrics(custom).fixes.map((f) => f.label)).toEqual(['wiki/budgets.md: budgets block missing']);
+    write(custom, '.novadev/knowledge/wiki/budgets.md', '# Budgets page\n');
+    expect(auditMetrics(custom).fixes.map((f) => f.label)).toEqual(['knowledge/wiki/budgets.md: budgets block missing']);
 
     const missing = withSnapshot({ metricsWikiPage: 'nope.md' });
     const audit = auditMetrics(missing);
     expect(audit.fixes).toEqual([]);
     expect(audit.notes).toContain(
-      'wiki/nope.md: missing, so the budgets block has nowhere to go — create the page, or set "metricsWikiPage"',
+      'knowledge/wiki/nope.md: missing, so the budgets block has nowhere to go — create the page, or set "metricsWikiPage"',
     );
 
     const off = withSnapshot({ metricsWikiPage: false });
@@ -200,7 +200,7 @@ describe('the budgets block in the wiki', () => {
 
   test('waits for the wiki to exist', () => {
     const root = withSnapshot();
-    rmSync(join(root, '.novadev/wiki/INDEX.md'));
+    rmSync(join(root, WIKI), { recursive: true });
     expect(auditMetrics(root).fixes).toEqual([]);
   });
 

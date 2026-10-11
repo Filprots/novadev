@@ -109,6 +109,9 @@ novadev test-result review /tmp/review.json
 - `notes` is for what they want ADDED or CHANGED, and for anything that belongs to no
   scenario. Write it down even when you are also going to file it as a todo — the round
   must carry the reason it was not a clean pass.
+- When they say the feature itself is described wrongly — "that is not what it is for",
+  "it was never meant to do that" — put it in `notes` in their words. The agent who reviews
+  the round corrects the feature in `.novadev/knowledge/` from it, and records the change.
 
 **6. Confirm, then offer the follow-up.** Say in one sentence which file you wrote and
 which images landed in it. Then, if they asked for changes or something failed:
@@ -130,6 +133,8 @@ any session runs it.
   same day adds to the first; it never erases it. Do not write the file by hand.
 - **Never write a verdict they did not give**, and never upgrade a "seems ok" to a
   "passed".
+- **Never edit `.novadev/knowledge/`.** Their testing is evidence for a feature, not a
+  review of its document; the reviewing agent decides what the knowledge must say.
 - **Never drop a change request** just because it is not about pass or fail. It goes in
   `notes`, and it usually deserves a todo.
 - The command reports `missingAttachments` for a path that was not there — tell them

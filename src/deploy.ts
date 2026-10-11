@@ -4,6 +4,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  KNOWLEDGE_DIR,
   LEGACY_ADAPTER_SLUGS,
   LEGACY_SKILL_FILES,
   NOVADEV_VERSION,
@@ -15,27 +16,21 @@ import {
   deployedVersion,
   isDirectory,
   isNovadevManaged,
+  knowledgeDir,
   manifestPath,
   packageDir,
   readManifest,
   todayStamp,
 } from './lib.ts';
+import { REVIEW_DAYS_DEFAULT, derivedIndexes, initialLog, listConcepts } from './knowledge.ts';
 import { pendingMigrations } from './migrations.ts';
+import { LOG_FILE } from './okf.ts';
 
 const MARK_BEGIN = '<!-- novadev:begin -->';
 const MARK_END = '<!-- novadev:end -->';
 
-const USER_FOLDERS = [
-  'todos',
-  'archive',
-  'postponed',
-  'sparks',
-  'wiki',
-  'memories',
-  'features',
-  'totest',
-  'metrics',
-];
+/** The work folders, each with a README of novadev's. The knowledge bundle is seeded apart (below). */
+const USER_FOLDERS = ['todos', 'archive', 'postponed', 'sparks', 'totest', 'metrics'];
 
 export function deploy(cwd: string = process.cwd()): void {
   const root = join(cwd, ROOT_DIR_NAME);
@@ -117,14 +112,27 @@ export function deploy(cwd: string = process.cwd()): void {
     }
   }
 
-  // memories/INDEX.md is user content — seed it only when missing.
-  const memIndex = join(root, 'memories', 'INDEX.md');
-  if (!existsSync(memIndex)) {
-    writeFileSync(memIndex, '# Memories index\n\n(no memories yet)\n');
-    created.push(`${ROOT_DIR_NAME}/memories/INDEX.md`);
+  // 1b. The knowledge bundle — an Open Knowledge Format bundle, so no README inside it: every file
+  // there is a concept, an index, or the log. Day 0 gets the log's first entry and the root index;
+  // the wiki and the features registry are deliberately NOT created — their absence is the signal
+  // that an agent must build them, and `novadev sync` says so in NEXT ACTIONS.
+  const bundle = knowledgeDir(root);
+  if (existsSync(bundle) && !isDirectory(bundle)) {
+    blocked.push(`${ROOT_DIR_NAME}/${KNOWLEDGE_DIR}`);
+  } else {
+    if (!existsSync(bundle)) {
+      mkdirSync(bundle, { recursive: true });
+      created.push(`${ROOT_DIR_NAME}/${KNOWLEDGE_DIR}/`);
+    }
+    const logPath = join(bundle, LOG_FILE);
+    if (!existsSync(logPath)) {
+      writeFileSync(logPath, initialLog(todayStamp()));
+      created.push(`${ROOT_DIR_NAME}/${KNOWLEDGE_DIR}/${LOG_FILE}`);
+    }
+    for (const [path, content] of derivedIndexes(root, listConcepts(root))) {
+      writeManaged(join(bundle, path), content);
+    }
   }
-  // wiki/INDEX.md and features/INDEX.md are deliberately NOT created: their absence is
-  // the signal that an agent must build them, and `novadev sync` says so in NEXT ACTIONS.
 
   // 2. Canonical skill playbooks (framework-owned, always refreshed).
   const skillsDir = join(root, 'skills');
@@ -159,7 +167,13 @@ export function deploy(cwd: string = process.cwd()): void {
   // `migrate-repo` brought to this version — and with "placementSince" set to today, as the 0.11.0
   // migration sets it. Only on the FIRST deploy: someone who deleted them meant it.
   const seeded = firstDeploy
-    ? { metrics: null, debtBudget: null, hubs: null, placementSince: todayStamp() }
+    ? {
+        metrics: null,
+        debtBudget: null,
+        hubs: null,
+        placementSince: todayStamp(),
+        knowledge: { reviewDays: { ...REVIEW_DAYS_DEFAULT } },
+      }
     : {};
   writeManaged(
     join(root, 'novadev.json'),
@@ -241,10 +255,12 @@ alwaysApply: true
 
 This project uses novadev (\`${ROOT_DIR_NAME}/\`). Read
 \`${ROOT_DIR_NAME}/skills/novadev-work.md\` — the development playbook — and run THE LOOP
-it defines for any development work here: load pre-context (wiki + memories + features)
+it defines for any development work here: load pre-context (\`${ROOT_DIR_NAME}/knowledge/index.md\`
+first — the project's knowledge is an Open Knowledge Format bundle: wiki, memories, features)
 → plan → work → write the ai_ record → hand what you could not verify to the human as
 a \`totest/\` task → review their results when they land → update the feature →
-memories → wiki → close out with \`novadev sync\`.
+memories → wiki, recording every knowledge change with \`novadev knowledge log\` → close out
+with \`novadev sync\`.
 
 Three companion playbooks sit beside it for the human's own entry points:
 \`novadev-file-a-todo.md\` (turn a chat request into a todo folder),
@@ -270,13 +286,17 @@ function managedSection(): string {
 ## novadev — structured development system (managed by \`novadev deploy\`, do not edit inside markers)
 
 This project uses **novadev** (\`${ROOT_DIR_NAME}/\`): git-tracked todos, archive,
-postponed, sparks, wiki, memories, a features registry, and a human-testing queue.
+postponed, sparks, a human-testing queue, and the project's knowledge — wiki, memories,
+features — as one Open Knowledge Format bundle in \`${ROOT_DIR_NAME}/knowledge/\`.
 
 - **Follow** \`${ROOT_DIR_NAME}/skills/novadev-work.md\` — the development
   playbook (\`/novadev-work\`). It defines THE LOOP you run for any development work
-  here, end to end: load pre-context → plan → work → write the ai_ record → hand
-  untestable work to the human → review their results → update the feature →
-  memories → wiki → close out.
+  here, end to end: load pre-context (\`${ROOT_DIR_NAME}/knowledge/index.md\` first) →
+  plan → work → write the ai_ record → hand untestable work to the human → review
+  their results → update the feature → memories → wiki → close out.
+- **Knowledge is recorded, not just written.** Every change to a wiki page, a memory or
+  a feature gets its stamp and its log entry from \`novadev knowledge log\` — who changed
+  it, when, and why — so the bundle stays trustworthy for the next agent and the human.
 - **Three companion playbooks** cover the human's own entry points, and each is a
   slash command of the same name:
   \`/novadev-file-a-todo\` (turn what they just said into a todo folder, screenshots

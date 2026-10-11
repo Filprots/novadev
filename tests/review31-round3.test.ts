@@ -112,6 +112,6 @@ describe('[minor] findings', () => {
     metricsOutput(root, { debt: { known: 2 }, hubs: [] });
     const check = run(root, 'sync', '--check');
     expect(check.stdout).toContain('✗ metrics/latest.json: out of date');
-    expect(check.stdout).toContain('✗ wiki/architecture.md: budgets block out of date');
+    expect(check.stdout).toContain('✗ knowledge/wiki/architecture.md: budgets block out of date');
   });
 });

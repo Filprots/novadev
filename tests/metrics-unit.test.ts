@@ -566,7 +566,7 @@ describe('settings in novadev.json', () => {
     const bad = config({
       metrics: 42,
       metricsTimeoutSeconds: 0,
-      metricsWikiPage: 'INDEX.md',
+      metricsWikiPage: 'index.md',
       debtBudget: { maxKnown: '230' },
     });
     expect(bad.command).toBeNull();

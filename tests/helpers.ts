@@ -3,7 +3,9 @@
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { NOVADEV_VERSION, WIKI_PAGES } from '../src/lib.ts';
+import { WIKI_PAGES, derivedIndexes, initialLog, listConcepts } from '../src/knowledge.ts';
+import { NOVADEV_VERSION, csvList } from '../src/lib.ts';
+import { yamlFlowList, yamlString } from '../src/okf.ts';
 
 export const REPO = resolve(import.meta.dir, '..');
 export const CLI = join(REPO, 'bin', 'novadev.ts');
@@ -51,28 +53,43 @@ export function mtime(root: string, rel: string): number {
   return statSync(join(root, rel)).mtimeMs;
 }
 
+/** Where the knowledge bundle sits in a fixture, and the paths of its folders. */
+export const KNOWLEDGE = '.novadev/knowledge';
+export const WIKI = `${KNOWLEDGE}/wiki`;
+export const MEMORIES = `${KNOWLEDGE}/memories`;
+export const FEATURES = `${KNOWLEDGE}/features`;
+/** The stamp every fixture concept carries: written by a test agent, on the day the log starts. */
+export const STAMP = '{ by: claude-code/test, at: 2026-10-01T00:00:00Z }';
+
+/** A wiki page as a concept: OKF frontmatter, then `body` (by default a heading and a line). */
+export function wikiText(title: string, body = `# ${title}\n\nHand-written text.\n`): string {
+  return `---\ntype: Wiki Page\ntitle: ${yamlString(title)}\ndescription: ${yamlString(`The ${title.toLowerCase()} of the project.`)}\ngenerated: ${STAMP}\n---\n\n${body}`;
+}
+
+/** Write one wiki page of a fixture, `file` inside knowledge/wiki/. */
+export function wikiPage(root: string, file: string, body?: string): void {
+  const title = WIKI_PAGES.find((page) => page.file === file)?.title ?? file.replace(/\.md$/, '');
+  write(root, `${WIKI}/${file}`, wikiText(title, body));
+}
+
+/** Rewrite the bundle's derived index files, as `novadev sync` would. */
+export function writeIndexes(root: string): void {
+  const nd = join(root, '.novadev');
+  for (const [path, content] of derivedIndexes(nd, listConcepts(nd))) write(root, `${KNOWLEDGE}/${path}`, content);
+}
+
 /**
- * A minimal healthy project at the installed version: a full wiki, an empty features registry,
- * a memories index. `novadev sync` on it comes back clean.
+ * A minimal healthy project at the installed version: a knowledge bundle with a full wiki, an
+ * empty features registry (its hand-made index says so) and a log, the derived indexes written.
+ * `novadev sync` on it comes back clean.
  */
 export function project(manifest: Record<string, unknown> = {}): string {
   const root = tempDir();
   setManifest(root, { novadev: true, version: NOVADEV_VERSION, ...manifest }, true);
-  const pages = WIKI_PAGES.filter((page) => page !== 'INDEX.md');
-  write(
-    root,
-    '.novadev/wiki/INDEX.md',
-    `---\nupdated: 2026-10-01\n---\n\n# Wiki\n\n${pages.map((p) => `- ${p}`).join('\n')}\n`,
-  );
-  for (const page of pages) {
-    write(root, `.novadev/wiki/${page}`, `---\nupdated: 2026-10-01\n---\n\n# ${page}\n\nHand-written text.\n`);
-  }
-  write(
-    root,
-    '.novadev/features/INDEX.md',
-    '# Features index\n\n<!-- novadev:features-index:begin -->\n<!-- novadev:features-index:end -->\n',
-  );
-  write(root, '.novadev/memories/INDEX.md', '# Memories index\n\n(no memories yet)\n');
+  write(root, `${KNOWLEDGE}/log.md`, initialLog('2026-10-01'));
+  for (const page of WIKI_PAGES) wikiPage(root, page.file);
+  write(root, `${FEATURES}/index.md`, '# Features\n');
+  writeIndexes(root);
   return root;
 }
 
@@ -113,7 +130,10 @@ export function todo(root: string, ref: string, files: Record<string, string> = 
   for (const [name, content] of Object.entries(files)) write(root, `.novadev/todos/${ref}/${name}`, content);
 }
 
-/** A feature folder, `features/<id>-<slug>/feature.md`; `touches` is the frontmatter value as written. */
+/**
+ * A feature folder, `knowledge/features/<id>-<slug>/feature.md`, as an OKF concept. `tags` and
+ * `touches` are comma lists, written as the YAML lists the file holds.
+ */
 export function feature(
   root: string,
   id: string,
@@ -121,10 +141,12 @@ export function feature(
   o: { title?: string; status?: string; area?: string; tags?: string; touches?: string } = {},
 ): void {
   const title = o.title ?? slug;
+  const status = o.status ?? 'shipped';
+  const lifecycle = status === 'shipped' ? 'stable' : status === 'deprecated' ? 'deprecated' : 'draft';
   write(
     root,
-    `.novadev/features/${id}-${slug}/feature.md`,
-    `---\nid: ${id}\ntitle: ${title}\nstatus: ${o.status ?? 'shipped'}\narea: ${o.area ?? 'editor'}\ncreated: 2026-10-01\nupdated: 2026-10-01\ntags: ${o.tags ?? ''}\ntouches: ${o.touches ?? ''}\ndepends-on:\nsupersedes:\nsuperseded-by:\nconflicts-with:\n---\n\n# ${id} — ${title}\n\n## What it does\n\nIt works.\n`,
+    `${FEATURES}/${id}-${slug}/feature.md`,
+    `---\ntype: Feature\nid: ${id}\ntitle: ${yamlString(title)}\ndescription: ${yamlString(`What ${title} does.`)}\nfeature-status: ${status}\nstatus: ${lifecycle}\narea: ${o.area ?? 'editor'}\ncreated: 2026-10-01\ntags: ${yamlFlowList(csvList(o.tags))}\ntouches: ${yamlFlowList(csvList(o.touches))}\ndepends-on: []\nsupersedes: []\nsuperseded-by: []\nconflicts-with: []\ngenerated: ${STAMP}\n---\n\n# ${id} — ${title}\n\n## What it does\n\nIt works.\n`,
   );
 }
 

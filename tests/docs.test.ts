@@ -7,15 +7,17 @@ import { join } from 'node:path';
 import { debtRaiseIn } from '../src/debt-budget.ts';
 import { parseHubsSetting } from '../src/hubs.ts';
 import { parseMetricsOutput } from '../src/metrics.ts';
+import { WIKI_PAGES } from '../src/knowledge.ts';
+import { parseEvents } from '../src/knowledge-log.ts';
+import { readFrontmatterText } from '../src/okf.ts';
 import { placementState } from '../src/placement.ts';
-import { REPO, commitAll, completed, feature, metricsOutput, metricsProject, read, run, tempDir, todo } from './helpers.ts';
+import { REPO, commitAll, completed, exists, feature, git, metricsOutput, metricsProject, project, read, run, tempDir, todo } from './helpers.ts';
 
 const readme = readFileSync(join(REPO, 'README.md'), 'utf8');
 const playbook = readFileSync(join(REPO, 'templates/skills/novadev-work.md'), 'utf8');
 const folderReadme = readFileSync(join(REPO, 'templates/readmes/metrics.md'), 'utf8');
 const rootReadme = readFileSync(join(REPO, 'templates/readmes/root.md'), 'utf8');
 const todosReadme = readFileSync(join(REPO, 'templates/readmes/todos.md'), 'utf8');
-const featuresReadme = readFileSync(join(REPO, 'templates/readmes/features.md'), 'utf8');
 
 /** The bodies of the fenced blocks in a markdown text whose info string is `lang` ('' = none). */
 function fences(text: string, lang: string): string[] {
@@ -222,8 +224,8 @@ describe('the templates', () => {
     expect(register).toContain('add the new path to its `touches:`, and remove the\n  hub path once none of its code is left there');
   });
 
-  test('the features and metrics folder READMEs and the CLI help name features --hubs', () => {
-    expect(featuresReadme).toContain('novadev features --hubs             # which features lean on each hub');
+  test('the README, the metrics folder README and the CLI help name features --hubs', () => {
+    expect(readme).toContain('novadev features --hubs               # which features lean on each hub');
     expect(folderReadme).toContain('`novadev features --hubs` lists the features whose\n`touches:` name it');
     expect(run(tempDir(), 'help').stdout).toContain('--hubs lists the features on each hub');
   });
@@ -279,5 +281,85 @@ describe('the templates', () => {
       expect(read(root, file)).toContain("the project's metrics command");
     }
     expect(read(root, 'AGENTS.md')).toContain('novadev sync --check');
+  });
+});
+
+describe('the knowledge bundle in the docs', () => {
+  const okf = 'https://github.com/GoogleCloudPlatform/open-knowledge-format';
+
+  test('the README explains the bundle, names the spec, and its examples are what the code accepts', () => {
+    expect(readme).toContain('## Knowledge — an Open Knowledge Format bundle');
+    expect(readme).toContain(okf);
+    for (const text of ['`agent/unrecorded`', '"reviewDays"', '`human:filipp-protsenko`', '**Initialization**', 'novadev knowledge log events.json']) {
+      expect(readme).toContain(text);
+    }
+    // The concept example parses, and passes novadev's profile once written into a bundle.
+    const concept = fences(readme, 'markdown').find((body) => body.includes('type: Gotcha'))!;
+    const read = readFrontmatterText(concept);
+    expect(read.state).toBe('ok');
+    expect(read.state === 'ok' && read.data).toMatchObject({ type: 'Gotcha', tags: ['testing', 'bun'] });
+    // The payload example is what `novadev knowledge log` reads.
+    const payload = fences(readme, 'json').find((body) => body.includes('"events"'))!;
+    const root = project();
+    git(root, 'init', '-q');
+    git(root, 'config', 'user.name', 'Ada Lovelace');
+    expect(() => parseEvents(root, join(root, '.novadev'), JSON.parse(payload))).not.toThrow();
+  });
+
+  test('the playbook teaches the bundle: the map first, recording every change, the events, trust and sources', () => {
+    expect(playbook).toContain('## The knowledge bundle — Open Knowledge Format');
+    expect(playbook).toContain('### Recording a change');
+    expect(playbook).toContain('read `knowledge/index.md`');
+    expect(playbook).toContain(okf);
+    for (const event of ['`create`', '`update`', '`verify`', '`deprecate`', '`remove`']) expect(playbook).toContain(`| ${event} |`);
+    for (const resource of ['`todo:<batch>/<todo>`', '`commit:<hash>`', '`repo:<path>`']) expect(playbook).toContain(resource);
+    expect(playbook).toContain('never record a person as the actor of anything they did not do or\n  confirm in this conversation');
+    // Its payload example is valid for the real parser.
+    const example = fences(playbook, 'sh').find((body) => body.includes('"events"'))!;
+    const json = example.slice(example.indexOf('{ "events"'), example.indexOf('\nJSON'));
+    const root = project();
+    expect(() => parseEvents(root, join(root, '.novadev'), JSON.parse(json))).not.toThrow();
+    // Its memory and wiki templates are concepts of the right types.
+    const memory = fences(playbook, 'markdown').find((body) => body.includes('type: Gotcha'))!;
+    expect(readFrontmatterText(memory).state).toBe('ok');
+    const page = fences(playbook, 'markdown').find((body) => body.includes('type: Wiki Page'))!;
+    expect(readFrontmatterText(page).state).toBe('ok');
+  });
+
+  test('the playbook names every wiki page the code requires, and the messages it is pointed at exist', () => {
+    for (const page of WIKI_PAGES) expect(playbook).toContain(`| \`${page.file}\` |`);
+    expect(playbook).toContain('**Building the wiki**');
+    expect(playbook).toContain('*Recording a change*');
+  });
+
+  test('the companion playbooks keep their hands off the bundle', () => {
+    for (const file of ['novadev-file-a-todo.md', 'novadev-what-to-test.md', 'novadev-test-review.md']) {
+      expect(readFileSync(join(REPO, 'templates/skills', file), 'utf8')).toContain('Never edit `.novadev/knowledge/`');
+    }
+    expect(readFileSync(join(REPO, 'templates/skills/novadev-file-a-todo.md'), 'utf8')).toContain('**A standing rule is knowledge, not only a todo.**');
+  });
+
+  test('the root folder README describes the bundle, and deploy writes no README inside it', () => {
+    expect(rootReadme).toContain('| `knowledge/` |');
+    expect(rootReadme).toContain('No README lives inside it');
+    const root = tempDir();
+    run(root, 'deploy');
+    expect(exists(root, '.novadev/knowledge/README.md')).toBe(false);
+  });
+
+  test('the files deploy writes for agents send them to the knowledge map first', () => {
+    const root = tempDir();
+    run(root, 'deploy');
+    for (const file of ['AGENTS.md', 'CLAUDE.md', '.cursor/rules/novadev.mdc']) {
+      expect(read(root, file)).toContain('.novadev/knowledge/index.md');
+      expect(read(root, file)).toContain('novadev knowledge log');
+    }
+    expect(read(root, '.claude/skills/novadev-work/SKILL.md')).toContain('Open Knowledge Format');
+  });
+
+  test('the CLI help names the knowledge command', () => {
+    const help = run(tempDir(), 'help').stdout;
+    expect(help).toContain('novadev knowledge [words]');
+    expect(help).toContain('"log <payload.json>" records changes');
   });
 });

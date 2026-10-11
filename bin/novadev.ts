@@ -8,7 +8,8 @@ const HELP = `novadev ${NOVADEV_VERSION} — structured development system
 
 usage:
   novadev sync [--check]    THE close-out: run the metrics hook (if set), regenerate derived
-                            links, archive what is finished, validate, and print what the agent
+                            links and the knowledge indexes, archive what is finished, validate
+                            (the knowledge bundle and its log included), and print what the agent
                             + the human still have to do; --check writes nothing and fails on
                             problems, stale derived files (the metrics snapshot and the wiki
                             block included), an unreadable snapshot, a budget raise sync has not
@@ -18,11 +19,15 @@ usage:
   novadev new [slug…]       scaffold today's next batch (todos/YYYY-MM-DD_N/), optional todo folders
   novadev status            stock-take: open todos + record states, postponed triggers, wiki/memories
   novadev archive <batch>…  move fully-recorded batch(es) to archive/<year>/   (or: --done for all)
+  novadev knowledge [words] the knowledge bundle (.novadev/knowledge/, Open Knowledge Format 0.2):
+                            what it holds, or search it; --type/--tag/--tier filter, --stale lists
+                            what is due for a re-check; "log <payload.json>" records changes —
+                            each concept's stamps and its log.md entry, together
   novadev features [query]  search the feature registry; --touching <path> finds overlap,
                             --hubs lists the features on each hub, --status/--area filter,
                             --new <slug> scaffolds an entry
   novadev links [--fix]     validate the link graph (records ↔ features ↔ commits);
-                            --fix regenerates derived backlinks and features/INDEX.md
+                            --fix regenerates each feature's derived work.md and tests.md
   novadev totest [--all]    what still needs YOUR hands-on testing, and what is ready
                             for review; --new <slug> scaffolds a test task
   novadev file-todo …       the command half of /novadev-file-a-todo: "plan" says which batch
@@ -55,6 +60,11 @@ switch (command) {
   case 'archive': {
     const { archive } = await import('../src/archive.ts');
     archive(args);
+    break;
+  }
+  case 'knowledge': {
+    const { knowledge } = await import('../src/knowledge-cmd.ts');
+    knowledge(args);
     break;
   }
   case 'features': {

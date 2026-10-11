@@ -4,11 +4,17 @@ A **framework/language/IDE/agent/LLM-agnostic structured development system**.
 One command deploys a git-tracked folder tree + one agent playbook into any project.
 From then on you write task briefs; the agent runs a fixed loop that does the work,
 records it, registers the feature, hands you what only a human can test, keeps the
-wiki true, and archives what is finished. The folder becomes the development history.
+knowledge true, and archives what is finished. The folder becomes the development history.
+
+The project's knowledge — its wiki, its memories, its features — is one
+[Open Knowledge Format](https://github.com/GoogleCloudPlatform/open-knowledge-format)
+(OKF 0.2) bundle from day 0: plain markdown files any agent or tool can read, each saying
+who wrote it, who checked it, where it came from and when it is due for a re-check, with a
+log of every change. See *Knowledge* below.
 
 ## Install
 
-Requires [Bun](https://bun.sh) (>= 1.0).
+Requires [Bun](https://bun.sh) (>= 1.4: novadev reads YAML frontmatter with Bun's own parser, so it needs no dependencies).
 
 ```sh
 git clone https://github.com/Filprots/novadev.git
@@ -27,7 +33,7 @@ git pull          # then, in each project: `novadev migrate-repo`, then `novadev
 
 ```sh
 cd your-project
-novadev deploy    # creates .novadev/ + the four playbooks + agent adapters (idempotent, upgrade-safe)
+novadev deploy    # creates .novadev/ — the knowledge bundle included — + the four playbooks + agent adapters
 ```
 
 Then:
@@ -39,6 +45,9 @@ novadev totest                        # what needs YOUR hands-on testing
 novadev status                        # open todos + record states, postponed triggers, health
 novadev features --touching src/auth  # which features already own this code (conflict pre-flight)
 novadev features --hubs               # which features lean on each hub (see Placement)
+novadev knowledge                     # what the knowledge bundle holds: types, trust, what is stale
+novadev knowledge magic link --stale  # search it; --type, --tag, --tier and --stale filter
+novadev knowledge log events.json     # record changes: each concept's stamps + its log entry
 novadev migrate-repo                  # upgrade an older .novadev/ layout to this version
 ```
 
@@ -63,17 +72,30 @@ both as `null`, which means off; see *Metrics and the debt budget* below to turn
 0.11.0 adds two more: `hubs`, written as `null` (off), and `placementSince`, set to the day
 `migrate-repo` runs; see *Placement* below.
 
+0.12.0 moves `wiki/`, `memories/` and `features/` into `.novadev/knowledge/`, one Open
+Knowledge Format bundle. `migrate-repo` gives every page, memory and feature OKF
+frontmatter: a memory's `kind` becomes its `type` (a kind outside the four is left for an
+agent to choose), a feature's `status` becomes `feature-status`, and each old `INDEX.md`
+one-liner becomes that file's `description` — the INDEX.md files go, because `index.md` is
+derived now. Who wrote and checked the old content was never recorded, so its stamps say
+`agent/unrecorded`; their dates come from the files and git. It also adds `"knowledge":
+{ "reviewDays": … }` to `novadev.json` and starts `knowledge/log.md`. Then `novadev deploy`
+and `novadev sync`, and let an agent work the list sync prints.
+
 ## The system
 
 ```
 .novadev/
+  knowledge/   the project's KNOWLEDGE — one Open Knowledge Format bundle (see Knowledge):
+    index.md     the load-first map, derived by `novadev sync`
+    log.md       every change to the knowledge, newest day first
+    wiki/        project pre-context agents load first (strict page set; the agent creates it)
+    memories/    guardrails, gotchas, decisions and guides, written the moment they cost time
+    features/    what the software DOES — FEAT-NNNN/ folders: feature.md + derived work.md/tests.md
   todos/       task batches YYYY-MM-DD_N/<todo>/ — briefs: human-authored (.txt/.md + screenshots) or agent-filed prompt.md (chat-initiated)
   archive/     finished work by year — <year>/todos/<batch>/ and <year>/totest/<task>/<round>/
   postponed/   deferred work with do-when / discard-if triggers
   sparks/      raw unshaped ideas
-  wiki/        project pre-context agents load first (strict page set; the agent creates it)
-  memories/    gotchas/guides/decisions/guardrails, auto-written during work + INDEX.md
-  features/    what the software DOES — FEAT-NNNN/ folders: feature.md + derived work.md/tests.md
   totest/      the ACTIVE queue of tests waiting on a human (rounds archive once reviewed)
   metrics/     latest.json — the newest snapshot of the project's own numbers (when a metrics command is set)
   skills/      the four canonical playbooks, novadev-*.md (agent-agnostic; managed by deploy)
@@ -135,17 +157,19 @@ still in flight — plus a `## Thinking` section capturing the reasoning and
 decisions that would otherwise evaporate with the chat. Nothing project-changing
 happens off the books.
 
-**Wiki.** `wiki/INDEX.md` + six mandated pages (overview, stack, architecture,
-conventions, workflows, glossary). Its absence is the signal: an agent MUST create
-it (loop phase 9) before doing todo work.
+**Wiki.** Six mandated pages in `knowledge/wiki/` (overview, stack, architecture,
+conventions, workflows, glossary). Their absence is the signal: an agent MUST build
+them (loop phase 9) before doing todo work.
 
 **Memories.** The moment work stumbles on something non-obvious that cost time,
-the agent writes a memory file (frontmatter: title/created/kind/verified) and
-indexes it — guardrails that stop future time-wasting.
+the agent writes a memory — a `Guardrail`, `Gotcha`, `Decision` or `Guide` in
+`knowledge/memories/`, its one-line `description` saying when it applies and its
+`sources` saying where it was learned — and records it. Guardrails that stop future
+time-wasting.
 
-**Features + links.** `features/` registers every capability as a folder
-`FEAT-NNNN-<slug>/` — you write `feature.md` (status, area, tags, the code it `touches:`, and
-`depends-on`/`supersedes`/`conflicts-with` relations), and `work.md` (every todo,
+**Features + links.** `knowledge/features/` registers every capability as a folder
+`FEAT-NNNN-<slug>/` — you write `feature.md` (its `feature-status`, area, tags, the code it
+`touches`, and `depends-on`/`supersedes`/`conflicts-with` relations), and `work.md` (every todo,
 record and commit that built it) plus `tests.md` (every human test round and its
 verdict) are generated beside it. Before anything new is designed, the registry is
 searched — `novadev features --touching src/auth` answers "what already owns this
@@ -155,8 +179,8 @@ code?" — so duplicates and conflicts get caught at proposal time rather than i
 Records and features are cross-linked, and the graph is maintainable because each
 edge has **one authored direction and one derived direction**: the record names
 its feature (`**Feature:** FEAT-0007`, `**Commits:** abc1234`), and
-`novadev links --fix` regenerates the feature's `work.md`, `tests.md`,
-and `features/INDEX.md` from it. Nothing is written twice, so backlinks cannot
+`novadev links --fix` regenerates the feature's `work.md` and `tests.md`
+from it, and `novadev sync` the registry's `index.md`. Nothing is written twice, so backlinks cannot
 rot. All references are **stable IDs, never relative paths** (`FEAT-0007`,
 `2026-08-24_1/01-magic-link`) — archiving moves todo folders, and paths would
 break where IDs keep resolving. `novadev links` validates the whole graph;
@@ -168,7 +192,7 @@ The playbook for the work itself is `.novadev/skills/novadev-work.md`, and it de
 a single loop the agent runs for every round of work:
 
 ```
-0 ORIENT   load the wiki, memories, features, and the queue
+0 ORIENT   load knowledge/index.md, then the wiki, memories and features it maps; the queue
 1 INTAKE   any chat request that changes the repo becomes a todo, before work starts
 2 PLAN     batch waves + decisions up front; pre-flight new capabilities for duplicates;
            name the unit that will own a change to a hub
@@ -177,16 +201,16 @@ a single loop the agent runs for every round of work:
            a ## Placement section
 5 VERIFY   what an agent cannot check → a totest task + the ai_needstest gate
 6 REVIEW   the human left results → judge them, close the gate, file follow-ups
-7 REGISTER feature status, progress, touches
-8 REMEMBER memories for what cost real time; postponed for what is blocked
-9 DOCUMENT the wiki, if reality moved
+7 REGISTER feature status, progress, touches — recorded with `novadev knowledge log`
+8 REMEMBER memories for what cost real time — recorded; postponed for what is blocked
+9 DOCUMENT the wiki, if reality moved — recorded
 10 CLOSE   `novadev sync`
 ```
 
 `novadev sync` is the close-out and the engine: it runs the project's metrics command
 (when one is set), regenerates every derived file, archives finished batches and reviewed
-test rounds, validates the tree and the link graph, and prints two lists — **NEXT
-ACTIONS** (the agent's) and **WAITING ON THE HUMAN**. The agent works its list and re-runs
+test rounds, validates the tree, the link graph and the knowledge bundle, and prints two
+lists — **NEXT ACTIONS** (the agent's) and **WAITING ON THE HUMAN**. The agent works its list and re-runs
 until it reports clean:
 
 ```
@@ -204,6 +228,116 @@ WAITING ON THE HUMAN (1):
 **You write todo briefs and walk the tests only a person can walk. That is the whole
 job.** No command to remember, no skill to pick, no archive step to run — if
 something needs doing and an agent can do it, `sync` says so and the agent does it.
+
+## Knowledge — an Open Knowledge Format bundle
+
+Knowledge rots when nobody can tell a fresh fact from an old guess. novadev keeps the
+project's knowledge as infrastructure instead: versioned, typed, validated on every
+`novadev sync`, and honest about how far each piece can be trusted.
+
+`.novadev/knowledge/` is an [Open Knowledge Format](https://github.com/GoogleCloudPlatform/open-knowledge-format)
+(OKF 0.2) bundle — the open, vendor-neutral format Google Cloud published in 2026 for
+knowledge that people and agents maintain together: a folder of markdown files with YAML
+frontmatter. novadev deploys it on day 0 and keeps it conformant, so anything that reads OKF
+— an agent loading files into context, a search index, an OKF graph viewer — can read the
+project, and the project's knowledge never depends on novadev to stay readable.
+
+```
+knowledge/
+  index.md     derived: okf_version, then the load-first map — wiki pages, memories, features, log
+  log.md       every change, newest day first
+  wiki/        index.md + overview.md, stack.md, architecture.md, conventions.md, workflows.md, glossary.md
+  memories/    index.md + one file per lesson
+  features/    index.md + FEAT-NNNN-<slug>/ { feature.md, work.md, tests.md }
+```
+
+**One concept per file.** Every markdown file in the bundle except `index.md` and `log.md` is
+a *concept*; its path is its identity. It opens with frontmatter:
+
+```markdown
+---
+type: Gotcha
+title: bun test -t takes a JavaScript regular expression
+description: When filtering tests by name — write a|b, never a\|b, which runs nothing.
+tags: [testing, bun]
+created: 2026-10-03
+generated: { by: claude-code/claude-opus-5-5, at: 2026-10-03T14:05:00+02:00 }
+verified:
+  - { by: human:filipp-protsenko, at: 2026-10-11T10:00:00+02:00 }
+stale_after: 2027-04-09T10:00:00+02:00
+sources:
+  - id: found
+    resource: todo:2026-10-03_1/02-filter
+    title: The mutation check that passed with zero tests
+---
+```
+
+OKF asks only for `type`. novadev asks more of every hand-written concept: a `title`, a
+one-line `description` (the derived indexes show it, so an agent decides from one line
+whether to open a file), and a `generated` stamp — who wrote the current content, in OKF's
+actor form (`human:<id>`, `<tool>/<model>`, `process:<id>`), and when, as an ISO 8601
+timestamp with its offset. The types are fixed per folder: `Wiki Page` in `wiki/`;
+`Guardrail`, `Gotcha`, `Decision` or `Guide` in `memories/`; `Feature` for `feature.md`
+(its OKF `status` — draft, stable, deprecated — is derived from `feature-status`). A folder
+the project adds may hold any type.
+
+**Trust and freshness are in the file.** `verified` lists who re-checked a concept, one
+event per actor: none makes it *unverified*, agents or processes only *machine-confirmed*,
+a person *human-reviewed*. `stale_after` says when it is due for a re-check; novadev sets it
+from `"knowledge": { "reviewDays": { "wiki": 90, "memories": 180, "features": 365 } }` in
+`novadev.json` each time a concept is recorded — for a folder set to `null` it writes none
+and removes the one it finds, and no `"knowledge"` at all means no dates — and `novadev sync`
+lists what is past it. `sources` says what a concept was drawn from — a
+todo (`todo:<batch>/<todo>`, wherever the archive moved it), a commit (`commit:<hash>`), a
+file of the project (`repo:<path>`), a URL — and sync checks the todos exist and tells you
+when a `repo:` path is gone, because the concept may describe code that moved.
+
+**Every change is recorded.** A change is two writes — the stamps in the concept, and an
+entry in `log.md` — and one command makes both, for a whole batch of events or for none of
+them:
+
+```sh
+novadev knowledge log events.json
+```
+
+```json
+{ "events": [
+  { "path": "wiki/architecture.md", "event": "update", "by": "claude-code/claude-opus-5-5",
+    "note": "The kit registry moved out of the Workbench.", "ref": "2026-10-11_1/01-kits" },
+  { "path": "memories/bun-test-t-is-a-regex.md", "event": "verify", "by": "human",
+    "note": "The human re-ran the example." }
+] }
+```
+
+`create` and `update` stamp `generated`; `verify` adds a `verified` event; `deprecate` sets
+`status: deprecated` (a feature's `feature-status` too); `remove` deletes the file — never a
+feature, never a page of the wiki's set. Each moves `stale_after` by the folder's review
+days (a deprecated concept has none), and each appends a `**Creation**`, `**Update**`,
+`**Verification**`, `**Deprecation**` or `**Removal**` line under today's date in `log.md`,
+with the note, the actor and the todo. An entry is about the concept its first link names;
+a note may link others. `"by": "human"` takes the person's id from git's `user.name`
+(`human:filipp-protsenko`). The payload is a JSON file because a note is prose, and a
+backtick in a shell argument runs a command. Every file is staged first and replaced only
+when all of them are written, so a refused or failed call changes nothing. The answer is
+JSON too.
+
+**What `novadev sync` checks.** That every file in the bundle is a valid OKF concept with
+the keys above; that `index.md` files are current (it rewrites them, and each feature's
+derived `status`); and that the log knows every change — a concept whose `generated` or
+`verified` day is newer than its newest log entry is a problem, and so is a concept that is
+gone while the log still lists it as current. Changes made on or before the day of the log's
+`**Initialization**` entry are covered by it. As NEXT ACTIONS it lists the concepts past
+`stale_after` (five, then a count), a concept changed since the last commit whose
+`generated` stamp did not move, stamps changed since the last commit with no new log entry
+(a hand-written stamp claims a check nobody recorded), a concept deleted since the last
+commit without a removal, and a `repo:` source that is gone. An `index.md` sync wrote for a
+folder that has no concepts left is removed. `novadev sync --check` fails on the problems, as on any.
+
+**Links.** Concepts link to each other with plain relative markdown links — the bundle is a
+graph as well as a tree — and cite work only by stable id in `sources`, because todos move
+into the archive. A relative link that reaches nothing — a concept not written yet, or code
+that moved — is reported by `novadev doctor` as a note: OKF allows links to knowledge not
+yet written.
 
 ## Metrics and the debt budget
 
@@ -487,7 +621,8 @@ additionally generates thin native adapters that just route to them:
   `/novadev` offers the whole set
 - `.cursor/rules/novadev.mdc` — Cursor always-applied rule
 - managed marker sections in `AGENTS.md` and `CLAUDE.md` (created if missing;
-  re-deploy updates between the markers without touching your text)
+  re-deploy updates between the markers without touching your text) — they send every
+  agent to `.novadev/knowledge/index.md` first
 
 Everything under `.novadev/` is meant to be **committed**. Only transient junk
 should be git-ignored.

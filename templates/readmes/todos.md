@@ -16,6 +16,9 @@ Inside a todo folder:
   still in flight. Every record says where its new code went, in a `## Placement`
   section.
 
+What a todo teaches is not kept here: the agent records it in `../knowledge/` (a memory, a
+wiki page, a feature), citing the todo as its source, so it outlives the archive move.
+
 Todos are not only human-authored: when the human asks an agent in chat to
 implement/fix/change something that no open todo covers, the agent must FILE it
 here itself — transcribe the request as `prompt.md`, do the work, record the

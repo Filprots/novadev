@@ -14,7 +14,6 @@ import {
   TEST_RESULTS_DIR,
   TEST_ROUND_RE,
   TEST_TASK_RE,
-  WIKI_PAGES,
   compareVersions,
   deployedVersion,
   listDirs,
@@ -24,6 +23,7 @@ import {
   readFrontmatter,
   requireProjectRoot,
 } from './lib.ts';
+import { auditKnowledge } from './knowledge.ts';
 import { auditLinks } from './links.ts';
 import { auditMetrics } from './metrics-audit.ts';
 import { auditPlacement } from './placement.ts';
@@ -167,40 +167,12 @@ export function doctor(): void {
     }
   }
 
-  // --- memories: frontmatter + INDEX sync ---
-  const memoriesDir = join(nd, 'memories');
-  const memoryFiles = listFiles(memoriesDir).filter(
-    (f) => f.endsWith('.md') && f !== 'INDEX.md' && f !== 'README.md',
-  );
-  const indexPath = join(memoriesDir, 'INDEX.md');
-  const indexText = existsSync(indexPath) ? readFileSync(indexPath, 'utf8') : '';
-  if (!existsSync(indexPath)) problems.push('memories/INDEX.md: missing');
-  for (const file of memoryFiles) {
-    const fm = readFrontmatter(join(memoriesDir, file));
-    if (!fm) problems.push(`memories/${file}: missing frontmatter header`);
-    else {
-      for (const key of ['title', 'created', 'kind']) {
-        if (!fm[key]) problems.push(`memories/${file}: frontmatter missing "${key}"`);
-      }
-    }
-    if (indexText && !indexText.includes(file)) {
-      problems.push(`memories/INDEX.md: no pointer line for ${file}`);
-    }
-  }
-
-  // --- wiki: page set + index sync ---
-  const wikiDir = join(nd, 'wiki');
-  if (!existsSync(join(wikiDir, 'INDEX.md'))) {
-    notes.push('wiki: MISSING — an agent must create it (skills/novadev-work.md (phase 9)) before todo work');
-  } else {
-    for (const page of WIKI_PAGES) {
-      if (!existsSync(join(wikiDir, page))) problems.push(`wiki/${page}: missing (strict page set)`);
-    }
-    const wikiIndex = readFileSync(join(wikiDir, 'INDEX.md'), 'utf8');
-    for (const page of listFiles(wikiDir)) {
-      if (!page.endsWith('.md') || page === 'INDEX.md' || page === 'README.md') continue;
-      if (!wikiIndex.includes(page)) problems.push(`wiki/INDEX.md: no line for ${page}`);
-    }
+  // --- knowledge: the Open Knowledge Format bundle — wiki, memories, features — and its log ---
+  const knowledge = auditKnowledge(root, nd);
+  problems.push(...knowledge.problems);
+  notes.push(...knowledge.notes, ...knowledge.actions);
+  for (const fix of knowledge.fixes) {
+    problems.push(`${fix.label} — run \`novadev sync\``);
   }
 
   // --- skills: canonical files present + in sync with the installed novadev ---
@@ -275,12 +247,14 @@ export function doctor(): void {
     'archive',
     'postponed',
     'sparks',
-    'wiki',
-    'memories',
-    'features',
+    'knowledge',
     'totest',
     'skills',
     'metrics',
+    // Pre-0.12.0 knowledge folders: the knowledge audit names them as problems.
+    'wiki',
+    'memories',
+    'features',
   ]);
   for (const dir of listDirs(nd)) {
     if (!known.has(dir)) notes.push(`.novadev/${dir}/: not a novadev folder (tolerated)`);

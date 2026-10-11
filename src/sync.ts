@@ -10,18 +10,20 @@
 // derived file — the metrics snapshot and the wiki budgets block included — on a metrics
 // snapshot nobody can read, on a budget raise sync has not written into novadev.json yet, on a
 // debt budget nothing can be checked against, and on known debt over its budget.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { sweepDone } from './archive.ts';
 import {
   RECORD_NEEDSTEST,
   addDays,
+  applyFix,
   archiveGraceDays,
   batchCompletedOn,
   compareVersions,
   listDirs,
   readField,
   deployedVersion,
+  featuresDir,
   listAllTodos,
   listFeatures,
   listFiles,
@@ -32,6 +34,7 @@ import {
   requireProjectRoot,
   todoState,
 } from './lib.ts';
+import { auditKnowledge } from './knowledge.ts';
 import { auditLinks } from './links.ts';
 import { displayCommand, refreshMetrics } from './metrics.ts';
 import { auditMetrics } from './metrics-audit.ts';
@@ -75,14 +78,13 @@ export async function sync(args: string[]): Promise<void> {
   // snapshot this sync stores: a record is never archived out of sight before its problem is shown.
   const placement = auditPlacement(root, metrics.view.snapshot);
 
-  // 1. Derived content.
+  // 1. Derived content: the features' histories, the metrics snapshot and budgets block, and the
+  // knowledge bundle's indexes (with each feature's derived lifecycle).
   const before = auditLinks(root);
-  const fixes = [...before.fixes, ...metrics.fixes, ...metricsAudit.fixes];
+  const knowledgeBefore = auditKnowledge(root, nd);
+  const fixes = [...before.fixes, ...metrics.fixes, ...metricsAudit.fixes, ...knowledgeBefore.fixes];
   if (!check && fixes.length > 0) {
-    for (const fix of fixes) {
-      mkdirSync(dirname(fix.path), { recursive: true });
-      writeFileSync(fix.path, fix.next);
-    }
+    for (const fix of fixes) applyFix(fix);
     console.log(`derived: regenerated ${fixes.length} file(s)`);
   } else if (check && fixes.length > 0) {
     // Name each one: a hook or CI log is often all anyone sees of this run.
@@ -99,9 +101,10 @@ export async function sync(args: string[]): Promise<void> {
     }
   }
 
-  // 3. Validate what is left.
+  // 3. Validate what is left. In `--check` nothing was written, so the knowledge is judged as it is.
   const audit = auditLinks(root);
-  const problems = [...audit.problems, ...metricsAudit.problems, ...placement.problems];
+  const knowledge = check ? knowledgeBefore : auditKnowledge(root, nd);
+  const problems = [...audit.problems, ...metricsAudit.problems, ...placement.problems, ...knowledge.problems];
   if (problems.length > 0) {
     console.log(`\nPROBLEMS (${problems.length}):`);
     for (const p of problems) console.log(`  ✗ ${p}`);
@@ -123,7 +126,7 @@ export async function sync(args: string[]): Promise<void> {
   }
 
   // 4. What still needs doing, split by who has to do it.
-  const agent = [...agentActions(root, nd, audit.notes), ...metrics.actions, ...placement.actions];
+  const agent = [...knowledge.actions, ...agentActions(root, nd, audit.notes), ...metrics.actions, ...placement.actions];
   const human = humanActions(nd);
 
   if (agent.length > 0) {
@@ -166,10 +169,8 @@ export async function sync(args: string[]): Promise<void> {
 function agentActions(root: string, nd: string, notes: string[]): string[] {
   const out: string[] = [];
 
-  if (!existsSync(join(nd, 'wiki', 'INDEX.md'))) {
-    out.push('wiki is MISSING — build it before any todo work (loop phase 9, "Building the wiki")');
-  }
-  if (!existsSync(join(nd, 'features', 'INDEX.md')) && listFeatures(nd).length === 0) {
+  // (A missing wiki is the knowledge audit's first action.)
+  if (!existsSync(join(featuresDir(nd), 'index.md')) && listFeatures(nd).length === 0) {
     out.push(
       'features registry is MISSING — reverse-engineer it (loop phase 9, "Building the registry")',
     );

@@ -3,18 +3,22 @@
 // The graph only stays true because each edge has ONE authored direction and one
 // derived direction. Authored (by an agent, in prose): a record/brief's
 // `**Feature:**` and `**Commits:**` lines. Derived (regenerated here): every
-// feature's `## Work` / `## Commits` blocks and `features/INDEX.md`. Nothing has to
-// be updated in two places, so backlinks cannot silently rot.
+// feature's work.md and tests.md — concepts of the knowledge bundle, so each carries its
+// Open Knowledge Format frontmatter. Nothing has to be updated in two places, so backlinks
+// cannot silently rot. (The bundle's index.md files are derived by knowledge.ts.)
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { DERIVED_ACTOR, FEATURES_DIR, TEST_HISTORY_TYPE, WORK_HISTORY_TYPE } from './knowledge.ts';
 import {
   FEATURE_DIR_RE,
-  FEATURE_DOC,
   FEATURE_ID_RE,
+  FEATURE_LIST_KEYS,
   FEATURE_REF_KEYS,
   FEATURE_REQUIRED_KEYS,
+  FEATURE_STATUS_KEY,
   FEATURE_STATUSES,
+  KNOWLEDGE_DIR,
   RECORD_CONFIRMED,
   RECORD_NEEDSTEST,
   TEST_PLAN_FILE,
@@ -25,13 +29,13 @@ import {
   type TestRound,
   type TestTask,
   type TodoRef,
+  applyFix,
   blockBegin,
   blockEnd,
   blockTrouble,
   commitHashesIn,
   featureIdsIn,
   featuresDir,
-  legacyFeatureFiles,
   listAllTodos,
   listFeatures,
   listFiles,
@@ -39,11 +43,15 @@ import {
   listTestTasks,
   novadevDir,
   readField,
-  readFrontmatter,
   requireProjectRoot,
+  textValue,
   todoState,
   writeBlock,
 } from './lib.ts';
+import { readFrontmatterText, splitFrontmatter, yamlFlowMap, yamlString } from './okf.ts';
+
+/** How a message names a feature's folder: by its place in `.novadev/`. */
+const FEATURES = `${KNOWLEDGE_DIR}/${FEATURES_DIR}`;
 
 export type { Fix } from './lib.ts';
 export type Audit = { problems: string[]; notes: string[]; fixes: Fix[] };
@@ -66,51 +74,48 @@ export function auditLinks(root: string): Audit {
   const notes: string[] = [];
   const fixes: Fix[] = [];
 
-  // A pre-0.6.0 tree reads as an empty registry, which would silently pass every check.
-  const stragglers = legacyFeatureFiles(nd);
-  if (stragglers.length > 0) {
-    problems.push(
-      `features/: ${stragglers.length} feature(s) still in the pre-0.6.0 flat layout (${stragglers[0]}…) — run \`novadev migrate-repo\``,
-    );
-  }
-
   const features = listFeatures(nd);
   const byId = new Map<string, Feature>();
   for (const f of features) {
     if (byId.has(f.id)) {
-      problems.push(`features/${f.file}: duplicate id ${f.id} (also ${byId.get(f.id)!.file})`);
+      problems.push(`${FEATURES}/${f.file}: duplicate id ${f.id} (also ${byId.get(f.id)!.file})`);
       continue;
     }
     byId.set(f.id, f);
   }
 
-  // --- feature files: naming, frontmatter, cross-references ---
+  // --- feature files: naming, novadev's keys, cross-references ---
+  // (The Open Knowledge Format side — type, description, the stamps — is knowledge.ts's to judge.)
   for (const f of features) {
     const m = f.file.match(FEATURE_DIR_RE);
+    const id = textValue(f.fm.id);
     if (!m) {
-      problems.push(`features/${f.file}: folder must be named FEAT-NNNN-<kebab-slug>`);
-    } else if (f.fm.id && m[1] !== f.fm.id) {
-      problems.push(`features/${f.file}: folder id ${m[1]} does not match frontmatter id ${f.fm.id}`);
+      problems.push(`${FEATURES}/${f.file}: folder must be named FEAT-NNNN-<kebab-slug>`);
+    } else if (id && m[1] !== id) {
+      problems.push(`${FEATURES}/${f.file}: folder id ${m[1]} does not match frontmatter id ${id}`);
     }
-    if (!readFrontmatter(f.path)) {
-      problems.push(`features/${f.file}: missing frontmatter header`);
-      continue;
-    }
+    if (readFrontmatterText(f.text).state !== 'ok') continue; // knowledge.ts reports the frontmatter itself
     for (const key of FEATURE_REQUIRED_KEYS) {
-      if (!f.fm[key]) problems.push(`features/${f.file}: frontmatter missing "${key}"`);
+      if (textValue(f.fm[key]) === '') problems.push(`${FEATURES}/${f.file}: frontmatter missing "${key}"`);
     }
-    if (f.fm.id && !FEATURE_ID_RE.test(f.fm.id)) {
-      problems.push(`features/${f.file}: id "${f.fm.id}" must look like FEAT-0001`);
+    for (const key of FEATURE_LIST_KEYS) {
+      const value = f.fm[key];
+      if (value !== undefined && value !== null && !(Array.isArray(value) && value.every((v) => typeof v === 'string'))) {
+        problems.push(`${FEATURES}/${f.file}: "${key}" must be a YAML list, like [${key === 'touches' ? 'src/auth/, src/login.ts' : key === 'tags' ? 'login, auth' : 'FEAT-0003'}]`);
+      }
+    }
+    if (id && !FEATURE_ID_RE.test(id)) {
+      problems.push(`${FEATURES}/${f.file}: id "${id}" must look like FEAT-0001`);
     }
     if (f.status && !(FEATURE_STATUSES as readonly string[]).includes(f.status)) {
       problems.push(
-        `features/${f.file}: status "${f.status}" — one of: ${FEATURE_STATUSES.join(', ')}`,
+        `${FEATURES}/${f.file}: ${FEATURE_STATUS_KEY} "${f.status}" — one of: ${FEATURE_STATUSES.join(', ')}`,
       );
     }
     for (const key of FEATURE_REF_KEYS) {
-      for (const id of f.refs[key] ?? []) {
-        if (id === f.id) problems.push(`features/${f.file}: ${key} points at itself`);
-        else if (!byId.has(id)) problems.push(`features/${f.file}: ${key} → ${id} does not exist`);
+      for (const ref of f.refs[key] ?? []) {
+        if (ref === f.id) problems.push(`${FEATURES}/${f.file}: ${key} points at itself`);
+        else if (!byId.has(ref)) problems.push(`${FEATURES}/${f.file}: ${key} → ${ref} does not exist`);
       }
     }
   }
@@ -121,7 +126,7 @@ export function auditLinks(root: string): Audit {
       const other = byId.get(id);
       if (other && !(other.refs['superseded-by'] ?? []).includes(f.id)) {
         problems.push(
-          `features/${other.file}: ${f.id} claims to supersede it — add "superseded-by: ${f.id}"`,
+          `${FEATURES}/${other.file}: ${f.id} claims to supersede it — add ${f.id} to its "superseded-by" list`,
         );
       }
     }
@@ -129,7 +134,7 @@ export function auditLinks(root: string): Audit {
       const other = byId.get(id);
       if (other && !(other.refs['supersedes'] ?? []).includes(f.id)) {
         problems.push(
-          `features/${other.file}: ${f.id} claims to be superseded by it — add "supersedes: ${f.id}"`,
+          `${FEATURES}/${other.file}: ${f.id} claims to be superseded by it — add ${f.id} to its "supersedes" list`,
         );
       }
     }
@@ -141,7 +146,7 @@ export function auditLinks(root: string): Audit {
   for (const t of todos) {
     for (const id of t.featureIds) {
       if (!byId.has(id)) {
-        problems.push(`${t.todo.ref}: **Feature:** ${id} does not exist in features/`);
+        problems.push(`${t.todo.ref}: **Feature:** ${id} does not exist in ${FEATURES}/`);
         continue;
       }
       if (!workByFeature.has(id)) workByFeature.set(id, []);
@@ -251,8 +256,8 @@ export function auditLinks(root: string): Audit {
     const openTasks = tasks.filter((t) => t.featureIds.includes(f.id));
 
     for (const derived of [
-      renderDerivedFile(f.workPath, 'work', renderWork(linked, f.id)),
-      renderDerivedFile(f.testsPath, 'tests', renderTests(featureRounds, openTasks, f.id)),
+      renderDerivedFile(f.workPath, 'work', renderWork(linked, f), derivedHeader('work', f)),
+      renderDerivedFile(f.testsPath, 'tests', renderTests(featureRounds, openTasks, f), derivedHeader('tests', f)),
     ]) {
       if (derived.fix) fixes.push(derived.fix);
       if (derived.problem) problems.push(derived.problem);
@@ -261,10 +266,10 @@ export function auditLinks(root: string): Audit {
     // `confirmed` is completed work that a human additionally verified — it counts.
     const done = (t: TodoLinks) => t.state === 'completed' || t.state === 'confirmed';
     if (f.status === 'shipped' && !linked.some(done)) {
-      notes.push(`features/${f.file}: status "shipped" but no completed todo links to it`);
+      notes.push(`${FEATURES}/${f.file}: ${FEATURE_STATUS_KEY} "shipped" but no completed todo links to it`);
     }
     if (f.status === 'planned' && linked.some(done)) {
-      notes.push(`features/${f.file}: status "planned" but completed work links to it — advance it`);
+      notes.push(`${FEATURES}/${f.file}: ${FEATURE_STATUS_KEY} "planned" but completed work links to it — advance it`);
     }
     // Only the LATEST round's verdict matters here: a historical failed round that a later
     // round verified fixed is exactly the normal lifecycle, not a standing warning.
@@ -279,28 +284,15 @@ export function auditLinks(root: string): Audit {
     );
     if (f.status === 'shipped' && latestRound?.verdict === 'failed') {
       notes.push(
-        `features/${f.file}: status "shipped" but its latest human test round recorded a failure`,
+        `${FEATURES}/${f.file}: ${FEATURE_STATUS_KEY} "shipped" but its latest human test round recorded a failure`,
       );
     }
   }
 
-  // --- derived content: features/INDEX.md ---
-  const indexPath = join(featuresDir(nd), 'INDEX.md');
-  if (features.length > 0) {
-    const current = existsSync(indexPath) ? readFileSync(indexPath, 'utf8') : null;
-    const base = current ?? indexScaffold();
-    const next = writeBlock(base, 'features-index', renderIndex(features));
-    if (next === null) {
-      problems.push(`features/INDEX.md: ${blockTrouble(base, 'features-index')}`);
-    } else if (next !== current) {
-      fixes.push({
-        path: indexPath,
-        label: current === null ? 'features/INDEX.md: missing' : 'features/INDEX.md: out of date',
-        next,
-      });
-    }
-  } else if (!existsSync(indexPath)) {
-    notes.push('features/: registry MISSING — an agent must create it (skills/novadev-work.md (phase 9))');
+  // An empty registry: building it is the agent's job — unless someone already said it is empty, by
+  // writing its index by hand (knowledge.ts derives that index once the first feature exists).
+  if (features.length === 0 && !existsSync(join(featuresDir(nd), 'index.md'))) {
+    notes.push(`${FEATURES}/: registry MISSING — an agent must create it (skills/novadev-work.md (phase 9))`);
   }
 
   return { problems, notes, fixes };
@@ -346,29 +338,59 @@ function readTodoLinks(todo: TodoRef): TodoLinks {
 }
 
 /**
- * Rebuild one derived file, preserving anything a human wrote outside the block. Gives a Fix when
- * the content changed (or the file does not exist yet), and a problem when its markers are missing
- * or broken — the file then stays as it is, instead of silently going stale.
+ * The frontmatter a derived history carries: it is a concept of the knowledge bundle, written by
+ * `novadev sync` from the records — so its actor is sync's, with no time (it changes with the
+ * records, not on a day of its own).
  */
-function renderDerivedFile(path: string, block: string, body: string): { fix?: Fix; problem?: string } {
+function derivedHeader(block: 'work' | 'tests', f: Feature): string {
+  const type = block === 'work' ? WORK_HISTORY_TYPE : TEST_HISTORY_TYPE;
+  const title = `${f.id} — ${block === 'work' ? 'work history' : 'test history'}`;
+  const description =
+    block === 'work'
+      ? `Every todo, record and commit that built ${f.id}${f.title ? ` (${f.title})` : ''}.`
+      : `The human test rounds of ${f.id}${f.title ? ` (${f.title})` : ''}: the open one, and every completed round with its verdict.`;
+  return [
+    '---',
+    `type: ${type}`,
+    `title: ${yamlString(title)}`,
+    `description: ${yamlString(description)}`,
+    `generated: ${yamlFlowMap([['by', DERIVED_ACTOR]])}`,
+    '---',
+    '',
+    '',
+  ].join('\n');
+}
+
+/**
+ * Rebuild one derived file, preserving anything a human wrote outside the block. Its frontmatter is
+ * novadev's, and always the canonical one. Gives a Fix when the content changed (or the file does not
+ * exist yet), and a problem when its markers are missing or broken — the file then stays as it is,
+ * instead of silently going stale.
+ */
+function renderDerivedFile(path: string, block: string, body: string, header: string): { fix?: Fix; problem?: string } {
   const current = existsSync(path) ? readFileSync(path, 'utf8') : null;
   const base = current ?? derivedScaffold(block);
-  const where = path.split(/[\\/]features[\\/]/)[1]?.replace(/\\/g, '/') ?? path;
-  const next = writeBlock(base, block, body);
-  if (next === null) {
+  // The part after the LAST "features" folder: the project's own path may hold one too.
+  const where = /[\\/]features[\\/]((?:(?![\\/]features[\\/]).)*)$/.exec(path)?.[1]?.replace(/\\/g, '/') ?? path;
+  const written = writeBlock(base, block, body);
+  if (written === null) {
     return {
-      problem: `features/${where}: ${blockTrouble(base, block)} — repair the markers, or delete the file and \`novadev sync\` writes it again`,
+      problem: `${FEATURES}/${where}: ${blockTrouble(base, block)} — repair the markers, or delete the file and \`novadev sync\` writes it again`,
     };
   }
+  const split = splitFrontmatter(written);
+  const rest = (split === null ? written : split.body).replace(/^(\r?\n)+/, '');
+  // The header in the file's own line endings, like the block: a CRLF checkout never reads as stale.
+  const next = (written.includes('\r\n') ? header.replace(/\n/g, '\r\n') : header) + rest;
   if (next === current) return {};
-  return { fix: { path, label: `${where}: ${current === null ? 'missing' : 'out of date'}`, next } };
+  return { fix: { path, label: `${FEATURES}/${where}: ${current === null ? 'missing' : 'out of date'}`, next } };
 }
 
 function derivedScaffold(block: string): string {
   const heading = block === 'work' ? 'Work' : 'Human test rounds';
   return `# ${heading}
 
-<!-- DERIVED by \`novadev links --fix\` from the todo records and archived test rounds.
+<!-- DERIVED by \`novadev sync\` from the todo records and archived test rounds.
      Do not hand-edit inside the markers; anything outside them is preserved. -->
 
 ${blockBegin(block)}
@@ -376,8 +398,10 @@ ${blockEnd(block)}
 `;
 }
 
-function renderWork(linked: TodoLinks[], featureId: string): string {
+function renderWork(linked: TodoLinks[], f: Feature): string {
+  const featureId = f.id;
   const lines: string[] = [];
+  lines.push(`The work that built [${featureId}${f.title ? ` — ${f.title.replace(/[\\[\]]/g, (c) => `\\${c}`)}` : ''}](feature.md).`, '');
   lines.push('## Todos');
   if (linked.length === 0) {
     lines.push('', '(nothing links to this feature yet)');
@@ -396,8 +420,10 @@ function renderWork(linked: TodoLinks[], featureId: string): string {
   return lines.join('\n');
 }
 
-function renderTests(rounds: TestRound[], open: TestTask[], featureId: string): string {
+function renderTests(rounds: TestRound[], open: TestTask[], f: Feature): string {
+  const featureId = f.id;
   const lines: string[] = [];
+  lines.push(`The human testing of [${featureId}${f.title ? ` — ${f.title.replace(/[\\[\]]/g, (c) => `\\${c}`)}` : ''}](feature.md).`, '');
 
   lines.push('## Open round');
   lines.push('');
@@ -425,34 +451,6 @@ function renderTests(rounds: TestRound[], open: TestTask[], featureId: string): 
   }
   lines.push('', `_Rounds are matched to this feature by \`${featureId}\`._`);
   return lines.join('\n');
-}
-
-function renderIndex(features: Feature[]): string {
-  const head = '| ID | Status | Area | Feature | Touches |\n|---|---|---|---|---|';
-  const rows = features.map((f) => {
-    const cell = (s: string) => (s ? s.replace(/\|/g, '\\|') : '—');
-    return `| [${f.id}](${f.file}/${FEATURE_DOC}) | ${cell(f.status)} | ${cell(f.area)} | ${cell(f.title)} | ${cell(f.touches.join(', '))} |`;
-  });
-  return [head, ...rows].join('\n');
-}
-
-function indexScaffold(): string {
-  return `# Features index
-
-<!-- The table below is DERIVED from the feature files' frontmatter.
-     Regenerate it with \`novadev links --fix\` — do not hand-edit inside the markers. -->
-
-${blockBegin('features-index')}
-${blockEnd('features-index')}
-
-Search the registry from the CLI:
-
-\`\`\`sh
-novadev features <query>              # title / area / tags / body
-novadev features --touching <path>    # which features already claim this code
-novadev features --status in-progress
-\`\`\`
-`;
 }
 
 /** Hashes that git does not know about (rebased away, typo'd, or never pushed). */
@@ -489,7 +487,7 @@ export function links(args: string[]): void {
 
   if (apply && audit.fixes.length > 0) {
     for (const fix of audit.fixes) {
-      writeFileSync(fix.path, fix.next);
+      applyFix(fix);
       console.log(`  ✎ ${fix.label.split(':')[0]} — regenerated`);
     }
     console.log(`links: regenerated ${audit.fixes.length} file(s).`);

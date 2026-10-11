@@ -26,6 +26,7 @@ describe('deploy', () => {
       debtBudget: null,
       hubs: null,
       placementSince: todayStamp(),
+      knowledge: { reviewDays: { wiki: 90, memories: 180, features: 365 } },
     });
   });
 
@@ -46,10 +47,11 @@ describe('deploy', () => {
     delete manifest.debtBudget;
     delete manifest.hubs;
     delete manifest.placementSince;
+    delete manifest.knowledge;
     write(root, '.novadev/novadev.json', JSON.stringify(manifest, null, 2) + '\n');
     run(root, 'deploy');
     const after = readJson(root, '.novadev/novadev.json');
-    for (const key of ['metrics', 'debtBudget', 'hubs', 'placementSince']) expect(key in after).toBe(false);
+    for (const key of ['metrics', 'debtBudget', 'hubs', 'placementSince', 'knowledge']) expect(key in after).toBe(false);
   });
 
   test('refuses a repo that still needs migrating, changes nothing, and goes ahead after migrate-repo', () => {
@@ -149,7 +151,7 @@ describe('doctor', () => {
     write(root, '.novadev/metrics/latest.json', '{"updated":"2026-10-01","debt":{"known":230},"hubs":[]}');
     const stale = run(root, 'doctor');
     expect(stale.code).toBe(1);
-    expect(stale.stdout).toContain('✗ wiki/architecture.md: budgets block missing — run `novadev sync`');
+    expect(stale.stdout).toContain('✗ knowledge/wiki/architecture.md: budgets block missing — run `novadev sync`');
 
     write(root, 'metrics-out.json', '{"debt":{"known":230},"hubs":[]}');
     expect(run(root, 'sync').code).toBe(0);

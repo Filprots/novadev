@@ -6,6 +6,7 @@ import {
   BATCH_COMPLETE_FILE,
   BATCH_RE,
   addDays,
+  applyFix,
   archiveGraceDays,
   batchCompletedOn,
   batchIsDone,
@@ -26,7 +27,7 @@ import {
  */
 function regenerateDerived(root: string, quiet = false): void {
   const { fixes } = auditLinks(root);
-  for (const fix of fixes) writeFileSync(fix.path, fix.next);
+  for (const fix of fixes) applyFix(fix);
   if (fixes.length > 0 && !quiet) console.log(`regenerated ${fixes.length} derived file(s).`);
 }
 

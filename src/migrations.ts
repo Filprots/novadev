@@ -30,7 +30,6 @@ import {
   compareVersions,
   deployedVersion,
   featureIdsIn,
-  featuresDir,
   isDirectory,
   isNovadevManaged,
   listDirs,
@@ -45,6 +44,7 @@ import {
   totestDir,
   writeManifest,
 } from './lib.ts';
+import { migrateToKnowledgeBundle } from './knowledge-migration.ts';
 import { METRICS_DIR, METRICS_SNAPSHOT, readSnapshot } from './metrics.ts';
 
 export type MigrationContext = { nd: string; dryRun: boolean; log: (line: string) => void };
@@ -86,7 +86,19 @@ export const MIGRATIONS: Migration[] = [
     title: 'a "## Placement" section in records: novadev.json gains "hubs" (off until set) and "placementSince"',
     run: migratePlacementSettings,
   },
+  {
+    to: '0.12.0',
+    title: 'wiki/, memories/ and features/ become one Open Knowledge Format bundle, .novadev/knowledge/, with a log and derived indexes',
+    run: migrateToKnowledgeBundle,
+  },
 ];
+
+/**
+ * Where features lived before 0.12.0 moved them into the knowledge bundle. The migrations up to
+ * 0.11.0 ran on that layout, so they name it — never `featuresDir`, which is today's place.
+ */
+const LEGACY_FEATURES = 'features';
+const legacyFeaturesDir = (nd: string) => join(nd, LEGACY_FEATURES);
 
 /** The migrations a repo whose layout is at `from` still needs, in order. */
 export function pendingMigrations(from: string): Migration[] {
@@ -179,8 +191,8 @@ export function migrateRepo(args: string[]): void {
   stampVersion(nd);
   console.log(
     `\nmigrated to ${NOVADEV_VERSION}${applied === 0 ? ' (layout was already current)' : ''}.` +
-      '\nNext: `novadev deploy` to refresh the playbooks, `novadev links --fix`, then' +
-      '\n`novadev doctor` — and commit the move.',
+      '\nNext: `novadev deploy` to refresh the playbooks, then `novadev sync` (it writes every' +
+      '\nderived file) and `novadev doctor` — and commit the move.',
   );
 }
 
@@ -362,10 +374,10 @@ function migratePlacementSettings(ctx: MigrationContext): void {
 }
 
 function featureFolderFor(nd: string, featureId: string): string | null {
-  for (const folder of listDirs(featuresDir(nd))) {
+  for (const folder of listDirs(legacyFeaturesDir(nd))) {
     if (folder.startsWith(featureId + '-')) return folder;
   }
-  for (const file of listFiles(featuresDir(nd))) {
+  for (const file of listFiles(legacyFeaturesDir(nd))) {
     if (file.startsWith(featureId + '-') && file.endsWith('.md')) return file.replace(/\.md$/, '');
   }
   return null;
@@ -384,7 +396,7 @@ function migrateFeatureFoldersAndArchive(ctx: MigrationContext): void {
 
 /** `features/FEAT-0007-magic-link.md` → `features/FEAT-0007-magic-link/feature.md`. */
 function featureFilesToFolders(ctx: MigrationContext): void {
-  const dir = featuresDir(ctx.nd);
+  const dir = legacyFeaturesDir(ctx.nd);
   for (const file of listFiles(dir)) {
     if (!LEGACY_FEATURE_FILE_RE.test(file)) continue;
     const folder = file.replace(/\.md$/, '');

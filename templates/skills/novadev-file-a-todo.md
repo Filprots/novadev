@@ -84,6 +84,12 @@ For each part write:
   earlier in this conversation, and anything you noticed that makes the request concrete
   (an identifier, a setting, a number they mentioned). This is the part that saves them
   typing later — make it factual, never speculative.
+- **A standing rule is knowledge, not only a todo.** When they state something that must
+  hold beyond this one change — "never…", "always…", "from now on…", "we decided…" — keep
+  their exact words in `request` and add one line to `context`: *Standing rule — record it
+  as a Guardrail or Decision memory when this is worked.* The agent who works the todo
+  writes it into the project's knowledge bundle with this todo as its source; you do not
+  write the memory yourself.
 
 **6. Confirm.** Report the refs it created (`2026-09-08_4/01-green-highlight-too-thin`),
 which files landed in each, and stop. **Do not start working on the todo.** Do not run
@@ -98,8 +104,12 @@ which files landed in each, and stop. **Do not start working on the todo.** Do n
 - **Never file without a yes.** The folders land in their repository.
 - **Never invent a `**Feature:**` line, a feature id, or a priority.** The brief is a
   request, not a plan. If a feature is obviously involved, mention it in prose inside the
-  context. (If they quote an old record at you, the command defangs the field form for
-  you — do not hand-edit the brief afterwards.)
+  context — and name it only after looking it up (`novadev features <word>`, or the map in
+  `.novadev/knowledge/features/index.md`); a guessed id sends the next agent to the wrong
+  place. (If they quote an old record at you, the command defangs the field form for you —
+  do not hand-edit the brief afterwards.)
+- **Never edit `.novadev/knowledge/`.** The wiki, the memories and the features change
+  only through the work loop, which records every change with who made it and why.
 - **Attachments belong to parts, not to the batch.** A screenshot of a broken panel goes
   in the panel todo. If you cannot tell, put it in the first part and say so.
 - The command reports `missingAttachments` for a path that was not there — tell them

@@ -1,7 +1,7 @@
 {
   "name": "novadev",
-  "version": "0.11.0",
-  "description": "novadev — a framework/language/agent-agnostic structured development system: git-tracked todos, archive, postponed, sparks, wiki, memories, and a linked features registry, deployed into any project with one command.",
+  "version": "0.12.0",
+  "description": "novadev \u2014 a framework/language/agent-agnostic structured development system: git-tracked todos, archive, postponed, sparks, a human-testing queue, and the project's knowledge (wiki, memories, a linked features registry) as one Open Knowledge Format bundle, deployed into any project with one command.",
   "type": "module",
   "bin": {
     "novadev": "bin/novadev.ts"
@@ -16,7 +16,7 @@
     "README.md"
   ],
   "engines": {
-    "bun": ">=1.0.0"
+    "bun": ">=1.4.0"
   },
   "license": "MIT"
 }

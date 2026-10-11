@@ -123,13 +123,14 @@ export function readMetricsConfig(nd: string): MetricsConfig {
     if (
       typeof rawPage === 'string' &&
       /^[A-Za-z0-9][A-Za-z0-9._-]*\.md$/.test(rawPage) &&
-      rawPage !== 'INDEX.md' &&
+      rawPage !== 'index.md' &&
+      rawPage !== 'log.md' &&
       rawPage !== 'README.md'
     ) {
       wikiPage = rawPage;
     } else {
       problems.push(
-        'novadev.json: "metricsWikiPage" must be the file name of a wiki page (like "architecture.md", not INDEX.md), or false for no budgets block',
+        'novadev.json: "metricsWikiPage" must be the file name of a wiki page (like "architecture.md", not index.md), or false for no budgets block',
       );
     }
   }

@@ -152,15 +152,16 @@ describe('0.10.0 → 0.11.0', () => {
     expect(read(root, '.novadev/novadev.json')).toBe(before);
   });
 
-  test('a 0.9.0 repo runs both steps in one go', () => {
+  test('a 0.9.0 repo runs every step in one go', () => {
     const root = project({ version: '0.9.0' });
     const result = run(root, 'migrate-repo', '--force');
-    expect(result.stdout).toContain('2 migration(s) to apply: 0.10.0 → 0.11.0');
+    expect(result.stdout).toContain('3 migration(s) to apply: 0.10.0 → 0.11.0 → 0.12.0');
     expect(readJson(root, '.novadev/novadev.json')).toMatchObject({
       metrics: null,
       debtBudget: null,
       hubs: null,
       placementSince: todayStamp(),
+      knowledge: { reviewDays: { wiki: 90, memories: 180, features: 365 } },
     });
   });
 

@@ -1,9 +1,21 @@
 // Shared helpers for the novadev CLI. Zero dependencies — Bun + node:fs only.
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { readFrontmatterText } from './okf.ts';
 
 export const ROOT_DIR_NAME = '.novadev';
-export const NOVADEV_VERSION = '0.11.0';
+export const NOVADEV_VERSION = '0.12.0';
+
+/**
+ * The project's knowledge — wiki, memories, features — is one Open Knowledge Format bundle under
+ * this folder of `.novadev/` (knowledge.ts). Everything else in `.novadev/` is the work: todos, the
+ * archive, the test queue, the metrics; the knowledge cites it by stable id.
+ */
+export const KNOWLEDGE_DIR = 'knowledge';
+
+export function knowledgeDir(nd: string): string {
+  return join(nd, KNOWLEDGE_DIR);
+}
 
 /** Compare dotted versions: <0 when a is older, 0 when equal, >0 when a is newer. */
 export function compareVersions(a: string, b: string): number {
@@ -64,17 +76,6 @@ export const RECORD_CONFIRMED = 'ai_confirmed.md';
  */
 export const WORK_RECORDS = [RECORD_COMPLETED, RECORD_PROGRESS, RECORD_FAILED] as const;
 
-/** The strict wiki page set. INDEX.md is the load-first map; the rest are the mandated pages. */
-export const WIKI_PAGES = [
-  'INDEX.md',
-  'overview.md',
-  'stack.md',
-  'architecture.md',
-  'conventions.md',
-  'workflows.md',
-  'glossary.md',
-] as const;
-
 /**
  * Canonical skill playbooks shipped into <root>/skills/, and the slash commands that route to them.
  *
@@ -86,7 +87,7 @@ export const SKILLS = [
     file: 'novadev-work.md',
     slug: 'novadev-work',
     description:
-      'The novadev development loop — the single always-applied playbook for this project. Covers the pre-context ritual, executing todo briefs, writing ai_ records, the features registry, handing untestable work to the human via totest, reviewing their results, memories, the wiki, and the `novadev sync` close-out. Invoke it for any development work here; the human writes todo briefs and this drives everything else.',
+      'The novadev development loop — the single always-applied playbook for this project. Covers the pre-context ritual (the knowledge bundle in .novadev/knowledge/, an Open Knowledge Format bundle: wiki, memories, features), executing todo briefs, writing ai_ records, the features registry, handing untestable work to the human via totest, reviewing their results, recording every knowledge change with provenance and trust, and the `novadev sync` close-out. Invoke it for any development work here; the human writes todo briefs and this drives everything else.',
   },
   {
     file: 'novadev-file-a-todo.md',
@@ -155,19 +156,26 @@ export const RENAMED_ADAPTER_SLUGS = ['novadev'] as const;
 // ---------------------------------------------------------------------------
 
 /**
- * A feature is a FOLDER: `features/FEAT-NNNN-<slug>/` holding the hand-written
+ * A feature is a FOLDER: `knowledge/features/FEAT-NNNN-<slug>/` holding the hand-written
  * `feature.md` plus derived `work.md` (todos/records/commits) and `tests.md` (human
  * test rounds). Splitting the derived indexes out keeps feature.md readable once a
- * capability has accumulated twenty todos and eight test rounds.
+ * capability has accumulated twenty todos and eight test rounds. All three are concepts of the
+ * knowledge bundle, so each opens with Open Knowledge Format frontmatter (knowledge.ts).
  */
 export const FEATURE_DIR_RE = /^(FEAT-\d{4})-[a-z0-9][a-z0-9-]*$/;
-/** Pre-0.6.0 flat layout, kept so doctor/migrate can recognise and fix it. */
+/** Pre-0.6.0 flat layout (`features/FEAT-*.md`), kept so the 0.6.0 migration can recognise it. */
 export const LEGACY_FEATURE_FILE_RE = /^(FEAT-\d{4})-[a-z0-9][a-z0-9-]*\.md$/;
 export const FEATURE_ID_RE = /^FEAT-\d{4}$/;
 export const FEATURE_DOC = 'feature.md';
 export const FEATURE_WORK = 'work.md';
 export const FEATURE_TESTS = 'tests.md';
 
+/**
+ * Where a feature is in its life — the `feature-status` key. It is novadev's own key: OKF reserves
+ * `status` for a document's lifecycle (draft | stable | deprecated), which `novadev sync` derives
+ * from this one (knowledge.ts).
+ */
+export const FEATURE_STATUS_KEY = 'feature-status';
 export const FEATURE_STATUSES = ['planned', 'in-progress', 'shipped', 'deprecated'] as const;
 export type FeatureStatus = (typeof FEATURE_STATUSES)[number];
 /** The mark `novadev features` prints before a feature, by status. */
@@ -183,9 +191,15 @@ export function featureStatusMark(status: string): string {
   return Object.hasOwn(FEATURE_STATUS_MARKS, status) ? FEATURE_STATUS_MARKS[status]! : '?';
 }
 
-export const FEATURE_REQUIRED_KEYS = ['id', 'title', 'status', 'area', 'created', 'updated'] as const;
-/** Frontmatter keys whose values are FEAT-ID references to other features. */
+/**
+ * novadev's own keys every feature.md carries. The OKF ones — type, title, description, the stamps —
+ * are knowledge.ts's to check, so a missing title is reported once.
+ */
+export const FEATURE_REQUIRED_KEYS = ['id', FEATURE_STATUS_KEY, 'area', 'created'] as const;
+/** Frontmatter keys whose values are YAML lists of FEAT-ID references to other features. */
 export const FEATURE_REF_KEYS = ['depends-on', 'supersedes', 'superseded-by', 'conflicts-with'] as const;
+/** Frontmatter keys whose values are YAML lists: the refs, plus `tags` and the code paths in `touches`. */
+export const FEATURE_LIST_KEYS = ['tags', 'touches', ...FEATURE_REF_KEYS] as const;
 
 export type Feature = {
   id: string;
@@ -197,22 +211,33 @@ export type Feature = {
   workPath: string;
   testsPath: string;
   title: string;
+  description: string;
+  /** The `feature-status` key: planned | in-progress | shipped | deprecated. */
   status: string;
   area: string;
   tags: string[];
   touches: string[];
   refs: Record<string, string[]>;
-  fm: Record<string, string>;
+  /** The frontmatter as YAML reads it — empty when it is missing or broken. */
+  fm: Record<string, unknown>;
   text: string;
 };
 
 export function featuresDir(nd: string): string {
-  return join(nd, 'features');
+  return join(knowledgeDir(nd), 'features');
 }
 
-/** Feature folders left over in the pre-0.6.0 flat layout (`features/FEAT-*.md`). */
-export function legacyFeatureFiles(nd: string): string[] {
-  return listFiles(featuresDir(nd)).filter((f) => LEGACY_FEATURE_FILE_RE.test(f));
+/** A frontmatter value as text: a string as it is, a number or a boolean written out, else ''. */
+export function textValue(value: unknown): string {
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return '';
+}
+
+/** A frontmatter value that must be a YAML list of words: its strings, or [] for anything else. */
+export function listValue(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === 'string' && item.trim() !== '').map((item) => item.trim());
 }
 
 export function listFeatures(nd: string): Feature[] {
@@ -222,24 +247,27 @@ export function listFeatures(nd: string): Feature[] {
     const featureDir = join(dir, folder);
     const path = join(featureDir, FEATURE_DOC);
     if (!existsSync(path)) continue;
-    const fm = readFrontmatter(path) ?? {};
+    const text = readFileSync(path, 'utf8');
+    const read = readFrontmatterText(text);
+    const fm = read.state === 'ok' ? read.data : {};
     const refs: Record<string, string[]> = {};
-    for (const key of FEATURE_REF_KEYS) refs[key] = featureIdsIn(fm[key] ?? '');
+    for (const key of FEATURE_REF_KEYS) refs[key] = featureIdsIn(listValue(fm[key]).join(' '));
     out.push({
-      id: fm.id ?? folder.match(FEATURE_DIR_RE)?.[1] ?? folder,
+      id: textValue(fm.id) || (folder.match(FEATURE_DIR_RE)?.[1] ?? folder),
       file: folder,
       dir: featureDir,
       path,
       workPath: join(featureDir, FEATURE_WORK),
       testsPath: join(featureDir, FEATURE_TESTS),
-      title: fm.title ?? '',
-      status: fm.status ?? '',
-      area: fm.area ?? '',
-      tags: csvList(fm.tags),
-      touches: csvList(fm.touches),
+      title: textValue(fm.title),
+      description: textValue(fm.description),
+      status: textValue(fm[FEATURE_STATUS_KEY]),
+      area: textValue(fm.area),
+      tags: listValue(fm.tags),
+      touches: listValue(fm.touches),
       refs,
       fm,
-      text: readFileSync(path, 'utf8'),
+      text,
     });
   }
   return out.sort((a, b) => a.id.localeCompare(b.id));
@@ -509,8 +537,9 @@ export function pathsOverlap(a: string, b: string): boolean {
 
 /**
  * Bidirectional links only stay true if ONE side is authored and the other is derived.
- * Authored: the record's `**Feature:**` line. Derived: the feature's Work/Commits blocks
- * and features/INDEX.md, all fenced by these markers and rewritten by `novadev links --fix`.
+ * Authored: the record's `**Feature:**` line. Derived: the blocks of a feature's work.md and
+ * tests.md, fenced by these markers and rewritten by `novadev links --fix` (and the wiki's
+ * budgets block, by `novadev sync`). The knowledge bundle's index.md files are derived whole.
  */
 export function blockBegin(name: string): string {
   return `<!-- novadev:${name}:begin -->`;
@@ -867,7 +896,11 @@ export function todayStamp(): string {
   return `${d.getFullYear()}-${mm}-${dd}`;
 }
 
-/** Minimal YAML frontmatter reader: returns null when the file has no `---` header. */
+/**
+ * The frontmatter of novadev's WORK files — a test plan, a postponed item, a batch's completed.md:
+ * flat `key: value` lines, read as text (a value may hold ": "). Null when the file has no `---`
+ * header. The knowledge bundle's concepts are YAML, read by okf.ts.
+ */
 export function readFrontmatter(filePath: string): Record<string, string> | null {
   const text = readFileSync(filePath, 'utf8');
   if (!text.startsWith('---')) return null;
@@ -935,8 +968,18 @@ export function refuse(error: string): { ok: false; error: string } {
   return { ok: false, error };
 }
 
-/** A derived file novadev (re)writes: where, why, and its new content. */
-export type Fix = { path: string; label: string; next: string };
+/** A derived file novadev (re)writes: where, why, and its new content — null when the file must go. */
+export type Fix = { path: string; label: string; next: string | null };
+
+/** Apply one fix: write the new content, or delete a derived file nothing derives any more. */
+export function applyFix(fix: Fix): void {
+  if (fix.next === null) {
+    rmSync(fix.path, { force: true });
+    return;
+  }
+  mkdirSync(dirname(fix.path), { recursive: true });
+  writeFileSync(fix.path, fix.next);
+}
 
 /** The line every file deploy manages carries. A README without it is the project's own. */
 export const MANAGED_MARK = 'managed by `novadev deploy`';

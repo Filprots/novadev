@@ -4,7 +4,11 @@
      Project-specific rules belong in the wiki (conventions page), not here. -->
 
 This project uses **novadev**: a structured development system in `.novadev/`,
-tracked in git, so the folder itself is the development history.
+tracked in git, so the folder itself is the development history. Its knowledge — the wiki,
+the memories, the features — is one **Open Knowledge Format** bundle (OKF 0.2, an open
+format: markdown files with YAML frontmatter) in `.novadev/knowledge/`, so any agent or
+tool that speaks OKF can read it, and every piece of it says who wrote it, when, who
+checked it, and when it is due for a re-check.
 
 Because every file in it is tracked, the deletions this playbook asks for (a spark that
 became a todo, a superseded record, a scenario describing behaviour that no longer
@@ -39,17 +43,23 @@ This is the playbook for the work itself. Everything below is one loop.
 
 ```
 .novadev/
+  knowledge/   the project's KNOWLEDGE — one Open Knowledge Format bundle:
+    index.md     the load-first map (derived by `novadev sync` — never edit it)
+    log.md       what changed in the knowledge, newest day first (`novadev knowledge log`)
+    wiki/        the project pre-context every agent loads before working
+    memories/    hard-won guardrails, gotchas, decisions and guides — read before, write during
+    features/    what this software DOES — one FEAT-NNNN/ folder per capability
   todos/       task batches waiting to be executed — human-authored, or filed by YOU from chat
   archive/     finished work by year: archive/<year>/todos/ and archive/<year>/totest/
   postponed/   deferred work with an explicit wake-up trigger
   sparks/      raw unshaped ideas — not yet tasks
-  wiki/        the project pre-context every agent loads before working
-  memories/    hard-won gotchas, guides, and guardrails — read before, write during
-  features/    what this software DOES — one FEAT-NNNN/ folder per capability
   totest/      the ACTIVE queue of tests waiting on a HUMAN (archived once reviewed)
   metrics/     latest.json — the project's own numbers, written by `novadev sync` (if set)
   skills/      this playbook and its three companions (managed by `novadev deploy`)
 ```
+
+`knowledge/` holds what is TRUE about the project; everything else is the WORK — the
+history the knowledge is drawn from, which it cites by stable id.
 
 ## The four playbooks
 
@@ -81,13 +91,26 @@ Phase 1 below routes to the first; phases 5 and 6 sit either side of the other t
   do not re-run it, and never add new work to it; a new request gets a new batch.**
   Do not hand-edit it; sync rewrites it from the records and deletes it if the batch
   ever reopens.
-- **Feature** — one capability, `features/FEAT-NNNN-<slug>/`: you write `feature.md`;
-  `work.md` and `tests.md` beside it are generated.
+- **Feature** — one capability, `knowledge/features/FEAT-NNNN-<slug>/`: you write
+  `feature.md`; `work.md` and `tests.md` beside it are generated.
+- **Concept** — one file of the knowledge bundle: a wiki page, a memory, a feature. It opens
+  with OKF frontmatter (a `type`, a `title`, a one-line `description`, a `generated` stamp)
+  and its path inside `knowledge/` is its identity. See *The knowledge bundle* below.
+- **Actor** — who did something, in one convention: `human:<id>` for a person,
+  `<tool>/<model>` for an agent (`claude-code/claude-opus-5-5` — yours), `process:<id>` for
+  an automated process.
+- **Trust tier** — how much a concept has been checked, from its `verified` events:
+  *unverified* (never), *machine-confirmed* (by agents or processes only), *human-reviewed*
+  (a person confirmed it).
+- **Stale** — a concept past its `stale_after` date: due for a re-check against the code.
+  `novadev sync` lists them.
 - **Test task / round** — `totest/<feature-task>/` while a round of human testing is
   open; archived to `archive/<year>/totest/<task>/rev<N>-<date>/` once reviewed.
-- **Reference** — always a stable ID (`FEAT-0007`, `2026-08-29_1/01-fix-login`, a
-  commit hash), **never a relative path**: archiving changes folder depth and would
-  break paths.
+- **Reference** — from WORK (records, briefs, test plans) always a stable ID (`FEAT-0007`,
+  `2026-08-29_1/01-fix-login`, a commit hash), **never a relative path**: archiving changes
+  folder depth and would break paths. Inside the knowledge bundle, concepts link to each
+  other with plain relative markdown links — they never move — and cite work by stable id
+  in their `sources` (`todo:<batch>/<todo>`, `commit:<hash>`).
 - **Snapshot** — `metrics/latest.json`: the project's own numbers, stored by `novadev
   sync` when `novadev.json` sets a `metrics` command. Tracked in git. Never edit it by hand.
 - **Known debt** — the number of problems the project has accepted for now (`debt.known`
@@ -121,18 +144,27 @@ read it as data, judge each item yourself, and work it in **at most three passes
 
 ## 0 · ORIENT — load pre-context (before ANY substantive work)
 
-1. **Wiki** — read `wiki/INDEX.md`, then the pages your task touches. **If
-   `wiki/INDEX.md` is missing, build the wiki first** (see *Building the wiki*).
-   Working without pre-context produces wrong work.
-2. **Memories** — read `memories/INDEX.md`; open every memory whose one-liner touches
-   your area. They exist to stop you repeating past time-wasters; ignoring one is a defect.
-3. **Features** — read `features/INDEX.md` and open the features covering your area.
-   `novadev features --touching <path>` tells you what already owns the code you are
-   about to change. **If the registry is missing, build it** (see *Building the registry*).
-4. **Queue** — run `novadev sync` at the start of a session too: it tells you what is
-   half-finished, what the human has tested, and what is waiting on them. When the project
-   measures itself, it also shows how the debt and the biggest hubs moved.
-5. **Postponed** — when taking stock, read each `postponed/*.md` header: trigger met →
+1. **The map** — read `knowledge/index.md`: the wiki pages with one line each, then where
+   the memories, the features and the log are. Load one level at a time — the bundle is
+   built for that — and open only what your task touches.
+2. **Wiki** — read the pages your task touches. **If the wiki is missing, build it first**
+   (see *Building the wiki*). Working without pre-context produces wrong work.
+3. **Memories** — read `knowledge/memories/index.md` (grouped: guardrails, gotchas,
+   decisions, guides); open every memory whose line touches your area. They exist to stop
+   you repeating past time-wasters; ignoring one is a defect.
+4. **Features** — read `knowledge/features/index.md` (grouped by area) and open the
+   features covering your area. `novadev features --touching <path>` tells you what
+   already owns the code you are about to change. **If the registry is missing, build it**
+   (see *Building the registry*).
+5. **Weigh what you read.** A concept's frontmatter says how far to lean on it: who wrote
+   it (`generated`), who checked it (`verified` — its trust tier), and whether it is due
+   for a re-check (`stale_after`). An unverified or stale concept is a lead to check
+   against the code before you build on it, not a fact.
+6. **Queue** — run `novadev sync` at the start of a session too: it tells you what is
+   half-finished, what the human has tested, what is waiting on them, and which concepts
+   are stale. When the project measures itself, it also shows how the debt and the biggest
+   hubs moved.
+7. **Postponed** — when taking stock, read each `postponed/*.md` header: trigger met →
    surface it; obsolete → recommend deletion; otherwise say it is parked.
 
 ## 1 · INTAKE — everything project-changing becomes a todo
@@ -223,6 +255,7 @@ conflicting second version is the expensive failure this prevents:
 | Name/keyword | `novadev features <term>` per synonym | the same thing under another name |
 | Code surface | `novadev features --touching <path>` | features that own the code you will change |
 | Hub | `novadev features --hubs` | the features already on a hub you will change |
+| Knowledge | `novadev knowledge <term>` | guardrails, decisions and gotchas that already constrain the design |
 | Area / lifecycle | `--area <a>`, `--status planned\|in-progress` | neighbours; someone already started it |
 | Deprecated | `--status deprecated` | capability removed on purpose — don't resurrect it blindly |
 | History | grep `archive/` records + `postponed/` + `sparks/` | rejected designs, earlier shapes of the idea |
@@ -326,7 +359,9 @@ not work; anything still open>
 **Conventions.** One record per todo, updated in place when status changes (a deferred
 item that lands flips `ai_failed.md` → `ai_completed.md`; delete the stale one). Short
 and factual. Reference by ID, never by relative path. **Never claim verification you
-did not run** — and when a human must check it, phase 5 is how you say so.
+did not run** — and when a human must check it, phase 5 is how you say so. The knowledge
+this todo changed is recorded in `knowledge/log.md` with the todo as its `ref` (phases
+7–9); the record need not repeat it.
 
 The `**Feature:**` and `**Commits:**` lines are the *authored* half of the link graph;
 `novadev sync` regenerates the feature's `work.md` from them. Saying
@@ -470,17 +505,27 @@ Finally set `status: reviewed`, `verdict: <…>`, `last-tested: <date>` in the p
 frontmatter, clear `todos:`, and add a line to `## Revisions`. Phase 10 archives the
 round and links it into the feature's `tests.md`.
 
+Then read the feature's `feature.md` against what the round showed. Where the human saw
+behaviour the document describes differently, the document is wrong: fix it and record an
+`update`. Where the round confirmed it, you may record a `verify` — by YOU, citing the round
+in the note: a person walking scenarios checked the software, not the document.
+
 ## 7 · REGISTER — keep the features registry true
 
 A registry that lags reality is a trap: the next pre-flight reads it, believes it, and
 gets the wrong verdict.
 
-- **New capability** → `novadev features --new <slug>`, then fill `area`, `tags`,
-  `touches`, and the relationships. `touches:` is what powers overlap detection —
-  list the paths the feature genuinely owns.
-- **Status**: `planned` → `in-progress` when real work starts → `shipped` when it works
-  end to end **and** the verification behind it actually passed (including the human
-  round, if there was one) → `deprecated` when removed or superseded.
+- **New capability** → `novadev features --new <slug>`, then fill `description` (one line:
+  what someone can do with it), `area`, `tags`, `touches`, and the relationships — `tags`,
+  `touches` and the relationships are YAML lists (`[src/auth/, src/login.ts]`). `touches` is
+  what powers overlap detection — list the paths the feature genuinely owns. Then record
+  its creation (*Recording a change*, event `create`).
+- **Status** lives in `feature-status`: `planned` → `in-progress` when real work starts →
+  `shipped` when it works end to end **and** the verification behind it actually passed
+  (including the human round, if there was one) → `deprecated` when removed or superseded.
+  The OKF `status` beside it (draft / stable / deprecated) is derived from it by
+  `novadev sync` — never set it yourself.
+- **Every change to `feature.md` is recorded** — event `update`, with the todo as `ref`.
 - **`## Progress`**: one dated line per real step, newest last, naming the todo ref.
 - **Refresh** `touches:` when the code surface moved and `tags:` when it gained
   vocabulary someone would search for — stale fields cause duplicate features later.
@@ -488,30 +533,46 @@ gets the wrong verdict.
   `touches:` name it. A feature marked "only hub paths" has no folder of its own. When your
   work moves a feature's code off a hub, add the new path to its `touches:`, and remove the
   hub path once none of its code is left there.
-- **Removal**: never delete the feature file. `status: deprecated`, log it, and set
-  `superseded-by:` / `supersedes:` on both sides if something replaced it.
-- **Never hand-edit** `work.md`, `tests.md`, or `features/INDEX.md` inside their
-  `<!-- novadev:*:… -->` markers — all derived, regenerated by phase 10.
+- **Removal**: never delete the feature file. Record a `deprecate` event (it sets
+  `feature-status: deprecated`), log it in `## Progress`, and add the ids to
+  `superseded-by` / `supersedes` on both sides if something replaced it.
+- **Never hand-edit** `work.md` or `tests.md` inside their `<!-- novadev:*:… -->` markers,
+  nor any `index.md` — all derived, regenerated by phase 10.
 
 ## 8 · REMEMBER — write the memory while it is fresh
 
 The moment you hit something **non-obvious that cost real time or would cost the next
 agent time** — a tool quirk, a trap in the stack, a decision with a non-obvious why, a
-debugging recipe, a "never do X here" — write it immediately:
+debugging recipe, a "never do X here" — write it immediately, as
+`knowledge/memories/<slug>.md`:
 
 ```markdown
 ---
+type: Gotcha
 title: <one line — the claim itself>
+description: <one line — WHEN it applies, the moment a future agent must think of it>
+tags: [<words someone would search for>]
 created: <YYYY-MM-DD>
-kind: gotcha | guide | decision | guardrail
-verified: <YYYY-MM-DD — last date this was confirmed true>
+sources:
+  - id: found
+    resource: todo:<batch>/<todo>
+    title: <where it cost time>
 ---
 <The fact. Then **Why:** it matters. Then **How to apply:** what to actually do.>
 ```
 
-Then a pointer in `memories/INDEX.md`: `- [title](<slug>.md) — <when it applies>`.
-Do NOT record what the repo already states, or what only matters to this conversation.
-A memory earns its file by saving future time.
+The `type` says what kind of lesson it is: **Guardrail** ("never do X here"), **Gotcha**
+(a trap, a tool quirk), **Decision** (a choice with a non-obvious why — its source is the
+record that made it), **Guide** (a recipe that worked). `sources` says where it was
+learned — the todo, a commit (`commit:<hash>`), a URL; cite one in the body with a
+footnote whose label is the source's `id` (`…cost an afternoon.[^found]`). Then record its
+creation (*Recording a change*, event `create`, with the todo as `ref`) — that stamps it
+and logs it; `memories/index.md` is derived from its `description`, so there is no pointer
+line to write. Do NOT record what the repo already states, or what only matters to this
+conversation. A memory earns its file by saving future time.
+
+When a memory turns out wrong, fix it and record an `update`; when its subject is gone,
+record a `remove` (a mistaken lesson that still explains old records: `deprecate`).
 
 **Postponing.** Work that is real but blocked goes to `postponed/<slug>.md` — never
 silently dropped. The header is the contract:
@@ -529,27 +590,41 @@ discard-if: <the condition that makes it OBSOLETE>
 ## 9 · DOCUMENT — keep the wiki true
 
 If your change altered what the wiki describes (new module, changed workflow, new
-dependency, moved boundary), update the affected pages and their `updated:` stamp, and
-keep the INDEX one-liners accurate. A wiki that lies is worse than none. The budgets block
+dependency, moved boundary), update the affected pages, keep each page's `description`
+true (the indexes show it), and record the change (*Recording a change*, event `update`,
+with the todo as `ref` and a note saying what moved). A wiki that lies is worse than none. The budgets block
 (in `architecture.md` unless `novadev.json` names another page, between
 `<!-- novadev:budgets:… -->` markers) is generated by `novadev sync`: never edit inside it.
 Only marker lines count, so you may quote the markers in a sentence or a code example.
 Close every code fence on that page: a fence that never closes turns the rest of the page
 into code, the block too, and sync reports it as a problem until the fence is closed.
 
-**Building the wiki** (when `wiki/INDEX.md` is missing — do this BEFORE todo work).
-Exactly these pages, no others; a topic that fits nowhere goes under a heading in the
-closest one. Each starts with `---\nupdated: <YYYY-MM-DD>\n---`.
+**Building the wiki** (when `knowledge/wiki/` has no pages — `novadev sync` says so; do
+this BEFORE todo work). These six pages in `knowledge/wiki/`; add another only for a
+subject none of them can hold, and give a topic that fits nowhere a heading in the closest
+one. Each page is a concept:
+
+```markdown
+---
+type: Wiki Page
+title: Architecture
+description: <one line — what this page tells an agent about THIS project>
+---
+```
 
 | Page | Contains |
 |---|---|
-| `INDEX.md` | Load-first map: 1–3 sentence summary + one line per page. Nothing else. |
 | `overview.md` | What the system IS: purpose, users, capabilities, top-level layout. |
 | `stack.md` | Languages, frameworks, runtimes, package managers, key deps and why, version constraints. |
 | `architecture.md` | The parts and how they connect: modules, boundaries, data flow, where state lives. |
 | `conventions.md` | How code is written HERE: style, naming, patterns required and banned, review gates. |
 | `workflows.md` | Build, run, test, debug, deploy: exact commands, environments, secrets handling (where, never values), CI. |
 | `glossary.md` | The project's own terms an outsider would not know. |
+
+There is no index page to write: `knowledge/index.md` and `knowledge/wiki/index.md` are
+derived from the pages' titles and descriptions, so make each `description` the one line
+an agent needs to decide whether to open the page. Record all six in ONE call (*Recording
+a change*, six `create` events).
 
 Investigate, don't guess: probe manifests, lockfiles, CI and deploy configs, entry
 points, existing docs; run the project's own documented build or test command (that
@@ -559,7 +634,8 @@ the claim; what you could not determine at all gets `TODO(wiki): <question>`. A 
 a briefing, not a book — well under ~150 lines, linking to files instead of quoting
 them.
 
-**Building the registry** (when `features/INDEX.md` is missing). A feature is a
+**Building the registry** (when `knowledge/features/` is empty — `novadev sync` says so).
+A feature is a
 capability someone can point at ("magic-link login", "CSV export", "rate limiting") —
 not a bug fix, refactor, or internal helper. Prefer a handful of real capabilities over
 dozens of fragments; two things always changed together with one code surface are ONE
@@ -567,7 +643,9 @@ feature. Reverse-engineer from the wiki (`overview`, `architecture`, `glossary` 
 the project's own names), the code surface (entry points, routes, commands, screens,
 flags), and the history (`archive/` records give you the work links for free). Confirm
 each against the code before writing it down. Then `novadev features --new <slug>` per
-feature and fill it in.
+feature, fill it in, and record their creation in one call. A project with nothing to
+register yet (day 0, no code) says so by writing `knowledge/features/index.md` with a
+`# Features` heading and nothing under it; sync derives it once the first feature exists.
 
 ## 10 · CLOSE — one command, then work the list
 
@@ -575,9 +653,18 @@ feature and fill it in.
 novadev sync
 ```
 
-It regenerates every derived file (`work.md`, `tests.md`, `features/INDEX.md`),
-archives what is finished, validates the whole tree and link graph, and prints two
-lists: **NEXT ACTIONS** (yours) and **WAITING ON THE HUMAN**.
+It regenerates every derived file (`work.md`, `tests.md`, the knowledge bundle's
+`index.md` files, each feature's OKF `status`), archives what is finished, validates the
+whole tree, the link graph and the knowledge bundle, and prints two lists: **NEXT
+ACTIONS** (yours) and **WAITING ON THE HUMAN**.
+
+**Knowledge.** sync checks that every file of `knowledge/` is a valid OKF concept with
+the frontmatter this playbook asks for, and that `log.md` knows every change: a concept
+whose `generated` or `verified` date is newer than its last log entry is a PROBLEM, and so
+is a concept that is gone while the log still lists it as current. It lists as NEXT
+ACTIONS the concepts past their `stale_after`, a concept you changed since the last commit
+without recording it, and a source (`repo:<path>`) that no longer exists. The cure for
+all of them is *Recording a change*.
 
 **Metrics.** When `novadev.json` sets a `metrics` command, `novadev sync` runs it first and
 stores the result in `metrics/latest.json`. It compares the numbers with the last commit,
@@ -631,6 +718,122 @@ they are allowed to see: name the records and commits so they can look at any of
 
 ---
 
+## The knowledge bundle — Open Knowledge Format
+
+`.novadev/knowledge/` is an **Open Knowledge Format (OKF 0.2)** bundle — the open format
+Google Cloud published for knowledge that people and agents keep together
+(<https://github.com/GoogleCloudPlatform/open-knowledge-format>). It is the project's
+foundation from its first day: every page, lesson and capability is a plain markdown file
+that any agent, editor or OKF tool can read, carrying in its frontmatter where it came
+from, who wrote it, who checked it, and when it is due for a re-check. Treat it like code:
+it is reviewed, versioned, validated by `novadev sync`, and never left to drift.
+
+### What a concept is
+
+One file, one concept. Its path inside `knowledge/` is its identity. It opens with YAML
+frontmatter, then a markdown body that favours structure (headings, lists, tables) over
+long prose. novadev asks more than the format's minimum:
+
+| Key | | |
+|---|---|---|
+| `type` | required | `Wiki Page` in `wiki/`; `Guardrail`, `Gotcha`, `Decision` or `Guide` in `memories/`; `Feature` for `feature.md`. A folder you add may use any descriptive type. |
+| `title` | required | its name — for a memory, the claim itself |
+| `description` | required | ONE line; the derived indexes show it, and agents decide from it whether to open the file — for a memory, WHEN it applies |
+| `generated` | required, written for you | `{ by: <actor>, at: <timestamp> }` — who wrote the current content, and when |
+| `tags` | recommended | a YAML list of words someone would search for: `[auth, login]` |
+| `sources` | recommended | what it was drawn from — see *Sources and links* |
+| `verified` | written for you | `{ by, at }` events — who re-checked it; one per actor, the newest |
+| `stale_after` | written for you | when it is due for a re-check (the review days in `novadev.json`) |
+| `status` | optional | `draft` / `stable` (the default) / `deprecated` — for a feature, derived from `feature-status` |
+
+Write values YAML can read: a value holding `: ` or ` #` goes in double quotes
+(`description: "Login: magic links only"`); lists are `[a, b]`. `novadev sync` names the
+line when it cannot read one. Timestamps are ISO 8601 with an offset
+(`2026-10-11T09:30:00+02:00`) — let the command write them.
+
+Never write a `README.md` or an `INDEX.md` inside `knowledge/`, and never edit a derived
+`index.md`: every file there is a concept, a derived map, or the log. The one `index.md` you
+ever write by hand is an empty registry's (*Building the registry*), and sync replaces it
+with the derived one when the first feature exists.
+
+### Recording a change
+
+Every change to a concept is RECORDED: its stamps in the frontmatter and an entry in
+`knowledge/log.md`, written together by one command. Edit the concept first (write a new
+one without `generated` — the command adds it), then:
+
+```sh
+payload=$(mktemp -t novadev-knowledge.XXXXXX.json)   # or your session's own scratch dir
+cat > "$payload" <<'JSON'
+{ "events": [
+  { "path": "wiki/architecture.md", "event": "update", "by": "claude-code/claude-opus-5-5",
+    "note": "The kit registry moved out of the Workbench into src/kits/registry.ts.",
+    "ref": "2026-10-11_1/01-kits" },
+  { "path": "memories/carve-by-helper-closure.md", "event": "create",
+    "by": "claude-code/claude-opus-5-5", "note": "The carve broke three times the same way.",
+    "ref": "2026-10-11_1/01-kits" }
+] }
+JSON
+novadev knowledge log "$payload"
+```
+
+| Event | When | What it writes |
+|---|---|---|
+| `create` | a new concept | `generated`, `stale_after`; a **Creation** entry |
+| `update` | its content changed | `generated`, `stale_after`; an **Update** entry |
+| `verify` | you re-checked it against the code or its sources, and it holds | a `verified` event, `stale_after`; a **Verification** entry |
+| `deprecate` | kept for links and history, no longer current | `status: deprecated` (and `feature-status` for a feature); a **Deprecation** entry |
+| `remove` | it is gone — never a feature, never a page of the wiki's set | deletes the file; a **Removal** entry |
+
+- `path` is inside `knowledge/` (`wiki/stack.md`); `note` is one line saying what changed
+  or what you checked it against — it is the log's prose, so make it worth reading, and it
+  may link other concepts (an entry is about the concept its FIRST link names, the one the
+  command writes); `ref` is the todo it belongs to.
+- `by` is the actor who did it. You: `<tool>/<model>`, the same every time. A person:
+  `"by": "human"` — the command takes their id from git — and ONLY when that person made
+  the change or confirmed the content in this conversation.
+- The payload is a JSON **file**, never shell arguments: a backtick in a note would run a
+  command. The command checks every event first and writes nothing if one is refused,
+  answering `{ "error": … }` — fix what it says and run it again. Then `novadev sync`
+  rewrites the indexes.
+- Several changes in one round go in one call. Record as you go, not at the end: an
+  interrupted session must still leave the knowledge true.
+- Never write `generated`, `verified` or `stale_after` by hand: a stamp written without its
+  log entry claims a check nobody recorded, and sync lists it until it is restored from git
+  or recorded.
+
+### Trust and freshness
+
+A concept's trust tier comes from its `verified` events: *unverified*, *machine-confirmed*
+(agents or processes only), *human-reviewed* (a person confirmed it). Record a `verify` only
+for what you actually re-checked this round, exactly as a record never claims verification
+you did not run. `stale_after` is set on every create, update and verify from the review
+days in `novadev.json` (`"knowledge": { "reviewDays": { "wiki": 90, "memories": 180,
+"features": 365 } }`); a folder set to `null` gets no date (the command removes one it
+finds), and neither does a deprecated concept. Once the date passes, sync lists the concept
+until someone re-checks it.
+Re-check the stale concepts that touch your task during ORIENT; the rest when the list
+asks for them.
+
+### Sources and links
+
+`sources` is a YAML list; each entry needs a `resource`, and an `id` when the body cites
+it as a footnote (`[^found]`):
+
+| Resource | Means |
+|---|---|
+| `todo:<batch>/<todo>` | a todo and its record, wherever archiving moved it — sync checks it exists |
+| `commit:<hash>` | a commit |
+| `repo:<path>` | a file or folder of the project — sync says when it is gone, because the concept may describe code that moved |
+| `https://…` | an outside document |
+| a relative path | another concept of the bundle |
+
+Concepts link to each other with plain relative markdown links (`[the registry](../features/FEAT-0012-kits/feature.md)`):
+the bundle is a graph, not only a tree, and the links are its edges. Work items are never
+linked by path — they move into the archive — only cited by stable id.
+
+---
+
 ## On demand (when the human asks — no command to remember)
 
 - **"find tech debt"** → sweep the code (TODO/FIXME/HACK, dead code, duplication,
@@ -641,14 +844,21 @@ they are allowed to see: name the records and commits so they can look at any of
   the current code** — a brief that sends someone to a non-existent problem is itself
   debt. File the confirmed ones as a new batch, one todo per coherent finding, and say
   plainly if the sweep was bounded.
-- **"is the wiki still true?" / "the memories look stale"** → audit them page by page
-  and file by file against the current code: fix what moved, delete what is dead,
-  resync the indexes. For memories, re-stamp `verified:` only on ones you actually
-  re-confirmed.
-- **"the wiki got fat"** → merge redundant content, delete stale detail, keep INDEX
-  skimmable in seconds. Pre-context must stay cheap to load.
+- **"is the knowledge still true?" / "is the wiki still true?" / "the memories look
+  stale"** → `novadev knowledge --stale` and `novadev knowledge --tier unverified` give
+  the worklist. Audit each concept against the current code: fix what moved and record an
+  `update`; delete what is dead and record a `remove` (a feature: `deprecate`); record a
+  `verify` only on what you actually re-checked, saying in the note what you checked it
+  against.
+- **"I checked it, it is right"** (the human, about a page, a memory, a feature) →
+  record a `verify` with `"by": "human"`. That is the only way a concept becomes
+  *human-reviewed*: never record a person as the actor of anything they did not do or
+  confirm in this conversation.
+- **"the wiki got fat"** → merge redundant content, delete stale detail, keep every
+  `description` one line an agent can decide on in a second. Pre-context must stay cheap
+  to load.
 - **"check the links"** → `novadev links` reports what is broken. `--fix` handles only
   derived content; the rest is judgement: unresolvable `FEAT-` refs (find what was
   meant — never delete the line to silence the error), one-way supersession claims,
   records with no `**Feature:**`, status contradictions, commit hashes git does not
-  know, stale `touches:` paths, and orphaned features.
+  know, stale `touches` paths, and orphaned features.

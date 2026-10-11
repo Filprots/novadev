@@ -3,10 +3,10 @@
 import { describe, expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { completed, exists, project, read, run, todo, write } from './helpers.ts';
+import { FEATURES, WIKI, completed, exists, project, read, run, todo, write } from './helpers.ts';
 
 const LOGIN =
-  '---\nid: FEAT-0001\ntitle: Login\nstatus: planned\narea: auth\ncreated: 2026-10-01\nupdated: 2026-10-01\n---\n\n# Login\n';
+  '---\ntype: Feature\nid: FEAT-0001\ntitle: Login\ndescription: Log in.\nfeature-status: planned\nstatus: draft\narea: auth\ncreated: 2026-10-01\ngenerated: { by: claude-code/test, at: 2026-10-01T00:00:00Z }\n---\n\n# Login\n';
 
 describe('sync', () => {
   test('a healthy project is clean', () => {
@@ -31,7 +31,7 @@ describe('sync', () => {
 
   test('a missing wiki and an unrecorded todo are NEXT ACTIONS', () => {
     const root = project();
-    rmSync(join(root, '.novadev/wiki/INDEX.md'));
+    rmSync(join(root, WIKI), { recursive: true });
     todo(root, '2026-10-01_1/01-thing');
     const result = run(root, 'sync');
     expect(result.code).toBe(0);
@@ -42,22 +42,19 @@ describe('sync', () => {
 
   test('stale derived content: sync regenerates it, --check reports it and fails without writing', () => {
     const root = project();
-    write(
-      root,
-      '.novadev/features/FEAT-0001-login/feature.md',
-      '---\nid: FEAT-0001\ntitle: Login\nstatus: planned\narea: auth\ncreated: 2026-10-01\nupdated: 2026-10-01\n---\n\n# Login\n',
-    );
-    const index = read(root, '.novadev/features/INDEX.md');
+    write(root, `${FEATURES}/FEAT-0001-login/feature.md`, LOGIN);
+    const index = read(root, `${FEATURES}/index.md`);
 
+    // work.md, tests.md, the features index, and the root index (which counts the features).
     const check = run(root, 'sync', '--check');
     expect(check.code).toBe(1);
-    expect(check.stdout).toContain('derived: 3 file(s) are stale');
-    expect(read(root, '.novadev/features/INDEX.md')).toBe(index);
+    expect(check.stdout).toContain('derived: 4 file(s) are stale');
+    expect(read(root, `${FEATURES}/index.md`)).toBe(index);
 
     const plain = run(root, 'sync');
     expect(plain.code).toBe(0);
-    expect(plain.stdout).toContain('derived: regenerated 3 file(s)');
-    expect(read(root, '.novadev/features/INDEX.md')).toContain('FEAT-0001');
+    expect(plain.stdout).toContain('derived: regenerated 4 file(s)');
+    expect(read(root, `${FEATURES}/index.md`)).toContain('FEAT-0001');
     expect(run(root, 'sync', '--check').code).toBe(0);
   });
 
@@ -74,44 +71,41 @@ describe('sync', () => {
 
   test('a feature file whose block markers are missing or broken is a problem, and stays as it is', () => {
     const root = project();
-    write(root, '.novadev/features/FEAT-0001-login/feature.md', LOGIN);
+    write(root, '.novadev/knowledge/features/FEAT-0001-login/feature.md', LOGIN);
     run(root, 'sync');
     const work = '# Work\n\nOnly hand-written text, no markers.\n';
     const tests = '# Tests\n\n<!-- novadev:tests:begin -->\nmine\n<!-- novadev:tests:begin -->\nold\n<!-- novadev:tests:end -->\n';
-    write(root, '.novadev/features/FEAT-0001-login/work.md', work);
-    write(root, '.novadev/features/FEAT-0001-login/tests.md', tests);
+    write(root, '.novadev/knowledge/features/FEAT-0001-login/work.md', work);
+    write(root, '.novadev/knowledge/features/FEAT-0001-login/tests.md', tests);
 
     const result = run(root, 'sync');
     expect(result.code).toBe(1);
     expect(result.stdout).toContain(
-      '✗ features/FEAT-0001-login/work.md: missing <!-- novadev:work:begin --> … <!-- novadev:work:end --> block — repair the markers, or delete the file and `novadev sync` writes it again',
+      '✗ knowledge/features/FEAT-0001-login/work.md: missing <!-- novadev:work:begin --> … <!-- novadev:work:end --> block — repair the markers, or delete the file and `novadev sync` writes it again',
     );
-    expect(result.stdout).toContain('✗ features/FEAT-0001-login/tests.md: the tests block markers are broken');
-    expect(read(root, '.novadev/features/FEAT-0001-login/work.md')).toBe(work);
-    expect(read(root, '.novadev/features/FEAT-0001-login/tests.md')).toBe(tests);
+    expect(result.stdout).toContain('✗ knowledge/features/FEAT-0001-login/tests.md: the tests block markers are broken');
+    expect(read(root, '.novadev/knowledge/features/FEAT-0001-login/work.md')).toBe(work);
+    expect(read(root, '.novadev/knowledge/features/FEAT-0001-login/tests.md')).toBe(tests);
   });
 
-  test('features/INDEX.md: a marker quoted in its hand-written text is never taken for the block', () => {
+  test('the features index is derived whole: a hand-made one for an empty registry is replaced once a feature exists', () => {
     const root = project();
-    write(root, '.novadev/features/FEAT-0001-login/feature.md', LOGIN);
-    const note = 'The table between `<!-- novadev:features-index:begin -->` and its end marker is generated.';
-    write(
-      root,
-      '.novadev/features/INDEX.md',
-      `# Features index\n\n${note}\n\n## Hand-written\n\nKeep me.\n\n<!-- novadev:features-index:begin -->\n<!-- novadev:features-index:end -->\n`,
-    );
+    expect(read(root, `${FEATURES}/index.md`)).toBe('# Features\n');
+    write(root, `${FEATURES}/FEAT-0001-login/feature.md`, LOGIN);
     expect(run(root, 'sync').code).toBe(0);
-    const index = read(root, '.novadev/features/INDEX.md');
-    expect(index).toContain(`${note}\n\n## Hand-written\n\nKeep me.\n`);
-    expect(index).toContain('| [FEAT-0001](FEAT-0001-login/feature.md) |');
+    const index = read(root, `${FEATURES}/index.md`);
+    expect(index).toContain('# auth\n\n* [○ FEAT-0001 — Login](FEAT-0001-login/feature.md) - planned · Log in.');
+    expect(index).not.toContain('---'); // an index below the bundle root carries no frontmatter
   });
 
   test('link files with CRLF line endings stay CRLF, and up-to-date ones are not stale', () => {
     const root = project();
-    write(root, '.novadev/features/FEAT-0001-login/feature.md', LOGIN);
+    write(root, '.novadev/knowledge/features/FEAT-0001-login/feature.md', LOGIN);
     expect(run(root, 'sync').code).toBe(0);
-    const files = ['features/INDEX.md', 'features/FEAT-0001-login/work.md', 'features/FEAT-0001-login/tests.md'];
-    for (const rel of files) write(root, `.novadev/${rel}`, read(root, `.novadev/${rel}`).replace(/\r?\n/g, '\r\n'));
+    const files = ['index.md', 'features/index.md', 'features/FEAT-0001-login/work.md', 'features/FEAT-0001-login/tests.md'];
+    for (const rel of files) {
+      write(root, `.novadev/knowledge/${rel}`, read(root, `.novadev/knowledge/${rel}`).replace(/\r?\n/g, '\r\n'));
+    }
 
     const check = run(root, 'sync', '--check');
     expect(check.code).toBe(0);
@@ -122,7 +116,7 @@ describe('sync', () => {
       'ai_completed.md': completed('01-login').replace('none — test fixture', 'FEAT-0001'),
     });
     expect(run(root, 'sync').stdout).toContain('derived: regenerated 1 file(s)');
-    const work = read(root, '.novadev/features/FEAT-0001-login/work.md');
+    const work = read(root, '.novadev/knowledge/features/FEAT-0001-login/work.md');
     expect(work).toContain('`2026-10-01_1/01-login`');
     expect(work.replace(/\r\n/g, '')).not.toContain('\n');
     expect(run(root, 'sync', '--check').code).toBe(0);

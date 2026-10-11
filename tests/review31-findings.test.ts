@@ -14,7 +14,7 @@ function blockProject(page: string, out = '{"debt":{"known":2},"hubs":[]}'): str
   const root = project({ metrics: 'cat metrics-out.json' });
   write(root, '.novadev/metrics/latest.json', SNAP);
   write(root, 'metrics-out.json', out);
-  write(root, '.novadev/wiki/architecture.md', page);
+  write(root, '.novadev/knowledge/wiki/architecture.md', page);
   return root;
 }
 
@@ -26,19 +26,19 @@ describe('[major] the budgets block never rewrites hand-written wiki text', () =
         '## Budgets\n\n<!-- novadev:budgets:begin -->\nold\n<!-- novadev:budgets:end -->\n',
     );
     run(root, 'sync');
-    expect(read(root, '.novadev/wiki/architecture.md')).toContain('Hand-written text that must survive.');
+    expect(read(root, '.novadev/knowledge/wiki/architecture.md')).toContain('Hand-written text that must survive.');
   });
   test('both markers quoted inline in one sentence are not "the block"', () => {
     const sentence = 'It sits between `<!-- novadev:budgets:begin -->` and `<!-- novadev:budgets:end -->`.';
     const root = blockProject(`# Architecture\n\n${sentence}\n`);
     run(root, 'sync');
-    expect(read(root, '.novadev/wiki/architecture.md')).toContain(sentence);
+    expect(read(root, '.novadev/knowledge/wiki/architecture.md')).toContain(sentence);
   });
   test('an example of the block inside a code fence is left alone', () => {
     const example = '```markdown\n<!-- novadev:budgets:begin -->\n(example rows)\n<!-- novadev:budgets:end -->\n```';
     const root = blockProject(`# Architecture\n\n${example}\n`);
     run(root, 'sync');
-    expect(read(root, '.novadev/wiki/architecture.md')).toContain(example);
+    expect(read(root, '.novadev/knowledge/wiki/architecture.md')).toContain(example);
   });
 });
 

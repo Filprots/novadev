@@ -346,10 +346,10 @@ describe('novadev features --hubs', () => {
     for (const args of [['features'], ['features', '--hubs']]) {
       expect(run(root, ...args).stdout.trim()).toBe('features — registry is empty.');
     }
-    rmSync(join(root, '.novadev/features/INDEX.md'));
+    rmSync(join(root, '.novadev/knowledge/features/index.md'));
     for (const args of [['features'], ['features', '--hubs']]) {
       expect(run(root, ...args).stdout.trim()).toBe(
-        'features — registry MISSING. An agent must create it: skills/novadev-work.md (phase 9)',
+        'features — registry MISSING (.novadev/knowledge/features/). An agent must create it: skills/novadev-work.md (phase 9)',
       );
     }
   });
@@ -359,7 +359,7 @@ describe('novadev features --hubs', () => {
     const result = run(root, 'features', '--new', 'kits', '--hubs');
     expect(result.code).toBe(1);
     expect(result.stderr.trim()).toBe('novadev: --hubs and --new do not go together: --new makes a feature, --hubs lists them by hub');
-    expect(exists(root, '.novadev/features/FEAT-0006-kits')).toBe(false);
+    expect(exists(root, '.novadev/knowledge/features/FEAT-0006-kits')).toBe(false);
   });
 });
 
@@ -418,9 +418,12 @@ describe('novadev features — the search', () => {
     const root = hubRegistry();
     const result = run(root, 'features', '--new', 'kits', '--title', 'Kit registry', '--touches', 'src/kits/');
     expect(result.code).toBe(0);
-    expect(result.stdout).toContain('created features/FEAT-0006-kits/feature.md');
-    const doc = read(root, '.novadev/features/FEAT-0006-kits/feature.md');
+    expect(result.stdout).toContain('created .novadev/knowledge/features/FEAT-0006-kits/feature.md');
+    const doc = read(root, '.novadev/knowledge/features/FEAT-0006-kits/feature.md');
+    expect(doc).toContain('type: Feature');
     expect(doc).toContain('title: Kit registry');
-    expect(doc).toContain('touches: src/kits/');
+    expect(doc).toContain('feature-status: planned\nstatus: draft');
+    expect(doc).toContain('touches: [src/kits/]');
+    expect(doc).not.toContain('generated:'); // recording its creation stamps it
   });
 });

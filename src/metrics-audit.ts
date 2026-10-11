@@ -4,6 +4,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { type DebtBudget, collectRaises, planRaises, recordHistory } from './debt-budget.ts';
+import { wikiState } from './knowledge.ts';
 import {
   type Fix,
   blockBegin,
@@ -14,6 +15,7 @@ import {
   findBlock,
   isMarkerLine,
   isNovadevManaged,
+  knowledgeDir,
   listDirs,
   listFiles,
   manifestPath,
@@ -145,16 +147,16 @@ function budgetsBlockFix(
   budget: DebtBudget | null,
 ): { fix?: Fix; note?: string; problem?: string } {
   if (page === null) return {};
-  const wikiDir = join(nd, 'wiki');
+  const wikiDir = join(knowledgeDir(nd), 'wiki');
   // No wiki yet: building it is already on the agent's list, and it will get the block after.
-  if (!existsSync(join(wikiDir, 'INDEX.md'))) return {};
+  if (wikiState(nd) === 'missing') return {};
   const path = join(wikiDir, page);
   if (!existsSync(path)) {
     return snapshot.state === 'ok'
-      ? { note: `wiki/${page}: missing, so the budgets block has nowhere to go — create the page, or set "metricsWikiPage"` }
+      ? { note: `knowledge/wiki/${page}: missing, so the budgets block has nowhere to go — create the page, or set "metricsWikiPage"` }
       : {};
   }
-  if (!statSync(path).isFile()) return { problem: `wiki/${page}: not a file — the budgets block needs a page of that name` };
+  if (!statSync(path).isFile()) return { problem: `knowledge/wiki/${page}: not a file — the budgets block needs a page of that name` };
   // A snapshot that cannot be read says nothing about the numbers: leave the block as it is.
   if (snapshot.state === 'invalid' || snapshot.state === 'blocked') return {};
 
@@ -171,7 +173,7 @@ function budgetsBlockFix(
   const spot = findBlock(lines, BUDGETS_BLOCK);
   if (spot.state === 'broken') {
     return {
-      problem: `wiki/${page}: ${blockTrouble(current, BUDGETS_BLOCK)} — repair them, or delete both and \`novadev sync\` adds the block again`,
+      problem: `knowledge/wiki/${page}: ${blockTrouble(current, BUDGETS_BLOCK)} — repair them, or delete both and \`novadev sync\` adds the block again`,
     };
   }
   if (spot.state === 'absent') {
@@ -182,13 +184,13 @@ function budgetsBlockFix(
     const hidden = hiddenBlock(lines, fences);
     if (hidden) {
       return {
-        problem: `wiki/${page}: the budgets block on line ${hidden.line + 1} is inside a code fence that opens on line ${hidden.fence + 1}, so sync cannot see it — close that fence, and sync rewrites the block where it is`,
+        problem: `knowledge/wiki/${page}: the budgets block on line ${hidden.line + 1} is inside a code fence that opens on line ${hidden.fence + 1}, so sync cannot see it — close that fence, and sync rewrites the block where it is`,
       };
     }
     const open = fences.find((fence) => fence.close === null);
     if (open) {
       return {
-        problem: `wiki/${page}: the code fence that opens on line ${open.open + 1} is never closed, so a budgets block added at the end of the page would be part of it — close the fence, and \`novadev sync\` adds the block`,
+        problem: `knowledge/wiki/${page}: the code fence that opens on line ${open.open + 1} is never closed, so a budgets block added at the end of the page would be part of it — close the fence, and \`novadev sync\` adds the block`,
       };
     }
   }
@@ -204,14 +206,14 @@ function budgetsBlockFix(
   // Never write a block the next run cannot find: it would be added again on every run.
   if (findBlock(next.split('\n'), BUDGETS_BLOCK).state !== 'found') {
     return {
-      problem: `wiki/${page}: a budgets block written into this page could not be found again — check its code fences and markers`,
+      problem: `knowledge/wiki/${page}: a budgets block written into this page could not be found again — check its code fences and markers`,
     };
   }
   if (next === current) return {};
   return {
     fix: {
       path,
-      label: `wiki/${page}: budgets block ${spot.state === 'found' ? 'out of date' : 'missing'}`,
+      label: `knowledge/wiki/${page}: budgets block ${spot.state === 'found' ? 'out of date' : 'missing'}`,
       next: crlf ? next.replace(/\n/g, '\r\n') : next,
     },
   };
