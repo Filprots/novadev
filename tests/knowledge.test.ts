@@ -5,7 +5,7 @@ import { describe, expect, test } from 'bun:test';
 import { readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { auditKnowledge, listConcepts } from '../src/knowledge.ts';
-import { todayStamp } from '../src/lib.ts';
+import { NOVADEV_VERSION, todayStamp } from '../src/lib.ts';
 import { bundleMarkdownFiles, conformanceProblems, isReserved, readFrontmatterText } from '../src/okf.ts';
 import {
   FEATURES,
@@ -57,7 +57,7 @@ describe('day 0', () => {
     const root = tempDir();
     expect(run(root, 'deploy').code).toBe(0);
     expect(read(root, `${KNOWLEDGE}/log.md`)).toBe(
-      `# Knowledge log\n\n## ${todayStamp()}\n\n* **Initialization**: novadev 0.12.0 started this knowledge bundle — an Open Knowledge Format (OKF 0.2) bundle for the project's wiki, memories and features.\n`,
+      `# Knowledge log\n\n## ${todayStamp()}\n\n* **Initialization**: novadev ${NOVADEV_VERSION} started this knowledge bundle — an Open Knowledge Format (OKF 0.2) bundle for the project's wiki, memories and features.\n`,
     );
     expect(read(root, `${KNOWLEDGE}/index.md`)).toStartWith('---\nokf_version: "0.2"\n---\n');
     expect(readdirSync(join(root, KNOWLEDGE)).sort()).toEqual(['index.md', 'log.md']);

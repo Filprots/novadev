@@ -81,7 +81,9 @@ export async function sync(args: string[]): Promise<void> {
   // 1. Derived content: the features' histories, the metrics snapshot and budgets block, and the
   // knowledge bundle's indexes (with each feature's derived lifecycle).
   const before = auditLinks(root);
-  const knowledgeBefore = auditKnowledge(root, nd);
+  // Git is asked once per `repo:` source in this run: nothing below commits, so both audits share the answers.
+  const sourceDays = new Map<string, string | null>();
+  const knowledgeBefore = auditKnowledge(root, nd, { sourceDays });
   const fixes = [...before.fixes, ...metrics.fixes, ...metricsAudit.fixes, ...knowledgeBefore.fixes];
   if (!check && fixes.length > 0) {
     for (const fix of fixes) applyFix(fix);
@@ -103,7 +105,7 @@ export async function sync(args: string[]): Promise<void> {
 
   // 3. Validate what is left. In `--check` nothing was written, so the knowledge is judged as it is.
   const audit = auditLinks(root);
-  const knowledge = check ? knowledgeBefore : auditKnowledge(root, nd);
+  const knowledge = check ? knowledgeBefore : auditKnowledge(root, nd, { sourceDays });
   const problems = [...audit.problems, ...metricsAudit.problems, ...placement.problems, ...knowledge.problems];
   if (problems.length > 0) {
     console.log(`\nPROBLEMS (${problems.length}):`);

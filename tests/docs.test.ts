@@ -7,11 +7,29 @@ import { join } from 'node:path';
 import { debtRaiseIn } from '../src/debt-budget.ts';
 import { parseHubsSetting } from '../src/hubs.ts';
 import { parseMetricsOutput } from '../src/metrics.ts';
-import { WIKI_PAGES } from '../src/knowledge.ts';
+import { WIKI_PAGES, auditKnowledge, parseKnowledgeSettings } from '../src/knowledge.ts';
 import { parseEvents } from '../src/knowledge-log.ts';
 import { readFrontmatterText } from '../src/okf.ts';
 import { placementState } from '../src/placement.ts';
-import { REPO, commitAll, completed, exists, feature, git, metricsOutput, metricsProject, project, read, run, tempDir, todo } from './helpers.ts';
+import {
+  REPO,
+  STAMP,
+  cleanEnv,
+  commitAll,
+  completed,
+  exists,
+  feature,
+  git,
+  metricsOutput,
+  metricsProject,
+  project,
+  read,
+  run,
+  setManifest,
+  tempDir,
+  todo,
+  write,
+} from './helpers.ts';
 
 const readme = readFileSync(join(REPO, 'README.md'), 'utf8');
 const playbook = readFileSync(join(REPO, 'templates/skills/novadev-work.md'), 'utf8');
@@ -361,5 +379,96 @@ describe('the knowledge bundle in the docs', () => {
     const help = run(tempDir(), 'help').stdout;
     expect(help).toContain('novadev knowledge [words]');
     expect(help).toContain('"log <payload.json>" records changes');
+  });
+});
+
+describe('the knowledge settings and source drift in the docs (0.13.0)', () => {
+  /** The `"knowledge": { … }` examples of a text, as novadev.json would hold them. */
+  const knowledgeExamples = (text: string) =>
+    fences(text, 'json')
+      .filter((body) => body.trimStart().startsWith('"knowledge"'))
+      .map((body) => JSON.parse(`{${body}}`).knowledge as unknown);
+
+  test('the README documents every key, and each of its "knowledge" examples is what the parser accepts', () => {
+    for (const text of ['"reviewDays"', '"*"', '"folders"', '`novadev knowledge --drifted`', '**Code that moved on.**', '**Folders the project adds.**', '0.13.0 changes no layout']) {
+      expect(readme).toContain(text);
+    }
+    const examples = knowledgeExamples(readme);
+    expect(examples).toHaveLength(2);
+    for (const example of examples) expect(parseKnowledgeSettings(example)).toMatchObject({ ok: true });
+    // Pasted over a project's "knowledge", an example without "reviewDays" would turn the review dates off.
+    for (const example of examples) expect(Object.keys(example as object)).toContain('reviewDays');
+  });
+
+  test('the README says what commit dates mean for drift, and where the settings stop', () => {
+    const prose = readme.replace(/\s+/g, ' ');
+    for (const text of [
+      'Only the first-parent line counts: a merge is dated the day it was made',
+      'A fast-forward pull keeps the dates the commits were made on',
+      'A concept that cites code not committed yet is checked again once that code is committed on a later day',
+      'A folder that holds only other repositories (`repo:repos`) never drifts',
+      'a path inside `.novadev/` is never asked about',
+      'Days are whole numbers, 1 to 36500.',
+      'a folder named like a whole number (`2026`) comes before them all, in number order',
+      "(novadev's own three may wait for their first concept)",
+      'A mistake in `"folders"` never stops it.',
+    ]) {
+      expect(prose).toContain(text);
+    }
+  });
+
+  test('the README\'s sample map line is what sync writes', () => {
+    const prose = readme.replace(/\s+/g, ' ');
+    const line = /The map then reads `([^`]+)`/.exec(prose)?.[1];
+    expect(line).toBe('* [planner](planner/index.md) - What a planner user can do, stage by stage. (12 concepts)');
+    const root = project({ knowledge: { folders: { planner: 'What a planner user can do, stage by stage.' } } });
+    for (let i = 1; i <= 12; i++) {
+      write(root, `.novadev/knowledge/planner/stage-${i}.md`, `---\ntype: Guide\ntitle: Stage ${i}\ndescription: Stage ${i}.\ngenerated: ${STAMP}\n---\n`);
+    }
+    expect(run(root, 'sync').code).toBe(0);
+    expect(read(root, '.novadev/knowledge/index.md')).toContain(`${line}\n`);
+  });
+
+  test('the README\'s sample drift action is what sync lists', () => {
+    const quote = /NEXT ACTION: "([^"]+)"/.exec(readme.replace(/\s+/g, ' '))?.[1];
+    expect(quote).toBe('its source repo:src/auth.ts changed on 2026-10-12, after the concept was last checked (2026-10-01)');
+    const root = project();
+    write(root, 'src/auth.ts', 'export {};\n');
+    git(root, 'init', '-q');
+    for (const args of [['add', '-A'], ['commit', '-q', '--no-verify', '-m', 'auth']]) {
+      const date = '2026-10-12T10:00:00+02:00';
+      const result = Bun.spawnSync({
+        cmd: ['git', '-c', 'user.email=novadev@example.invalid', '-c', 'user.name=novadev tests', '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null', ...args],
+        cwd: root,
+        env: { ...cleanEnv(), GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date },
+      });
+      expect(result.exitCode).toBe(0);
+    }
+    write(root, '.novadev/knowledge/memories/auth.md', `---\ntype: Gotcha\ntitle: Auth\ndescription: When logging in.\ngenerated: ${STAMP}\nsources:\n  - resource: repo:src/auth.ts\n---\n`);
+    expect(auditKnowledge(root, join(root, '.novadev')).actions.some((action) => action.startsWith(`knowledge/memories/auth.md: ${quote} — `))).toBe(true);
+  });
+
+  test('the playbook teaches it: the settings in Trust and freshness, drift, a folder you add, the word "Drifted"', () => {
+    const trust = playbook.split('### Trust and freshness')[1]!.split('### Sources and links')[0]!;
+    for (const text of ['"*"', '`null`', '**When the code moved on.**', '`novadev knowledge --drifted`', '**A folder you add.**', '`"folders"`']) {
+      expect(trust).toContain(text);
+    }
+    const examples = knowledgeExamples(trust);
+    expect(examples).toHaveLength(1);
+    expect(parseKnowledgeSettings(examples[0])).toMatchObject({ ok: true });
+    expect(playbook.split('## Vocabulary')[1]!.split('\n---')[0]!).toContain('**Drifted**');
+    expect(playbook).toContain('`novadev knowledge --stale`, `novadev knowledge --drifted` and');
+    const prose = trust.replace(/\s+/g, ' ');
+    expect(prose).toContain('The default `"reviewDays"` names only the three folders: name yours there too, or add `"*"`');
+    expect(prose).toContain('Code you leave uncommitted is different: once it is committed on a later day, the concept shows as drifted once');
+  });
+
+  test('the CLI help and the folder README name them', () => {
+    expect(run(tempDir(), 'help').stdout.replace(/\s+/g, ' ')).toContain('--drifted what cites code (repo: sources) that changed after its last check');
+    expect(rootReadme).toContain('(`"folders"`) and its review days (`"reviewDays"`)');
+    // Every example the playbook gives is what a project may really write.
+    const root = project();
+    setManifest(root, { knowledge: knowledgeExamples(playbook)[0] });
+    expect(auditKnowledge(root, join(root, '.novadev')).problems.filter((p) => p.startsWith('novadev.json'))).toEqual([]);
   });
 });

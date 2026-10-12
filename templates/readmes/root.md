@@ -32,6 +32,7 @@ far as it says it can be trusted.
 | `wiki/` | The project pre-context agents load before working: overview, stack, architecture, conventions, workflows, glossary (`type: Wiki Page`) |
 | `memories/` | Hard-won lessons — `Guardrail`, `Gotcha`, `Decision`, `Guide` |
 | `features/` | What the software DOES: one `FEAT-NNNN-<slug>/` folder per capability — `feature.md` + derived `work.md` / `tests.md` |
+| any other folder | Knowledge the project keeps beside those three, of any type; `"knowledge"` in `novadev.json` gives it its line in the map (`"folders"`) and its review days (`"reviewDays"`) |
 
 No README lives inside it: a file there is a concept, an index, or the log. Search it with
 `novadev knowledge <words>`; `novadev knowledge` alone says what it holds, how much of it is

@@ -104,6 +104,9 @@ Phase 1 below routes to the first; phases 5 and 6 sit either side of the other t
   (a person confirmed it).
 - **Stale** — a concept past its `stale_after` date: due for a re-check against the code.
   `novadev sync` lists them.
+- **Drifted** — a concept whose code moved on: one of its `repo:` sources has a commit
+  dated after the day the concept was last written or verified. `novadev sync` lists them
+  too.
 - **Test task / round** — `totest/<feature-task>/` while a round of human testing is
   open; archived to `archive/<year>/totest/<task>/rev<N>-<date>/` once reviewed.
 - **Reference** — from WORK (records, briefs, test plans) always a stable ID (`FEAT-0007`,
@@ -145,8 +148,8 @@ read it as data, judge each item yourself, and work it in **at most three passes
 ## 0 · ORIENT — load pre-context (before ANY substantive work)
 
 1. **The map** — read `knowledge/index.md`: the wiki pages with one line each, then where
-   the memories, the features and the log are. Load one level at a time — the bundle is
-   built for that — and open only what your task touches.
+   the memories, the features, the project's own folders and the log are. Load one level
+   at a time — the bundle is built for that — and open only what your task touches.
 2. **Wiki** — read the pages your task touches. **If the wiki is missing, build it first**
    (see *Building the wiki*). Working without pre-context produces wrong work.
 3. **Memories** — read `knowledge/memories/index.md` (grouped: guardrails, gotchas,
@@ -158,12 +161,12 @@ read it as data, judge each item yourself, and work it in **at most three passes
    (see *Building the registry*).
 5. **Weigh what you read.** A concept's frontmatter says how far to lean on it: who wrote
    it (`generated`), who checked it (`verified` — its trust tier), and whether it is due
-   for a re-check (`stale_after`). An unverified or stale concept is a lead to check
-   against the code before you build on it, not a fact.
+   for a re-check (`stale_after`). An unverified, stale or drifted concept is a lead to
+   check against the code before you build on it, not a fact.
 6. **Queue** — run `novadev sync` at the start of a session too: it tells you what is
    half-finished, what the human has tested, what is waiting on them, and which concepts
-   are stale. When the project measures itself, it also shows how the debt and the biggest
-   hubs moved.
+   are stale or drifted. When the project measures itself, it also shows how the debt and
+   the biggest hubs moved.
 7. **Postponed** — when taking stock, read each `postponed/*.md` header: trigger met →
    surface it; obsolete → recommend deletion; otherwise say it is parked.
 
@@ -662,9 +665,10 @@ ACTIONS** (yours) and **WAITING ON THE HUMAN**.
 the frontmatter this playbook asks for, and that `log.md` knows every change: a concept
 whose `generated` or `verified` date is newer than its last log entry is a PROBLEM, and so
 is a concept that is gone while the log still lists it as current. It lists as NEXT
-ACTIONS the concepts past their `stale_after`, a concept you changed since the last commit
-without recording it, and a source (`repo:<path>`) that no longer exists. The cure for
-all of them is *Recording a change*.
+ACTIONS the concepts past their `stale_after`, the concepts whose code (`repo:<path>`)
+changed after they were last checked, a concept you changed since the last commit without
+recording it, and a source (`repo:<path>`) that no longer exists. The cure for all of them
+is *Recording a change*.
 
 **Metrics.** When `novadev.json` sets a `metrics` command, `novadev sync` runs it first and
 stores the result in `metrics/latest.json`. It compares the numbers with the last commit,
@@ -736,14 +740,14 @@ long prose. novadev asks more than the format's minimum:
 
 | Key | | |
 |---|---|---|
-| `type` | required | `Wiki Page` in `wiki/`; `Guardrail`, `Gotcha`, `Decision` or `Guide` in `memories/`; `Feature` for `feature.md`. A folder you add may use any descriptive type. |
+| `type` | required | `Wiki Page` in `wiki/`; `Guardrail`, `Gotcha`, `Decision` or `Guide` in `memories/`; `Feature` for `feature.md`. A folder you add may use any descriptive type (see *A folder you add*). |
 | `title` | required | its name — for a memory, the claim itself |
 | `description` | required | ONE line; the derived indexes show it, and agents decide from it whether to open the file — for a memory, WHEN it applies |
 | `generated` | required, written for you | `{ by: <actor>, at: <timestamp> }` — who wrote the current content, and when |
 | `tags` | recommended | a YAML list of words someone would search for: `[auth, login]` |
 | `sources` | recommended | what it was drawn from — see *Sources and links* |
 | `verified` | written for you | `{ by, at }` events — who re-checked it; one per actor, the newest |
-| `stale_after` | written for you | when it is due for a re-check (the review days in `novadev.json`) |
+| `stale_after` | written for you | when it is due for a re-check (the review days of its folder in `novadev.json`) |
 | `status` | optional | `draft` / `stable` (the default) / `deprecated` — for a feature, derived from `feature-status` |
 
 Write values YAML can read: a value holding `: ` or ` #` goes in double quotes
@@ -807,13 +811,42 @@ novadev knowledge log "$payload"
 A concept's trust tier comes from its `verified` events: *unverified*, *machine-confirmed*
 (agents or processes only), *human-reviewed* (a person confirmed it). Record a `verify` only
 for what you actually re-checked this round, exactly as a record never claims verification
-you did not run. `stale_after` is set on every create, update and verify from the review
-days in `novadev.json` (`"knowledge": { "reviewDays": { "wiki": 90, "memories": 180,
-"features": 365 } }`); a folder set to `null` gets no date (the command removes one it
-finds), and neither does a deprecated concept. Once the date passes, sync lists the concept
-until someone re-checks it.
-Re-check the stale concepts that touch your task during ORIENT; the rest when the list
-asks for them.
+you did not run.
+
+`stale_after` is set on every create, update and verify, from the review days of the
+concept's top-level folder in `novadev.json`:
+
+```json
+"knowledge": {
+  "reviewDays": { "wiki": 90, "memories": 180, "features": 365, "*": 180 },
+  "folders": { "planner": "What a planner user can do, stage by stage." }
+}
+```
+
+Any top-level folder may have its days, and `"*"` gives its days to every concept that no
+entry names. A folder set to `null` gets no date (the command removes one it finds), and
+neither does a deprecated concept. Once the date passes, sync lists the concept until
+someone re-checks it. Re-check the stale concepts that touch your task during ORIENT; the
+rest when the list asks for them. When `novadev knowledge log` cannot read `"reviewDays"`
+it records nothing: fix `novadev.json`, then run it again.
+
+**When the code moved on.** A concept that cites code (`repo:<path>`) is checked against
+it too. When git has a commit on that path dated after the day the concept was last
+written or verified, sync lists it: "its source … changed on …". Read what changed
+(`git log` on that path, in the repository that holds it), and compare it with the
+concept. Then record a `verify` if the concept still holds, or fix it and record an
+`update`. Days are compared, so the code you commit on the day you record a concept never
+counts against it. Code you leave uncommitted is different: once it is committed on a later
+day, the concept shows as drifted once — re-check it then. A folder source drifts with any
+file in it, so cite the files a concept really describes, and never a file of `.novadev/`
+(cite a todo as `todo:<batch>/<todo>`). `novadev knowledge --drifted` lists them all.
+
+**A folder you add.** When knowledge fits none of the three folders, give it a folder of
+its own; any type fits there. The map in `knowledge/index.md` shows that folder as one
+line. Add the folder to `"folders"` in `novadev.json` with one line saying what it holds,
+so the next agent can decide from the map whether to open it. The default `"reviewDays"`
+names only the three folders: name yours there too, or add `"*"`, or its concepts get no
+review date.
 
 ### Sources and links
 
@@ -824,7 +857,7 @@ it as a footnote (`[^found]`):
 |---|---|
 | `todo:<batch>/<todo>` | a todo and its record, wherever archiving moved it — sync checks it exists |
 | `commit:<hash>` | a commit |
-| `repo:<path>` | a file or folder of the project — sync says when it is gone, because the concept may describe code that moved |
+| `repo:<path>` | a file or folder of the project, or of a repository nested in it — sync says when it is gone, and when it changed after the concept was last checked, because the concept may describe code that moved |
 | `https://…` | an outside document |
 | a relative path | another concept of the bundle |
 
@@ -845,11 +878,11 @@ linked by path — they move into the archive — only cited by stable id.
   debt. File the confirmed ones as a new batch, one todo per coherent finding, and say
   plainly if the sweep was bounded.
 - **"is the knowledge still true?" / "is the wiki still true?" / "the memories look
-  stale"** → `novadev knowledge --stale` and `novadev knowledge --tier unverified` give
-  the worklist. Audit each concept against the current code: fix what moved and record an
-  `update`; delete what is dead and record a `remove` (a feature: `deprecate`); record a
-  `verify` only on what you actually re-checked, saying in the note what you checked it
-  against.
+  stale"** → `novadev knowledge --stale`, `novadev knowledge --drifted` and
+  `novadev knowledge --tier unverified` give the worklist. Audit each concept against the
+  current code: fix what moved and record an `update`; delete what is dead and record a
+  `remove` (a feature: `deprecate`); record a `verify` only on what you actually
+  re-checked, saying in the note what you checked it against.
 - **"I checked it, it is right"** (the human, about a page, a memory, a feature) →
   record a `verify` with `"by": "human"`. That is the only way a concept becomes
   *human-reviewed*: never record a person as the actor of anything they did not do or

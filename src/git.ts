@@ -1,16 +1,24 @@
 // The few read-only questions novadev asks git. Each answers null when git cannot tell — no git,
 // not a repository, no commit yet, or the file is not in the last commit — and callers then fall
 // back to what the working tree alone says. Nothing here ever changes the repository.
+//
+// All but one ask the project's own repository. `lastCommitDate` asks the repository that holds the
+// path it is given, which may be another one nested inside the project.
 import { spawnSync } from 'node:child_process';
-import { resolve } from 'node:path';
+import { realpathSync, statSync } from 'node:fs';
+import { basename, dirname, resolve } from 'node:path';
 
-/** stdout of a git command run in `root` (with `input` on its stdin), or null when it could not run or failed. */
-function git(root: string, args: string[], input?: string): string | null {
+/**
+ * stdout of a git command run in `root` (with `input` on its stdin, and `env` for its environment),
+ * or null when it could not run or failed.
+ */
+function git(root: string, args: string[], input?: string, env?: NodeJS.ProcessEnv): string | null {
   try {
     const run = spawnSync('git', args, {
       cwd: root,
       encoding: 'utf8',
       input,
+      env: env ?? process.env,
       stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'ignore'],
       timeout: 30_000,
       maxBuffer: 64 * 1024 * 1024,
@@ -20,6 +28,62 @@ function git(root: string, args: string[], input?: string): string | null {
   } catch {
     return null;
   }
+}
+
+/** The variables that tie git to one repository, whatever folder it runs in. A git hook exports them. */
+const REPOSITORY_VARIABLES = [
+  'GIT_DIR',
+  'GIT_WORK_TREE',
+  'GIT_INDEX_FILE',
+  'GIT_OBJECT_DIRECTORY',
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  'GIT_COMMON_DIR',
+  'GIT_NAMESPACE',
+];
+
+/** This process's environment without REPOSITORY_VARIABLES: git then finds the repository from the folder it runs in. */
+function discoveringEnv(): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(process.env).filter(([key]) => !REPOSITORY_VARIABLES.includes(key)));
+}
+
+/**
+ * When the newest commit that changed `path` (absolute; a file or a folder) was made: its committer
+ * date as git writes it (`%cI`, ISO 8601 with the committer's offset). Git is asked in the folder of
+ * the path — a symbolic link is followed first — so the repository that HOLDS it answers, which may
+ * be one nested inside the project: an independent clone the project's own repository ignores. Only
+ * the first-parent line is walked, so a merge counts on the day it was made: a commit of a side
+ * branch keeps the day it was made on, before the merge brought it in. `since` is an ISO 8601
+ * instant: no older commit is looked for, so the search stays short. Null when no commit since then
+ * changed the path, when git cannot tell (no git, not in a repository), and when the newest commit
+ * that did is a shallow clone's oldest one: its parent was not fetched, so it seems to add every file.
+ */
+export function lastCommitDate(path: string, since: string): string | null {
+  let real: string;
+  let folder: boolean;
+  try {
+    real = realpathSync(path);
+    folder = statSync(real).isDirectory();
+  } catch {
+    return null;
+  }
+  const cwd = folder ? real : dirname(real);
+  const env = discoveringEnv();
+  // `since` is a whole instant: a day alone would take today's time of day, and miss that day's
+  // earlier commits.
+  const out = git(
+    cwd,
+    [
+      '--literal-pathspecs', 'log', '-1', '--first-parent', `--since=${since}`, '--format=%x01%cI%x02%P',
+      '--', folder ? '.' : basename(real),
+    ],
+    undefined,
+    env,
+  );
+  const found = out === null ? null : /\x01(\d{4}-\d{2}-\d{2}T[^\x02\s]+)\x02([0-9a-f ]*)/.exec(out);
+  if (!found) return null;
+  // No parent: the repository's first commit, or a shallow clone's oldest — which says nothing.
+  if (found[2]!.trim() === '' && git(cwd, ['rev-parse', '--is-shallow-repository'], undefined, env)?.trim() === 'true') return null;
+  return found[1]!;
 }
 
 /** True when `root` is inside a git work tree (and git runs at all). */

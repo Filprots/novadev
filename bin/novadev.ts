@@ -21,8 +21,9 @@ usage:
   novadev archive <batch>…  move fully-recorded batch(es) to archive/<year>/   (or: --done for all)
   novadev knowledge [words] the knowledge bundle (.novadev/knowledge/, Open Knowledge Format 0.2):
                             what it holds, or search it; --type/--tag/--tier filter, --stale lists
-                            what is due for a re-check; "log <payload.json>" records changes —
-                            each concept's stamps and its log.md entry, together
+                            what is due for a re-check, --drifted what cites code (repo: sources)
+                            that changed after its last check; "log <payload.json>" records changes
+                            — each concept's stamps and its log.md entry, together
   novadev features [query]  search the feature registry; --touching <path> finds overlap,
                             --hubs lists the features on each hub, --status/--area filter,
                             --new <slug> scaffolds an entry

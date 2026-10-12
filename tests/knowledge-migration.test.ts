@@ -2,6 +2,7 @@
 // the knowledge bundle with Open Knowledge Format frontmatter, their old INDEX.md one-liners become
 // descriptions, and every link keeps reaching what it reached.
 import { describe, expect, test } from 'bun:test';
+import { NOVADEV_VERSION } from '../src/lib.ts';
 import { addDaysToTimestamp } from '../src/okf.ts';
 import { exists, read, readJson, run, setManifest, tempDir, todo, write } from './helpers.ts';
 
@@ -73,9 +74,10 @@ describe('0.11.0 → 0.12.0', () => {
       expect(exists(root, `${K}/${folder}/INDEX.md`)).toBe(false);
       expect(exists(root, `${K}/${folder}/README.md`)).toBe(false);
     }
-    expect(read(root, `${K}/log.md`)).toContain("* **Initialization**: novadev 0.12.0 made this folder the project's knowledge bundle (Open Knowledge Format 0.2)");
+    // The installed novadev — the one that ran the migration — names itself, and stamps its version.
+    expect(read(root, `${K}/log.md`)).toContain(`* **Initialization**: novadev ${NOVADEV_VERSION} made this folder the project's knowledge bundle (Open Knowledge Format 0.2)`);
     expect(readJson(root, '.novadev/novadev.json')).toMatchObject({
-      version: '0.12.0',
+      version: NOVADEV_VERSION,
       knowledge: { reviewDays: { wiki: 90, memories: 180, features: 365 } },
     });
   });

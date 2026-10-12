@@ -4,7 +4,7 @@ import { dirname, join, resolve } from 'node:path';
 import { readFrontmatterText } from './okf.ts';
 
 export const ROOT_DIR_NAME = '.novadev';
-export const NOVADEV_VERSION = '0.12.0';
+export const NOVADEV_VERSION = '0.13.0';
 
 /**
  * The project's knowledge — wiki, memories, features — is one Open Knowledge Format bundle under

@@ -10,14 +10,17 @@
 //                                                   type: Guardrail | Gotcha | Decision | Guide
 //     features/     what the software does          FEAT-NNNN-<slug>/feature.md   type: Feature
 //                                                   work.md, tests.md beside it — DERIVED histories
-//     <any other folder the project adds>           any type
+//     <any other folder the project adds>           any type; `"knowledge.folders"` in novadev.json
+//                                                   says what it holds, for the map
 //
 // The format (okf.ts) asks only for a `type`. novadev asks more of every hand-written concept: a
 // `title`, a one-line `description` (the derived indexes show it), and a `generated: { by, at }` stamp
 // — who wrote the current content, and when. Every change to a concept is RECORDED: its stamps in
 // the frontmatter, and an entry in log.md, both written by `novadev knowledge log` (knowledge-log.ts).
 // `novadev sync` then keeps the indexes, checks that the log knows every change, and lists the
-// concepts whose `stale_after` has passed, so knowledge is re-checked before it rots.
+// concepts whose `stale_after` has passed — the review days of their folder, in novadev.json — and
+// those whose code (`repo:` sources) changed after they were last checked, so knowledge is re-checked
+// before it rots.
 //
 // Work items are not concepts: todos, records and test rounds move into the archive, so the
 // knowledge cites them by stable id in its `sources` — `todo:<batch>/<todo>`, `commit:<hash>` —
@@ -25,6 +28,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { lastCommitDate } from './git.ts';
 import {
   FEATURE_DIR_RE,
   FEATURE_STATUS_KEY,
@@ -34,6 +38,7 @@ import {
   ROOT_DIR_NAME,
   type Fix,
   type Parsed,
+  addDays,
   byCodePoint,
   featureStatusMark,
   isDirectory,
@@ -235,47 +240,135 @@ export function wikiState(nd: string): 'missing' | 'partial' | 'complete' {
 }
 
 // ---------------------------------------------------------------------------
-// Settings: the review policy
+// Settings: the review policy, and what the project's own folders hold
 // ---------------------------------------------------------------------------
 
-/** How many days a concept in each folder stays fresh after it is written or verified. */
-export type ReviewDays = Partial<Record<KnowledgeFolder, number>>;
+/**
+ * How many days a concept stays fresh after it is written or verified, by the top-level folder it
+ * sits in — one of novadev's three or one the project adds — and under OTHER_FOLDERS for every
+ * concept no entry names. null: never due.
+ */
+export type ReviewDays = ReadonlyMap<string, number | null>;
 export const REVIEW_DAYS_DEFAULT: Readonly<Record<KnowledgeFolder, number>> = { wiki: 90, memories: 180, features: 365 };
+/** The `reviewDays` key for every concept no other key names: the folders not named, and the bundle root. */
+export const OTHER_FOLDERS = '*';
+/** The longest review a folder may ask for: a hundred years. */
+export const MAX_REVIEW_DAYS = 36500;
 
-const REVIEW_FORMAT =
-  '"knowledge" must be { "reviewDays": { "wiki": 90, "memories": 180, "features": 365 } } — whole days, or null for a folder that is never due — or null for no review dates';
+/** One line saying what a folder of the bundle holds, for the map, by its path — in the order novadev.json declares them. */
+export type FolderLines = ReadonlyMap<string, string>;
+
+export type KnowledgeSettings = { reviewDays: ReviewDays; folders: FolderLines };
 
 /**
- * "knowledge" in novadev.json. Absent or null: no review dates — `novadev knowledge log` then writes
- * no `stale_after`. A folder set to null is never due.
+ * "knowledge" in novadev.json, read part by part, so that a mistake in one part never drops the
+ * other: `shape` says what is wrong with it as a whole (not an object, an unknown key), and each part
+ * is read on its own.
  */
-export function parseKnowledgeSettings(raw: unknown): Parsed<{ reviewDays: ReviewDays }> {
-  if (raw === undefined || raw === null) return { ok: true, value: { reviewDays: {} } };
-  if (!isPlainObject(raw)) return refuse(REVIEW_FORMAT);
-  const days = raw.reviewDays;
-  if (days === undefined || days === null) return { ok: true, value: { reviewDays: {} } };
-  if (!isPlainObject(days)) return refuse(REVIEW_FORMAT);
-  const reviewDays: ReviewDays = {};
-  for (const [folder, value] of Object.entries(days)) {
-    if (!(KNOWLEDGE_FOLDERS as readonly string[]).includes(folder)) {
-      return refuse(`"knowledge.reviewDays" names "${folder}" — only ${KNOWLEDGE_FOLDERS.join(', ')} have review dates`);
-    }
-    if (value === null) continue;
-    if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) return refuse(REVIEW_FORMAT);
-    reviewDays[folder as KnowledgeFolder] = value;
-  }
-  for (const key of Object.keys(raw)) {
-    if (key !== 'reviewDays') return refuse(`"knowledge" has an unknown key "${key}" — ${REVIEW_FORMAT}`);
-  }
-  return { ok: true, value: { reviewDays } };
+export type KnowledgeSettingsRead = { shape: string | null; reviewDays: Parsed<ReviewDays>; folders: Parsed<FolderLines> };
+
+const KNOWLEDGE_FORMAT =
+  '"knowledge" is { "reviewDays": { … }, "folders": { … } } — each optional — or null for no review dates';
+const REVIEW_FORMAT =
+  '"knowledge.reviewDays" gives a top-level folder of the bundle its review days, and "*" the days of every concept it names no folder for: { "wiki": 90, "memories": 180, "features": 365, "*": 180 } — whole days, or null for one that is never due';
+const FOLDERS_FORMAT =
+  '"knowledge.folders" gives a folder of the bundle one line saying what it holds, for the map in index.md: { "planner": "What a planner user can do, stage by stage." }';
+
+/**
+ * What is wrong with a folder named in "knowledge", in words — null when it can be a folder of the
+ * bundle. `nested`: a path to a folder inside another one is allowed.
+ */
+function folderNameProblem(name: string, nested: boolean): string | null {
+  if (name.trim() === '') return 'a folder needs a name';
+  if (name.trim() !== name) return 'it has spaces around it, so it names no folder';
+  if (name.includes('\\')) return 'write a path with "/"';
+  const parts = name.split('/');
+  if (parts.includes('')) return 'it has an empty part — write the path from the root of the bundle, like "references/tutorials"';
+  if (!nested && parts.length > 1) return 'review days are set per top-level folder, and a folder inside one takes its days';
+  if (parts.some((part) => part.startsWith('.'))) return 'a name starting with "." is hidden, and not part of the bundle';
+  if (parts.some((part) => isReserved(part.toLowerCase()))) return `${INDEX_FILE} and ${LOG_FILE} are the files a bundle reserves, never folders`;
+  if (parts.includes(OTHER_FOLDERS)) return `"${OTHER_FOLDERS}" stands for every folder not named, never for one`;
+  return null;
 }
 
-/** The review days of the folder a concept sits in, or null when it is never due. */
-export function reviewDaysFor(nd: string, path: string): number | null {
-  const parsed = parseKnowledgeSettings(readManifest(nd)?.knowledge);
-  if (!parsed.ok) return null;
-  const folder = path.split('/')[0] as KnowledgeFolder;
-  return parsed.value.reviewDays[folder] ?? null;
+/**
+ * "knowledge" in novadev.json, part by part (see KnowledgeSettingsRead). Absent or null: no review
+ * dates — `novadev knowledge log` then writes no `stale_after` — and no folder described.
+ */
+export function readKnowledgeSettings(raw: unknown): KnowledgeSettingsRead {
+  if (raw === undefined || raw === null) return { shape: null, reviewDays: parseReviewDays(null), folders: parseFolderLines(null) };
+  if (!isPlainObject(raw)) return { shape: KNOWLEDGE_FORMAT, reviewDays: parseReviewDays(null), folders: parseFolderLines(null) };
+  const unknown = Object.keys(raw).find((key) => key !== 'reviewDays' && key !== 'folders');
+  return {
+    shape: unknown === undefined ? null : `"knowledge" has an unknown key "${unknown}" — ${KNOWLEDGE_FORMAT}`,
+    reviewDays: parseReviewDays(raw.reviewDays),
+    folders: parseFolderLines(raw.folders),
+  };
+}
+
+/** "knowledge" in novadev.json as a whole: every part, or the first thing wrong with it. */
+export function parseKnowledgeSettings(raw: unknown): Parsed<KnowledgeSettings> {
+  const read = readKnowledgeSettings(raw);
+  if (read.shape !== null) return refuse(read.shape);
+  if (!read.reviewDays.ok) return refuse(read.reviewDays.error);
+  if (!read.folders.ok) return refuse(read.folders.error);
+  return { ok: true, value: { reviewDays: read.reviewDays.value, folders: read.folders.value } };
+}
+
+/** "knowledge.reviewDays". A folder may be written with a "/" at its end. */
+function parseReviewDays(days: unknown): Parsed<ReviewDays> {
+  const reviewDays = new Map<string, number | null>();
+  if (days === undefined || days === null) return { ok: true, value: reviewDays };
+  if (!isPlainObject(days)) return refuse(REVIEW_FORMAT);
+  for (const [key, value] of Object.entries(days)) {
+    const folder = key === OTHER_FOLDERS ? key : key.replace(/\/+$/, '');
+    const problem = key === OTHER_FOLDERS ? null : folderNameProblem(folder, false);
+    if (problem !== null) return refuse(`"knowledge.reviewDays" names "${key}" — ${problem}`);
+    if (reviewDays.has(folder)) return refuse(`"knowledge.reviewDays" names ${folder}/ twice`);
+    if (value !== null && !(typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= MAX_REVIEW_DAYS)) {
+      return refuse(
+        `"knowledge.reviewDays" gives "${key}" ${JSON.stringify(value)} — whole days, 1 to ${MAX_REVIEW_DAYS}, or null for a folder that is never due`,
+      );
+    }
+    reviewDays.set(folder, value);
+  }
+  return { ok: true, value: reviewDays };
+}
+
+/** "knowledge.folders". A folder may be written with a "/" at its end. */
+function parseFolderLines(described: unknown): Parsed<FolderLines> {
+  const folders = new Map<string, string>();
+  if (described === undefined || described === null) return { ok: true, value: folders };
+  if (!isPlainObject(described)) return refuse(FOLDERS_FORMAT);
+  for (const [key, about] of Object.entries(described)) {
+    const folder = key.replace(/\/+$/, '');
+    const top = folder.split('/')[0]!;
+    const problem =
+      key === OTHER_FOLDERS
+        ? `"${OTHER_FOLDERS}" belongs to reviewDays; a description is for one folder`
+        : (KNOWLEDGE_FOLDERS as readonly string[]).includes(top)
+          ? `novadev writes the map's line for ${top}/ itself`
+          : folderNameProblem(folder, true);
+    if (problem !== null) return refuse(`"knowledge.folders" names "${key}" — ${problem}`);
+    if (folders.has(folder)) return refuse(`"knowledge.folders" names ${folder}/ twice`);
+    if (typeof about !== 'string' || about.trim() === '' || /^<[^>]*>$/.test(about.trim())) {
+      return refuse(`"knowledge.folders" gives "${key}" no line of its own — write what the folder holds, as text`);
+    }
+    if (/[\r\n]/.test(about)) return refuse(`"knowledge.folders" gives "${key}" more than one line — the map shows one`);
+    folders.set(folder, about.trim());
+  }
+  return { ok: true, value: folders };
+}
+
+/**
+ * The review days of the concept at `path` (a path inside the bundle): those of its top-level folder
+ * when the policy names it — null: never due — else those of "*", else none.
+ */
+export function reviewDaysFor(reviewDays: ReviewDays, path: string): number | null {
+  const slash = path.indexOf('/');
+  const folder = slash === -1 ? null : path.slice(0, slash);
+  if (folder !== null && reviewDays.has(folder)) return reviewDays.get(folder) ?? null;
+  return reviewDays.get(OTHER_FOLDERS) ?? null;
 }
 
 // ---------------------------------------------------------------------------
@@ -331,6 +424,10 @@ function directoriesWithConcepts(concepts: readonly Concept[]): string[] {
  * wiki, memories and features folders once they hold a concept; any other folder holding concepts,
  * at any depth — except a feature's own folder, whose three files its feature.md links. A folder
  * whose index is not derived keeps whatever it has (an empty registry's hand-made index included).
+ *
+ * A folder the project adds is one entry in the index above it: the line `"knowledge.folders"` in
+ * novadev.json gives it, then how many concepts it holds. The folders novadev.json describes come
+ * first, in the order it declares them; the others follow by name.
  */
 export function derivedIndexes(nd: string, concepts: readonly Concept[]): Map<string, string> {
   const out = new Map<string, string>();
@@ -340,6 +437,24 @@ export function derivedIndexes(nd: string, concepts: readonly Concept[]): Map<st
   const wiki = authored.filter((c) => c.role === 'wiki');
   const memories = authored.filter((c) => c.role === 'memory');
   const features = authored.filter((c) => c.role === 'feature');
+  // Lines that cannot be read are a problem of their own (auditKnowledge): the map then describes nothing.
+  const lines = readKnowledgeSettings(readManifest(nd)?.knowledge).folders;
+  const described: FolderLines = lines.ok ? lines.value : new Map();
+  const declared = [...described.keys()];
+  const inMapOrder = (dirs: readonly string[]) => [
+    ...declared.filter((dir) => dirs.includes(dir)),
+    ...dirs.filter((dir) => !described.has(dir)),
+  ];
+  /** A folder's entry, linked from the index of the folder above it (`from`, '' for the root). */
+  const folderEntry = (dir: string, from: string) => {
+    const count = plural(authored.filter((c) => c.path.startsWith(`${dir}/`)).length, 'concept', 'concepts');
+    const about = described.get(dir);
+    return {
+      title: dir.split('/').pop()!,
+      href: `${relativeTo(from, dir)}/${INDEX_FILE}`,
+      description: about === undefined ? count : `${about} (${count})`,
+    };
+  };
 
   // The root: the load-first map.
   const root: IndexSection[] = [];
@@ -388,11 +503,7 @@ export function derivedIndexes(nd: string, concepts: readonly Concept[]): Map<st
       heading: 'More knowledge',
       entries: [
         ...rootConcepts.map((c) => ({ title: c.title || c.path, href: c.path, description: c.description })),
-        ...others.map((dir) => ({
-          title: dir,
-          href: `${dir}/${INDEX_FILE}`,
-          description: plural(authored.filter((c) => c.path.startsWith(`${dir}/`)).length, 'concept', 'concepts'),
-        })),
+        ...inMapOrder(others).map((dir) => folderEntry(dir, '')),
       ],
     });
   }
@@ -474,11 +585,7 @@ export function derivedIndexes(nd: string, concepts: readonly Concept[]): Map<st
             heading: dir.split('/').pop()!,
             entries: [
               ...here.map((c) => ({ title: c.title || c.path, href: relativeTo(dir, c.path), description: c.description })),
-              ...subdirs.map((sub) => ({
-                title: sub.split('/').pop()!,
-                href: `${relativeTo(dir, sub)}/${INDEX_FILE}`,
-                description: plural(authored.filter((c) => c.path.startsWith(`${sub}/`)).length, 'concept', 'concepts'),
-              })),
+              ...inMapOrder(subdirs).map((sub) => folderEntry(sub, dir)),
             ],
           },
         ],
@@ -572,7 +679,10 @@ export type KnowledgeAudit = {
   notes: string[];
   /** Derived files out of date: the indexes, a feature's derived `status`. */
   fixes: Fix[];
-  /** The agent's NEXT ACTIONS: build the wiki, re-check stale concepts, record unrecorded changes. */
+  /**
+   * The agent's NEXT ACTIONS: build the wiki, re-check stale concepts and those whose code changed
+   * since, record unrecorded changes.
+   */
   actions: string[];
   concepts: Concept[];
 };
@@ -583,12 +693,18 @@ const AT = `${ROOT_DIR_NAME}/${KNOWLEDGE_DIR}`;
 const where = (path: string) => `${KNOWLEDGE_DIR}/${path}`;
 const LOG_HOW = 'record it with `novadev knowledge log` (skills/novadev-work.md, "Recording a change")';
 const STALE_SHOWN = 5;
+const DRIFT_SHOWN = 5;
 
 /**
  * Judge the bundle. `now` decides what is stale; git (when the project is a repository) says which
- * concepts changed since the last commit.
+ * concepts changed since the last commit, and which `repo:` sources changed since their concept was
+ * last checked. `sourceDays` keeps git's answers about those sources: the audits of one run may share it.
  */
-export function auditKnowledge(root: string, nd: string, opts: { now?: Date } = {}): KnowledgeAudit {
+export function auditKnowledge(
+  root: string,
+  nd: string,
+  opts: { now?: Date; sourceDays?: Map<string, string | null> } = {},
+): KnowledgeAudit {
   const now = opts.now ?? new Date();
   const problems: string[] = [];
   const notes: string[] = [];
@@ -608,13 +724,34 @@ export function auditKnowledge(root: string, nd: string, opts: { now?: Date } = 
     return { problems, notes, fixes, actions, concepts: [] };
   }
 
-  const settings = parseKnowledgeSettings(readManifest(nd)?.knowledge);
-  if (!settings.ok) problems.push(`novadev.json: ${settings.error}`);
+  // Each part of the settings on its own: a mistake in one is reported, and the other still counts.
+  const raw = readManifest(nd)?.knowledge;
+  const settings = readKnowledgeSettings(raw);
+  if (settings.shape !== null) problems.push(`novadev.json: ${settings.shape}`);
+  if (!settings.reviewDays.ok) problems.push(`novadev.json: ${settings.reviewDays.error}`);
+  if (!settings.folders.ok) problems.push(`novadev.json: ${settings.folders.error}`);
+  // A "knowledge" without "reviewDays" — "folders" pasted over the whole object, say — dates nothing.
+  if (isPlainObject(raw) && !Object.hasOwn(raw, 'reviewDays')) {
+    notes.push(
+      `novadev.json: "knowledge" has no "reviewDays", so no concept gets a review date — write them back (the default is ${JSON.stringify(REVIEW_DAYS_DEFAULT)}), or "reviewDays": null to mean it`,
+    );
+  }
 
   const concepts = listConcepts(nd);
   const authored = authoredConcepts(concepts);
   const todoRefs = new Set(listAllTodos(nd).map((t) => t.ref));
   const bundlePaths = new Set(bundleMarkdownFiles(bundle));
+
+  // A folder the settings name that holds nothing yet: one still to come, or a typo that would
+  // silently date or describe nothing. novadev's own three may wait for their first concept.
+  const held = new Set(directoriesWithConcepts(authored));
+  for (const folder of settings.reviewDays.ok ? settings.reviewDays.value.keys() : []) {
+    if (folder === OTHER_FOLDERS || (KNOWLEDGE_FOLDERS as readonly string[]).includes(folder) || held.has(folder)) continue;
+    notes.push(`novadev.json: "knowledge.reviewDays" names ${folder}/, which holds no concept — a folder still to come, or a typo`);
+  }
+  for (const folder of settings.folders.ok ? settings.folders.value.keys() : []) {
+    if (!held.has(folder)) notes.push(`novadev.json: "knowledge.folders" describes ${folder}/, which holds no concept — a folder still to come, or a typo`);
+  }
 
   // --- every file: the format's own conformance rules ---
   for (const path of bundlePaths) {
@@ -711,9 +848,13 @@ export function auditKnowledge(root: string, nd: string, opts: { now?: Date } = 
       if (resource.startsWith('todo:')) {
         if (!todoRefs.has(resource.slice(5))) problems.push(`${at}: source ${resource} — no such todo in todos/ or the archive`);
       } else if (resource.startsWith('repo:')) {
-        const rel = resource.slice(5).replace(/^\.?\//, '');
-        if (rel === '' || rel.split('/').includes('..') || !existsSync(join(root, rel))) {
+        const rel = repoPath(resource);
+        if (rel === null || !existsSync(join(root, rel))) {
           actions.push(`${at}: its source ${resource} is gone — the code it describes moved or went; re-check the concept and its sources (loop phase 9)`);
+        } else if (novadevOwn(rel)) {
+          notes.push(
+            `${at}: source ${resource} is novadev's own bookkeeping, which every round commits — cite a todo as todo:<batch>/<todo> and a concept by its relative path; sync never asks git whether it changed`,
+          );
         }
       } else if (!/^[a-z][a-z0-9+.-]*:/i.test(resource)) {
         const target = resolveBundleLink(resource, c.path);
@@ -797,7 +938,7 @@ export function auditKnowledge(root: string, nd: string, opts: { now?: Date } = 
     }
   }
 
-  // --- what is due: the wiki to build, stale concepts, changes nobody recorded ---
+  // --- what is due: the wiki to build, stale concepts, code that moved on, changes nobody recorded ---
   if (wiki === 'missing') {
     actions.unshift('wiki is MISSING — build it before any todo work (loop phase 9, "Building the wiki")');
   }
@@ -812,9 +953,104 @@ export function auditKnowledge(root: string, nd: string, opts: { now?: Date } = 
   if (stale.length > STALE_SHOWN) {
     actions.push(`… and ${stale.length - STALE_SHOWN} more stale concept(s) — \`novadev knowledge --stale\` lists them all`);
   }
+  const drifted = sourceDrift(root, authored, opts.sourceDays);
+  for (const drift of drifted.slice(0, DRIFT_SHOWN)) {
+    const [newest, ...more] = drift.sources;
+    actions.push(
+      `${where(drift.concept.path)}: its source ${newest!.resource} changed on ${newest!.day}${more.length > 0 ? ` (and ${plural(more.length, 'other source', 'other sources')} too)` : ''}, after the concept was last checked (${drift.checked}) — re-check it against the code, then record a "verify" if it still holds, or an "update" if it moved (\`novadev knowledge log\`)`,
+    );
+  }
+  if (drifted.length > DRIFT_SHOWN) {
+    actions.push(
+      `… and ${drifted.length - DRIFT_SHOWN} more concept(s) whose sources changed after their last check — \`novadev knowledge --drifted\` lists them all`,
+    );
+  }
   actions.push(...unrecordedChanges(root, nd, log?.read ?? null));
 
   return { problems, notes, fixes, actions, concepts };
+}
+
+// ---------------------------------------------------------------------------
+// Code that moved on after the concept describing it was last checked
+// ---------------------------------------------------------------------------
+
+/** A concept one of whose `repo:` sources has a commit dated after the concept was last checked. */
+export type Drift = {
+  concept: Concept;
+  /** The day the concept was last written or verified (`lastChangeDay`). */
+  checked: string;
+  /** Each source that changed since, with the day of its newest commit — the newest first. */
+  sources: Array<{ resource: string; day: string }>;
+};
+
+/** A `repo:` source as a path from the project root, or null when it names none (empty, or leaving the project with ".."). */
+function repoPath(resource: string): string | null {
+  const rel = resource.slice(5).replace(/^\.?\//, '');
+  return rel === '' || rel.split('/').includes('..') ? null : rel;
+}
+
+/** True for a path inside `.novadev/`: novadev's own bookkeeping, which every round commits. */
+function novadevOwn(rel: string): boolean {
+  return rel.split('/')[0] === ROOT_DIR_NAME;
+}
+
+/**
+ * The concepts whose code moved on: a `repo:` source with a commit on a day after the concept was
+ * last written or verified. Whole days are compared, never moments: a round commits its code after it
+ * records its knowledge, on the same day. The commit is asked of the git repository that holds the
+ * path (`lastCommitDate`), once per path — `sourceDays` keeps the answers, so the audits of one run
+ * can share them. A path that is gone is skipped (the audit says it is gone), and so is a path inside
+ * `.novadev/` (the audit notes it: every round commits there, so it would never settle) and a
+ * deprecated concept: it is kept for history, never re-checked. The newest change first.
+ */
+export function sourceDrift(root: string, concepts: readonly Concept[], sourceDays: Map<string, string | null> = new Map()): Drift[] {
+  const cited = authoredConcepts(concepts).flatMap((concept) => {
+    const checked = lastChangeDay(concept);
+    if (checked === null || concept.status === 'deprecated') return [];
+    const paths = concept.sources.flatMap((source) => {
+      const rel = source.resource.startsWith('repo:') ? repoPath(source.resource) : null;
+      return rel !== null && !novadevOwn(rel) && existsSync(join(root, rel)) ? [{ resource: source.resource, rel }] : [];
+    });
+    return paths.length > 0 ? [{ concept, checked, paths }] : [];
+  });
+
+  // Each path is asked about once, back to the earliest day any concept citing it was checked: an
+  // older commit can make no concept drift. The search reaches back to midnight UTC of the day
+  // before, so no offset can hide a commit of a later day, and a clock a little off costs nothing.
+  const earliest = new Map<string, string>();
+  for (const { checked, paths } of cited) {
+    for (const { rel } of paths) {
+      const day = earliest.get(rel);
+      if (day === undefined || checked < day) earliest.set(rel, checked);
+    }
+  }
+  const newestDay = new Map<string, string | null>();
+  for (const [rel, day] of earliest) {
+    const key = `${rel}\0${day}`;
+    if (!sourceDays.has(key)) {
+      const date = lastCommitDate(join(root, rel), `${addDays(day, -1)}T00:00:00Z`);
+      sourceDays.set(key, date === null ? null : timestampDay(date));
+    }
+    newestDay.set(rel, sourceDays.get(key) ?? null);
+  }
+
+  const out: Drift[] = [];
+  for (const { concept, checked, paths } of cited) {
+    const sources = new Map<string, string>();
+    for (const { resource, rel } of paths) {
+      const day = newestDay.get(rel) ?? null;
+      if (day !== null && day > checked && !sources.has(resource)) sources.set(resource, day);
+    }
+    if (sources.size === 0) continue;
+    out.push({
+      concept,
+      checked,
+      sources: [...sources]
+        .map(([resource, day]) => ({ resource, day }))
+        .sort((a, b) => byCodePoint(b.day, a.day) || byCodePoint(a.resource, b.resource)),
+    });
+  }
+  return out.sort((a, b) => byCodePoint(b.sources[0]!.day, a.sources[0]!.day) || byCodePoint(a.concept.path, b.concept.path));
 }
 
 // ---------------------------------------------------------------------------

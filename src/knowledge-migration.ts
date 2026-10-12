@@ -41,7 +41,8 @@ import {
   WIKI_PAGES,
   WIKI_PAGE_TYPE,
   featureLifecycle,
-  parseKnowledgeSettings,
+  readKnowledgeSettings,
+  reviewDaysFor,
 } from './knowledge.ts';
 import {
   LOG_FILE,
@@ -72,8 +73,14 @@ export function migrateToKnowledgeBundle(ctx: MigrationContext): void {
     ctx.log(`SKIP — ${ROOT_DIR_NAME}/${KNOWLEDGE_DIR} is a file; from 0.12.0 the knowledge bundle is a folder of that name, so move the file away`);
     return;
   }
-  const settings = parseKnowledgeSettings(readManifest(nd)?.knowledge);
-  const reviewDays = settings.ok && readManifest(nd)?.knowledge !== undefined ? settings.value.reviewDays : REVIEW_DAYS_DEFAULT;
+  // The project's own review days when it has readable ones (a mistake in "folders" does not count),
+  // else the default.
+  const knowledge = readManifest(nd)?.knowledge;
+  const settings = readKnowledgeSettings(knowledge);
+  const reviewDays =
+    knowledge !== undefined && settings.shape === null && settings.reviewDays.ok
+      ? settings.reviewDays.value
+      : new Map<string, number | null>(Object.entries(REVIEW_DAYS_DEFAULT));
   const days = lastChangeDays(root, nd);
   const moving = FOLDERS.filter((folder) => {
     if (!isDirectory(join(nd, folder))) return false;
@@ -107,7 +114,7 @@ export function migrateToKnowledgeBundle(ctx: MigrationContext): void {
           day,
           gitDay: days.get(relative(root, oldPath).replace(/\\/g, '/')),
           today: todayStamp(),
-          reviewDays: reviewDays[folder] ?? null,
+          reviewDays: reviewDaysFor(reviewDays, `${folder}/${file}`),
         });
         if (result.missing.length > 0) unconverted.push(`${folder}/${file} (${result.missing.join(', ')})`);
         text = result.text;

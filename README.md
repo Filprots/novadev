@@ -46,7 +46,7 @@ novadev status                        # open todos + record states, postponed tr
 novadev features --touching src/auth  # which features already own this code (conflict pre-flight)
 novadev features --hubs               # which features lean on each hub (see Placement)
 novadev knowledge                     # what the knowledge bundle holds: types, trust, what is stale
-novadev knowledge magic link --stale  # search it; --type, --tag, --tier and --stale filter
+novadev knowledge magic link --stale  # search it; --type, --tag, --tier, --stale and --drifted filter
 novadev knowledge log events.json     # record changes: each concept's stamps + its log entry
 novadev migrate-repo                  # upgrade an older .novadev/ layout to this version
 ```
@@ -81,6 +81,14 @@ derived now. Who wrote and checked the old content was never recorded, so its st
 `agent/unrecorded`; their dates come from the files and git. It also adds `"knowledge":
 { "reviewDays": … }` to `novadev.json` and starts `knowledge/log.md`. Then `novadev deploy`
 and `novadev sync`, and let an agent work the list sync prints.
+
+0.13.0 changes no layout: `migrate-repo` only stamps the version (and `novadev deploy` on a
+0.12.0 repo stamps it too). A `novadev.json` from 0.12.0 means what it meant. The new
+settings are opt-in: `"knowledge"` may give review days to any top-level folder of the
+bundle, and to `"*"` for the rest, and `"folders"` gives a folder the project adds its line
+in the map. One check is new for everyone: `novadev sync` lists a concept whose `repo:`
+source changed after the concept was last checked. A bundle that cites no `repo:` source
+sees nothing new. See *Knowledge* below.
 
 ## The system
 
@@ -249,6 +257,7 @@ knowledge/
   wiki/        index.md + overview.md, stack.md, architecture.md, conventions.md, workflows.md, glossary.md
   memories/    index.md + one file per lesson
   features/    index.md + FEAT-NNNN-<slug>/ { feature.md, work.md, tests.md }
+  <yours>/     index.md + concepts of any type — a folder the project adds, at any depth
 ```
 
 **One concept per file.** Every markdown file in the bundle except `index.md` and `log.md` is
@@ -279,18 +288,92 @@ actor form (`human:<id>`, `<tool>/<model>`, `process:<id>`), and when, as an ISO
 timestamp with its offset. The types are fixed per folder: `Wiki Page` in `wiki/`;
 `Guardrail`, `Gotcha`, `Decision` or `Guide` in `memories/`; `Feature` for `feature.md`
 (its OKF `status` — draft, stable, deprecated — is derived from `feature-status`). A folder
-the project adds may hold any type.
+the project adds may hold any type (see *Folders the project adds*).
 
 **Trust and freshness are in the file.** `verified` lists who re-checked a concept, one
 event per actor: none makes it *unverified*, agents or processes only *machine-confirmed*,
-a person *human-reviewed*. `stale_after` says when it is due for a re-check; novadev sets it
-from `"knowledge": { "reviewDays": { "wiki": 90, "memories": 180, "features": 365 } }` in
-`novadev.json` each time a concept is recorded — for a folder set to `null` it writes none
-and removes the one it finds, and no `"knowledge"` at all means no dates — and `novadev sync`
-lists what is past it. `sources` says what a concept was drawn from — a
-todo (`todo:<batch>/<todo>`, wherever the archive moved it), a commit (`commit:<hash>`), a
-file of the project (`repo:<path>`), a URL — and sync checks the todos exist and tells you
-when a `repo:` path is gone, because the concept may describe code that moved.
+a person *human-reviewed*. `stale_after` says when it is due for a re-check. novadev sets it
+each time a concept is recorded, from the review days in `novadev.json` for the top-level
+folder the concept sits in:
+
+```json
+"knowledge": {
+  "reviewDays": { "wiki": 90, "memories": 180, "features": 365, "references": null, "*": 180 }
+}
+```
+
+Any top-level folder may have its days: novadev's three, or one the project adds. `"*"`
+gives its days to every concept that no entry names, the concepts at the bundle root too.
+A folder set to `null` is never due, whatever `"*"` says: novadev writes no date there, and
+removes one it finds. Days are whole numbers, 1 to 36500. Without `"*"`, a folder that is not
+named gets no date, and no `"knowledge"` at all means no dates. `novadev sync` lists what is
+past its date. A setting novadev cannot read is a problem in `novadev sync`, and
+`novadev knowledge log` records nothing until `"reviewDays"` can be read: it would date
+nothing, and remove the dates already written. A mistake in `"folders"` never stops it.
+
+`sources` says what a concept was drawn from — a todo (`todo:<batch>/<todo>`, wherever the
+archive moved it), a commit (`commit:<hash>`), a file or folder of the project
+(`repo:<path>`), a URL — and sync checks the todos exist and tells you when a `repo:` path is
+gone, because the concept may describe code that moved.
+
+**Code that moved on.** A `repo:` source also tells sync when a concept may be out of date.
+For each one, `novadev sync` asks git for the newest commit that changed the path. When that
+commit is dated after the day the concept was last written or verified, the concept is a
+NEXT ACTION: "its source repo:src/auth.ts changed on 2026-10-12, after the concept was last
+checked (2026-10-01)" — re-check it against the code, then record a `verify` if it still
+holds, or an `update`. Whole days are compared, each in its own offset: a round commits its
+code after it records the knowledge, on the same day, and that never counts. Git is asked in
+the folder of the path (a symbolic link is followed first), so the repository that holds it
+answers — even one nested inside the project that the project's own repository ignores, like
+the clones a super-repo keeps under `repos/`. Each path is asked about once per run, and only
+back to the day of the oldest check.
+
+Commit dates decide, so know what they say:
+
+- Only the first-parent line counts: a merge is dated the day it was made, so a side branch's
+  change shows up on the day it was merged. A fast-forward pull keeps the dates the commits
+  were made on: what someone else committed before your last check, and you pulled after it,
+  does not count.
+- A concept that cites code not committed yet is checked again once that code is committed
+  on a later day: it shows as drifted then, and a `verify` settles it.
+- A folder source drifts with any file in it, so a concept should cite the files it really
+  describes. A folder that holds only other repositories (`repo:repos`) never drifts: no
+  repository tracks it.
+- A path that is gone is reported as gone, and a path inside `.novadev/` is never asked about
+  (every round commits there; `novadev doctor` notes it — cite a todo as
+  `todo:<batch>/<todo>`, a concept by its relative path). A deprecated concept is never
+  asked about, and a shallow clone's oldest commit does not count (its parent was not
+  fetched, so it seems to add every file).
+
+Five are listed, then a count; `novadev knowledge --drifted` lists them all, with every
+source that changed. Like a stale concept, it never fails `novadev sync --check`.
+
+**Folders the project adds.** A folder beside `wiki/`, `memories/` and `features/` may hold
+concepts of any type, at any depth, and gets a derived `index.md` of its own. The root map
+shows it as one line, so give that line a meaning: say what the folder holds, and an agent
+can decide from the map whether to open it. `"folders"` sits beside `"reviewDays"`, in the
+same `"knowledge"` — keep both:
+
+```json
+"knowledge": {
+  "reviewDays": { "wiki": 90, "memories": 180, "features": 365, "planner": 90 },
+  "folders": {
+    "planner": "What a planner user can do, stage by stage.",
+    "references/tutorials": "Step-by-step guides from the vendors."
+  }
+}
+```
+
+The map then reads `* [planner](planner/index.md) - What a planner user can do, stage by
+stage. (12 concepts)`, and a folder with no line keeps `- 12 concepts`. A folder inside
+another is described by its path, in the index of the folder above it. The folders
+`"folders"` names come first, in its order, then the others by name; a folder named like a
+whole number (`2026`) comes before them all, in number order, because that is how a JSON
+object keeps such keys. A description is one line of text; novadev writes the lines of its
+own three folders itself. `novadev doctor` notes a folder that `"reviewDays"` or `"folders"`
+names but that holds no concept — one still to come, or a typo (novadev's own three may
+wait for their first concept) — and a `"knowledge"` with no `"reviewDays"` at all, which
+dates nothing: write `"reviewDays": null` to mean it.
 
 **Every change is recorded.** A change is two writes — the stamps in the concept, and an
 entry in `log.md` — and one command makes both, for a whole batch of events or for none of
@@ -327,7 +410,8 @@ derived `status`); and that the log knows every change — a concept whose `gene
 `verified` day is newer than its newest log entry is a problem, and so is a concept that is
 gone while the log still lists it as current. Changes made on or before the day of the log's
 `**Initialization**` entry are covered by it. As NEXT ACTIONS it lists the concepts past
-`stale_after` (five, then a count), a concept changed since the last commit whose
+`stale_after` (five, then a count), the concepts whose `repo:` sources changed after they
+were last checked (five, then a count), a concept changed since the last commit whose
 `generated` stamp did not move, stamps changed since the last commit with no new log entry
 (a hand-written stamp claims a check nobody recorded), a concept deleted since the last
 commit without a removal, and a `repo:` source that is gone. An `index.md` sync wrote for a

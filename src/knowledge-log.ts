@@ -24,6 +24,8 @@ import {
   ROOT_DIR_NAME,
   knowledgeDir,
   listAllTodos,
+  manifestPath,
+  readManifest,
   textValue,
 } from './lib.ts';
 import {
@@ -34,6 +36,7 @@ import {
   newestMentions,
   readConcept,
   readConceptText,
+  readKnowledgeSettings,
   readLog,
   recordable,
   reviewDaysFor,
@@ -166,6 +169,21 @@ export function recordEvents(root: string, nd: string, events: readonly Knowledg
   if (log.read.problems.length > 0) {
     throw new Error(`${ROOT_DIR_NAME}/${KNOWLEDGE_DIR}/${LOG_FILE} needs repair first: ${log.read.problems[0]}`);
   }
+  // Every concept recorded takes its review date from the project's policy. Read wrong, it would date
+  // nothing — and drop the dates already written — so a policy that cannot be read stops the call.
+  // A mistake in "knowledge.folders" does not: the map's lines have nothing to do with the dates.
+  const manifest = readManifest(nd);
+  if (manifest === null && existsSync(manifestPath(nd))) {
+    throw new Error(`${ROOT_DIR_NAME}/novadev.json is not a valid JSON object (a merge conflict?) — fix it first: the review dates come from it. Nothing was recorded.`);
+  }
+  const settings = readKnowledgeSettings(manifest?.knowledge);
+  if (settings.shape !== null) {
+    throw new Error(`${ROOT_DIR_NAME}/novadev.json: ${settings.shape}. Fix it first: the review dates come from "knowledge". Nothing was recorded.`);
+  }
+  if (!settings.reviewDays.ok) {
+    throw new Error(`${ROOT_DIR_NAME}/novadev.json: ${settings.reviewDays.error}. Fix it first: the review dates come from it. Nothing was recorded.`);
+  }
+  const reviewDays = settings.reviewDays.value;
   const todos = new Set(listAllTodos(nd).map((t) => t.ref));
   const lastKind = new Map<string, string | null>(
     [...newestMentions(log.read)].map(([path, mention]) => [path, mention.kind?.toLowerCase() ?? null]),
@@ -245,7 +263,7 @@ export function recordEvents(root: string, nd: string, events: readonly Knowledg
       if (text === null) throw new Error(`${e.event} ${e.path}: no such concept in the bundle.`);
       const concept = readConceptText(bundle, e.path, text);
       title = concept.title || e.path;
-      const days = reviewDaysFor(nd, e.path);
+      const days = reviewDaysFor(reviewDays, e.path);
       const updates: Record<string, string | null> = {};
       if (e.event === 'create' || e.event === 'update' || e.event === 'deprecate') {
         updates.generated = yamlFlowMap([
@@ -263,8 +281,9 @@ export function recordEvents(root: string, nd: string, events: readonly Knowledg
         updates.status = 'deprecated';
         if (roleOfPath(e.path) === 'feature') updates[FEATURE_STATUS_KEY] = 'deprecated';
       }
-      // A review date follows the folder's policy: none for a folder that is never due, and none for
-      // a deprecated concept — it is kept for history, not re-checked.
+      // A review date follows the policy for the concept's top-level folder (or "*"): none for a
+      // folder that is never due, and none for a deprecated concept — it is kept for history, not
+      // re-checked.
       const deprecated = e.event === 'deprecate' || concept.status === 'deprecated';
       updates.stale_after = days === null || deprecated ? null : addDaysToTimestamp(at, days);
       const next = setFrontmatterKeys(text, updates);
