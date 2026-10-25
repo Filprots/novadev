@@ -40,3 +40,14 @@ stops you from hand-creating a `_1` whose name the archive already took.
 
 A batch carrying `completed.md` is **done, not pending**: agents will not re-run it or
 add work to it. `novadev archive <batch>` archives one early if you want it gone.
+
+**A batch in work carries `working.md`** — its lock. An agent writes it when it starts on
+the batch (`novadev work start`), adds a waypoint as the work moves (which todo, which
+phase of the loop, what is done and what is next), and either releases it when the round
+is over (`novadev work stop`) or pauses it (`/novadev-pause`), which writes exactly where
+things stopped: the step, the state of the working tree, what comes next, how to resume.
+The newest entry is at the top: that is where the next session picks up. While the lock
+exists the batch is in work — `novadev sync` does not mark it complete, nothing archives
+it, and `/novadev-file-a-todo` does not file into it. `novadev status` shows every lock:
+who holds it, whether that session is still there, and where the work is. Never edit it
+by hand.

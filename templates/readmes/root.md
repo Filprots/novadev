@@ -16,7 +16,7 @@ development history.
 | `sparks/` | Raw unshaped ideas — not yet tasks |
 | `totest/` | The active queue of tests waiting on a **human** — stepped scenarios an agent could not verify itself |
 | `metrics/` | `latest.json` — the newest snapshot of the project's own numbers (known debt, the biggest hubs), written by `novadev sync` when `novadev.json` sets a `metrics` command |
-| `skills/` | The four playbooks that run this system, `novadev-*.md` (managed by deploy) |
+| `skills/` | The five playbooks that run this system, `novadev-*.md` (managed by deploy) |
 
 **The knowledge bundle.** `knowledge/` holds what is TRUE about the project; everything
 else here is the work it is drawn from. Every file in it is a markdown *concept* with YAML
@@ -41,15 +41,21 @@ them first — `novadev sync` says so.
 
 **Agents:** the rule of the house is `skills/novadev-work.md` — the always-applied
 playbook. It defines the loop; start every substantive task by loading `knowledge/index.md`
-(build the wiki per the playbook if it is missing), record every knowledge change with
-`novadev knowledge log`, and close every round with `novadev sync`. Three companion playbooks sit beside it for the human's own entry
-points: `novadev-file-a-todo.md`, `novadev-what-to-test.md`, `novadev-test-review.md`.
+(build the wiki per the playbook if it is missing), take the batch's lock before the first
+change (`novadev work start`), record every knowledge change with `novadev knowledge log`,
+and close every round with `novadev sync` and `novadev work stop` — or `/novadev-pause`
+when work remains. Four companion playbooks sit beside it: `novadev-file-a-todo.md`,
+`novadev-what-to-test.md`, `novadev-test-review.md` for the human's own entry points, and
+`novadev-pause.md` for stopping the loop where it is.
 
 **Humans:** you do not have to run any of this. Say what you want built and the agent
 files it (`/novadev-file-a-todo`); say you want to test and it shows you the queue
 (`/novadev-what-to-test`); say what you found after testing and it writes the round up
-(`/novadev-test-review`). By hand if you prefer: drop task briefs into `todos/`
-(`novadev new` scaffolds a batch), check progress with `novadev status`, see what needs
-your own testing with `novadev totest`, search capabilities with `novadev features` and
-everything the project knows with `novadev knowledge`, and validate structure and links
-with `novadev doctor` / `novadev links`.
+(`/novadev-test-review`); say "pause" and it writes down exactly where things stopped
+(`/novadev-pause`), so the next `/novadev-work` picks up from there. By hand if you
+prefer: drop task briefs into `todos/` (`novadev new` scaffolds a batch), see whether a
+work cycle is on and where it is with `novadev status` (a batch in work carries
+`todos/<batch>/working.md`, its lock), see what needs your own testing with
+`novadev totest`, search capabilities with `novadev features` and everything the project
+knows with `novadev knowledge`, and validate structure and links with `novadev doctor` /
+`novadev links`.

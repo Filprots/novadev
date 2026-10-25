@@ -39,6 +39,7 @@ import { auditLinks } from './links.ts';
 import { displayCommand, refreshMetrics } from './metrics.ts';
 import { auditMetrics } from './metrics-audit.ts';
 import { auditPlacement } from './placement.ts';
+import { auditWork } from './work.ts';
 
 export async function sync(args: string[]): Promise<void> {
   const check = args.includes('--check');
@@ -106,10 +107,17 @@ export async function sync(args: string[]): Promise<void> {
   // 3. Validate what is left. In `--check` nothing was written, so the knowledge is judged as it is.
   const audit = auditLinks(root);
   const knowledge = check ? knowledgeBefore : auditKnowledge(root, nd, { sourceDays });
-  const problems = [...audit.problems, ...metricsAudit.problems, ...placement.problems, ...knowledge.problems];
+  // The batches in work: who holds each lock, and whether they are still there.
+  const inWork = auditWork(nd);
+  const problems = [...inWork.problems, ...audit.problems, ...metricsAudit.problems, ...placement.problems, ...knowledge.problems];
   if (problems.length > 0) {
     console.log(`\nPROBLEMS (${problems.length}):`);
     for (const p of problems) console.log(`  ✗ ${p}`);
+  }
+
+  if (inWork.lines.length > 0) {
+    console.log(`\nin work (${inWork.lines.length}):`);
+    for (const line of inWork.lines) console.log(`  ${line}`);
   }
 
   // Finished batches inside the grace window stay put on purpose — say so, or their
@@ -127,9 +135,11 @@ export async function sync(args: string[]): Promise<void> {
     }
   }
 
-  // 4. What still needs doing, split by who has to do it.
-  const agent = [...knowledge.actions, ...agentActions(root, nd, audit.notes), ...metrics.actions, ...placement.actions];
-  const human = humanActions(nd);
+  // 4. What still needs doing, split by who has to do it. An abandoned lock comes first: a session
+  // died mid-work, and its last waypoint is where this one should pick up. A paused batch waits on
+  // the human — they stopped it, they say when it goes on.
+  const agent = [...inWork.actions, ...knowledge.actions, ...agentActions(root, nd, audit.notes), ...metrics.actions, ...placement.actions];
+  const human = [...inWork.waiting, ...humanActions(nd)];
 
   if (agent.length > 0) {
     console.log(`\nNEXT ACTIONS — you (${agent.length}):`);

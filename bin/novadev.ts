@@ -17,7 +17,12 @@ usage:
   novadev deploy            create/upgrade .novadev/ + the playbook + agent adapters
                             (on an older layout, run migrate-repo first)
   novadev new [slug…]       scaffold today's next batch (todos/YYYY-MM-DD_N/), optional todo folders
-  novadev status            stock-take: open todos + record states, postponed triggers, wiki/memories
+  novadev status            is a work cycle on? the batches in work (who, since when, where, paused
+                            or abandoned), then open todos + record states, postponed, knowledge
+  novadev work …            the lock of a batch in work (todos/<batch>/working.md): "start <batch>"
+                            takes or resumes it, "waypoint <batch> <payload.json>" records where the
+                            work is, "pause <batch> <payload.json>" writes exactly where it stopped
+                            (the command half of /novadev-pause), "stop <batch>" releases it
   novadev archive <batch>…  move fully-recorded batch(es) to archive/<year>/   (or: --done for all)
   novadev knowledge [words] the knowledge bundle (.novadev/knowledge/, Open Knowledge Format 0.2):
                             what it holds, or search it; --type/--tag/--tier filter, --stale lists
@@ -56,6 +61,11 @@ switch (command) {
   case 'status': {
     const { status } = await import('../src/status.ts');
     status();
+    break;
+  }
+  case 'work': {
+    const { work } = await import('../src/work.ts');
+    work(args);
     break;
   }
   case 'archive': {

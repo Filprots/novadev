@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { knowledgeStatusLine } from './knowledge.ts';
 import {
   FEATURE_STATUSES,
+  WORK_LOCK_FILE,
   batchIsDone,
   featuresDir,
   listDirs,
@@ -16,6 +17,7 @@ import {
   todoState,
 } from './lib.ts';
 import { metricsStatusLine } from './metrics-audit.ts';
+import { auditWork, readWorkLock } from './work.ts';
 
 const STATE_MARK = {
   confirmed: '✓✓',
@@ -30,12 +32,29 @@ export function status(): void {
   const root = requireProjectRoot();
   const nd = novadevDir(root);
 
+  // Is a work cycle on? The batches in work come first: who holds each lock, whether they are
+  // still there, and where the work is — the one thing a person opening the project wants to know.
+  const inWork = auditWork(nd);
+  const locks = inWork.lines.length + inWork.problems.length;
+  if (locks === 0) {
+    console.log('in work — none (no batch is locked; `/novadev-work` takes a batch\'s lock when it starts)');
+  } else {
+    console.log(`in work — ${locks} batch(es)`);
+    for (const line of inWork.lines) console.log(`  ${line}`);
+    for (const problem of inWork.problems) console.log(`  ⚠ ${problem}`);
+    if (inWork.waiting.length > 0) console.log(`  → a paused batch resumes with \`/novadev-work\`; it reads the PAUSED section of ${WORK_LOCK_FILE} first`);
+    if (inWork.actions.length > 0) console.log(`  → an abandoned lock is resumed (\`novadev work start <batch>\`) or released (\`novadev work stop <batch>\`)`);
+  }
+
   // Open batches.
   const batches = listDirs(join(nd, 'todos'));
-  console.log(`todos — ${batches.length} open batch(es)`);
+  console.log(`\ntodos — ${batches.length} open batch(es)`);
   for (const batch of batches) {
     const batchDir = join(nd, 'todos', batch);
-    const done = batchIsDone(batchDir) ? '  [ready to archive]' : '';
+    const lock = readWorkLock(nd, batch);
+    const mark =
+      lock === null ? '' : lock.state === 'invalid' ? '  [lock unreadable]' : lock.lock.state === 'paused' ? '  [paused]' : '  [in work]';
+    const done = batchIsDone(batchDir) ? '  [ready to archive]' : mark;
     console.log(`  ${batch}${done}`);
     for (const todo of listDirs(batchDir)) {
       const state = todoState(join(batchDir, todo));

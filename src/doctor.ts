@@ -27,6 +27,7 @@ import { auditKnowledge } from './knowledge.ts';
 import { auditLinks } from './links.ts';
 import { auditMetrics } from './metrics-audit.ts';
 import { auditPlacement } from './placement.ts';
+import { auditWork } from './work.ts';
 
 export function doctor(): void {
   const root = requireProjectRoot();
@@ -240,6 +241,11 @@ export function doctor(): void {
   const placement = auditPlacement(root);
   problems.push(...placement.problems);
   notes.push(...placement.actions, ...placement.notes);
+
+  // --- work: the batches in work — a lock novadev cannot read is a problem, an abandoned one a note ---
+  const inWork = auditWork(nd);
+  problems.push(...inWork.problems);
+  notes.push(...inWork.actions, ...inWork.waiting, ...inWork.notes);
 
   // --- unknown top-level folders: tolerated, but surfaced ---
   const known = new Set([

@@ -91,6 +91,28 @@ function inRepository(root: string): boolean {
   return git(root, ['rev-parse', '--is-inside-work-tree'])?.trim() === 'true';
 }
 
+/**
+ * Where the repository is: the branch checked out (null when the head is detached) and the short
+ * hash of the last commit (null before the first one). Null when `root` is not in a repository.
+ */
+export function headSummary(root: string): { branch: string | null; head: string | null } | null {
+  if (!inRepository(root)) return null;
+  const branch = git(root, ['symbolic-ref', '--quiet', '--short', 'HEAD'])?.trim() || null;
+  const head = git(root, ['rev-parse', '--short', '--verify', '--quiet', 'HEAD^{commit}'])?.trim() || null;
+  return { branch, head };
+}
+
+/**
+ * What is not committed, as `git status --porcelain` prints it — two status letters, a space, the
+ * path — one line per entry, untracked files included, folders of untracked files collapsed.
+ * Empty when the tree is clean; null when git cannot tell.
+ */
+export function dirtyPaths(root: string): string[] | null {
+  if (!inRepository(root)) return null;
+  const out = git(root, ['status', '--porcelain', '--untracked-files=normal']);
+  return out === null ? null : out.split('\n').filter((line) => line.trim() !== '');
+}
+
 /** A file's content in the last commit. `rel` is relative to `root`. */
 export function fileAtHead(root: string, rel: string): string | null {
   return git(root, ['show', `HEAD:./${rel.replace(/\\/g, '/')}`]);

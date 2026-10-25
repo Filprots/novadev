@@ -5,6 +5,7 @@ import { auditLinks } from './links.ts';
 import {
   BATCH_COMPLETE_FILE,
   BATCH_RE,
+  WORK_LOCK_FILE,
   addDays,
   applyFix,
   archiveGraceDays,
@@ -171,6 +172,11 @@ export function archive(args: string[]): void {
     if (!existsSync(src)) fail(`batch not found: todos/${batch}`);
     const m = batch.match(BATCH_RE);
     if (!m) fail(`batch name "${batch}" does not match YYYY-MM-DD_N`);
+    if (existsSync(join(src, WORK_LOCK_FILE))) {
+      fail(
+        `batch ${batch} is in work (${WORK_LOCK_FILE}) — the round on it is not over. Release the lock first: \`novadev work stop ${batch}\` (run \`novadev status\` to see who holds it).`,
+      );
+    }
     if (!batchIsDone(src)) {
       fail(
         `batch ${batch} is not fully recorded — every todo folder needs a terminal record (run \`novadev status\`).`,

@@ -42,7 +42,8 @@ Then:
 novadev new fix-login add-dark-mode   # scaffold todos/2026-08-16_1/{01-fix-login,02-add-dark-mode}/
 novadev sync                          # the close-out: measure (if set), derive, archive, validate, list what's left
 novadev totest                        # what needs YOUR hands-on testing
-novadev status                        # open todos + record states, postponed triggers, health
+novadev status                        # is a work cycle on? then open todos + record states, postponed, health
+novadev work start 2026-08-16_1       # take a batch's lock (agents do this; see Work in progress)
 novadev features --touching src/auth  # which features already own this code (conflict pre-flight)
 novadev features --hubs               # which features lean on each hub (see Placement)
 novadev knowledge                     # what the knowledge bundle holds: types, trust, what is stale
@@ -52,9 +53,10 @@ novadev migrate-repo                  # upgrade an older .novadev/ layout to thi
 ```
 
 Most of the time you do not type any of these — you talk to the agent, and it runs
-them. Four slash commands come with the deploy: `/novadev-work` (do the work),
+them. Five slash commands come with the deploy: `/novadev-work` (do the work),
 `/novadev-file-a-todo` (file what you just said), `/novadev-what-to-test` (walk the
-queue with me), `/novadev-test-review` (write up testing you already did).
+queue with me), `/novadev-test-review` (write up testing you already did),
+`/novadev-pause` (stop where we are; the next `/novadev-work` picks up from there).
 
 ## Upgrading
 
@@ -90,6 +92,12 @@ in the map. One check is new for everyone: `novadev sync` lists a concept whose 
 source changed after the concept was last checked. A bundle that cites no `repo:` source
 sees nothing new. See *Knowledge* below.
 
+0.14.0 changes no layout either: `migrate-repo` only stamps the version. It adds a fifth
+playbook, `/novadev-pause`, and the lock of a batch in work, `todos/<batch>/working.md`,
+which `novadev deploy` teaches the agents (see *Work in progress* below). A repo with no
+lock behaves exactly as before; the one visible change is that `novadev status` starts
+with whether a work cycle is on.
+
 ## The system
 
 ```
@@ -100,13 +108,14 @@ sees nothing new. See *Knowledge* below.
     wiki/        project pre-context agents load first (strict page set; the agent creates it)
     memories/    guardrails, gotchas, decisions and guides, written the moment they cost time
     features/    what the software DOES — FEAT-NNNN/ folders: feature.md + derived work.md/tests.md
-  todos/       task batches YYYY-MM-DD_N/<todo>/ — briefs: human-authored (.txt/.md + screenshots) or agent-filed prompt.md (chat-initiated)
+  todos/       task batches YYYY-MM-DD_N/<todo>/ — briefs: human-authored (.txt/.md + screenshots) or agent-filed prompt.md (chat-initiated);
+               a batch in work carries working.md, its lock (see Work in progress)
   archive/     finished work by year — <year>/todos/<batch>/ and <year>/totest/<task>/<round>/
   postponed/   deferred work with do-when / discard-if triggers
   sparks/      raw unshaped ideas
   totest/      the ACTIVE queue of tests waiting on a human (rounds archive once reviewed)
   metrics/     latest.json — the newest snapshot of the project's own numbers (when a metrics command is set)
-  skills/      the four canonical playbooks, novadev-*.md (agent-agnostic; managed by deploy)
+  skills/      the five canonical playbooks, novadev-*.md (agent-agnostic; managed by deploy)
 ```
 
 **Archiving has a grace period.** A batch whose todos are all recorded gets an
@@ -200,11 +209,13 @@ The playbook for the work itself is `.novadev/skills/novadev-work.md`, and it de
 a single loop the agent runs for every round of work:
 
 ```
-0 ORIENT   load knowledge/index.md, then the wiki, memories and features it maps; the queue
+0 ORIENT   load knowledge/index.md, then the wiki, memories and features it maps; the queue —
+           a paused or abandoned batch in it is where the session most likely continues
 1 INTAKE   any chat request that changes the repo becomes a todo, before work starts
 2 PLAN     batch waves + decisions up front; pre-flight new capabilities for duplicates;
            name the unit that will own a change to a hub
-3 WORK     do it by the project's own conventions
+3 WORK     take the batch's lock (`novadev work start`), then do it by the project's own
+           conventions, writing a waypoint whenever the work moves
 4 RECORD   ai_completed / ai_failed / ai_progress, with **Feature:**, **Commits:** and
            a ## Placement section
 5 VERIFY   what an agent cannot check → a totest task + the ai_needstest gate
@@ -212,7 +223,7 @@ a single loop the agent runs for every round of work:
 7 REGISTER feature status, progress, touches — recorded with `novadev knowledge log`
 8 REMEMBER memories for what cost real time — recorded; postponed for what is blocked
 9 DOCUMENT the wiki, if reality moved — recorded
-10 CLOSE   `novadev sync`
+10 CLOSE   `novadev sync`, then `novadev work stop` — or `/novadev-pause` when work remains
 ```
 
 `novadev sync` is the close-out and the engine: it runs the project's metrics command
@@ -236,6 +247,127 @@ WAITING ON THE HUMAN (1):
 **You write todo briefs and walk the tests only a person can walk. That is the whole
 job.** No command to remember, no skill to pick, no archive step to run — if
 something needs doing and an agent can do it, `sync` says so and the agent does it.
+
+## Work in progress — the lock, waypoints and pauses
+
+Is a work cycle on? Which batch, who is on it, where did they get to — and if the session
+died, or you said "pause" last night, where exactly does the next one pick up? novadev
+answers that from one file: **a batch in work carries `todos/<batch>/working.md`, its
+lock.** An agent writes it when it starts on the batch, adds a waypoint as the work moves,
+and either releases it when the round is over or pauses it. Like everything in `.novadev/`
+it is tracked, so a pause is development history, and a session on another machine finds it
+where it was left.
+
+```sh
+novadev work start 2026-10-24_1 --agent claude-code/claude-opus-5-5   # take the lock, or resume it
+novadev work waypoint 2026-10-24_1 waypoint.json   # { todo?, phase?, note }: where the work is now
+novadev work pause 2026-10-24_1 pause.json         # { todo?, phase?, stopped, next, done?, resume?, open? }
+novadev work stop 2026-10-24_1                     # the round is over: release it
+```
+
+The file is flat frontmatter novadev reads — the state (`working` or `paused`), the holder
+(the agent as an OKF actor, the host, the process, the session), when it was taken, the
+last heartbeat, the todo and loop phase of the last waypoint — and a markdown trail a
+person reads, **newest first**, so the top section is where the work resumes:
+
+```markdown
+---
+state: paused
+agent: claude-code/claude-opus-5-5
+host: fil-desktop
+pid: 3702151
+session: b424d984-bff7-4b80-9486-e4da99d5edd5
+started: 2026-10-24T18:02:11+02:00
+updated: 2026-10-24T22:49:30+02:00
+todo: 02-dark-mode
+phase: 3
+---
+
+# Working — 2026-10-24_1
+
+## PAUSED — waypoint 4 — 2026-10-24 22:49 · 02-dark-mode · phase 3 WORK
+
+**By:** claude-code/claude-opus-5-5 on fil-desktop
+
+**Tree at the pause:** branch `master`, HEAD `e19b61a` — 2 uncommitted path(s):
+- ` M` src/theme.ts
+- `??` src/toggle.ts
+
+### Stopped at
+
+In `src/theme.ts`, `applyTheme()` reads the tokens; the toggle in `Header.tsx` is wired but
+the body class never flips. `bun test` is green except `theme.test.ts` (2 failures: the toggle).
+
+### Next
+
+1. Check whether `useTheme` is called outside the provider — that is the likely cause.
+2. Finish `ai_progress.md` for 02-dark-mode, then `novadev sync`.
+
+### Done
+
+01-fix-login: `ai_completed.md`, commit abc1234. Test task FEAT-0003-login revised (rev 2).
+
+### To resume
+
+`bun install && bun dev`; the theme page is /settings.
+
+### Todos at the pause
+
+- ✓ 01-fix-login — completed
+- · 02-dark-mode — open
+
+## Waypoint 3 — 2026-10-24 20:10 · 02-dark-mode · phase 3 WORK
+
+Tokens in src/theme.ts done; wiring the toggle next.
+```
+
+**Start** takes the lock and answers in JSON: the batch's todos and their states, and, when
+the lock already existed, its last waypoint. A lock that is paused, or whose holder is gone,
+is RESUMED — the same session (the same session id, or the same process on the same host)
+simply refreshes it. A lock held by a *live* session is refused, naming the holder; `--take`
+takes it over when you know that session is gone. A finished batch (`completed.md`) is
+refused: a new request gets a new batch. `--agent` is the agent's OKF actor (`human` means
+the person git knows); without it the lock says `agent/unknown`.
+
+**Liveness.** On the holder's own host the process decides, when the lock names one: alive
+means working, gone means abandoned. Elsewhere the heartbeat decides: a `working` lock
+with no waypoint for two hours reads as abandoned. Claude Code names its process and its
+session in the shell (`CLAUDE_PID`, `CLAUDE_CODE_SESSION_ID`), so an agent there is
+identified without doing anything; otherwise the harness is the grandparent of the
+`novadev` process, and another harness may pass `--session <id>`.
+
+**Waypoint** adds an entry — the todo, the loop phase, a few lines on what is done and
+what is next — and refreshes the heartbeat. The playbook asks for one whenever the work
+moves: each todo picked up, each phase entered, each commit. **Pause** is the command half
+of `/novadev-pause`: it writes the exhaustive stop — `stopped` (exactly where), `next` (the
+steps, in order), `done`, `resume`, `open` — and adds what it can see on its own: the
+branch, the last commit, every uncommitted path, and each todo's state at that moment, so
+the resumer can tell what moved in between. **Stop** removes the file; it says which todos
+are not recorded as finished, because a stop drops the resume point and a pause keeps it.
+Payloads are JSON files, never shell arguments, like every other novadev payload.
+
+**A lock is a gate.** While it exists the batch is in work: `novadev sync` never marks it
+complete, nothing archives it (`novadev archive <batch>` says so), and `/novadev-file-a-todo`
+never files into it — a batch somebody is working is not where a phone's bug report lands.
+So the playbook's rule is firm: never end a session on a locked batch without a
+`novadev work stop` (the round is over) or a `/novadev-pause` (work remains).
+
+**What you see.** `novadev status` begins with it:
+
+```
+in work — 2 batch(es)
+  ● 2026-10-24_1 — WORKING: claude-code/claude-opus-5-5 on fil-desktop (process 3702151, alive), last waypoint 5 min ago — at 02-dark-mode · phase 3 WORK: "Tokens in src/theme.ts done; wiring the toggle next."
+  ‖ 2026-10-23_2 — PAUSED 2026-10-23 22:49 by claude-code/claude-opus-5-5 — at 03-export · phase 4 RECORD: "The CSV writer is done and tested; ai_completed.md needs its Verification section."
+  → a paused batch resumes with `/novadev-work`; it reads the PAUSED section of working.md first
+```
+
+A third kind is `✗ … — ABANDONED`: the process is gone, or there has been no waypoint for
+two hours. `novadev sync` prints the same block, lists a paused batch under WAITING ON THE
+HUMAN (you stopped it; you say when it goes on) and an abandoned one under NEXT ACTIONS
+(resume it, or release it). A lock novadev cannot read — a merge conflict, a broken header
+— is a problem for `sync`, `sync --check` and `doctor`; `novadev work stop` removes it
+anyway, because releasing it is what you asked for. `doctor` also notes a lock whose last
+waypoint names a todo the batch does not have.
 
 ## Knowledge — an Open Knowledge Format bundle
 
@@ -665,18 +797,19 @@ the ones the placement check uses: the stored snapshot's, or else `hubs` in `nov
 command only reads files. It never runs the metrics command. With no hub paths, it says how to
 set them and exits with 1.
 
-## The three companion playbooks
+## The four companion playbooks
 
-The loop above is what an agent runs. Three more playbooks cover the moments when YOU
-start the conversation, and each deploys as a slash command of the same name:
+The loop above is what an agent runs. Four more playbooks cover the moments when YOU
+start the conversation — or end it — and each deploys as a slash command of the same name:
 
 | You say | Playbook | What it does |
 |---|---|---|
 | "file this", a bug from your phone, "we should…" | **`/novadev-file-a-todo`** | turns what you just said into real todo folders — your words verbatim, your screenshots copied in — shows you the split, and waits for a yes before writing |
 | "what should I test?" | **`/novadev-what-to-test`** | shows the queue, helps you pick, walks you through one scenario, and writes the verdict down |
 | "I tested the selection thing — 3 broke, here is a shot" | **`/novadev-test-review`** | takes a whole round of testing you already did, in any order and any words, and files it as a formed review in that task's `test-results/` with every file attached |
+| "pause", "stop here", "let's continue tomorrow" | **`/novadev-pause`** | records the work that landed, then writes into the batch's lock exactly where things stopped — the step, the state of the tree, what is next, how to resume — and offers a commit of the work in progress; the next `/novadev-work` resumes from it |
 
-They share the loop's mechanics rather than re-deriving them, through two commands
+They share the loop's mechanics rather than re-deriving them, through three commands
 that exist for exactly this:
 
 ```sh
@@ -686,22 +819,25 @@ novadev file-todo file payload.json     # write the folders, the briefs, and the
 novadev test-result tasks [query]       # resolve "16" / "the selection one" against the real queue
 novadev test-result write payload.json  # one scenario's verdict → scenario-<N>.txt   (APPENDS)
 novadev test-result review payload.json # a whole round → review.md                   (APPENDS)
+
+novadev work pause <batch> payload.json # the pause record, newest entry of the batch's lock
 ```
 
-Both take a JSON **file**, because the content is a person's own multi-line words and
-quoting that through a shell is how it gets mangled; both answer in JSON, so the agent
+All take a JSON **file**, because the content is a person's own multi-line words and
+quoting that through a shell is how it gets mangled; all answer in JSON, so the agent
 reads the outcome instead of guessing. The rules they own are the ones prose gets
 wrong: which batch to reuse, the next `NN`, defanging a `**Feature:**` line quoted
-from an old record (an unknown id there is a hard `sync` failure), and above all
-**appending** — a second walk of a scenario must never erase the first.
+from an old record (an unknown id there is a hard `sync` failure), what a pause must
+say and what the command captures on its own, and above all **appending** — a second
+walk of a scenario must never erase the first.
 
 ## Agent integration (canonical + adapters)
 
 The playbooks are plain markdown any agent can follow. `novadev deploy`
 additionally generates thin native adapters that just route to them:
 
-- `.claude/skills/novadev-{work,file-a-todo,what-to-test,test-review}/SKILL.md` — the
-  four Claude Code skills. They share the `novadev-` prefix on purpose: typing
+- `.claude/skills/novadev-{work,file-a-todo,what-to-test,test-review,pause}/SKILL.md` —
+  the five Claude Code skills. They share the `novadev-` prefix on purpose: typing
   `/novadev` offers the whole set
 - `.cursor/rules/novadev.mdc` — Cursor always-applied rule
 - managed marker sections in `AGENTS.md` and `CLAUDE.md` (created if missing;

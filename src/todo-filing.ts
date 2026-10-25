@@ -6,7 +6,7 @@
 // — is the difference between a filed todo and a `novadev sync` that fails on a quoted record.
 import { copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { BATCH_RE, listDirs, todayStamp } from './lib.ts';
+import { BATCH_RE, WORK_LOCK_FILE, listDirs, todayStamp } from './lib.ts';
 
 const SLUG = /^[a-z0-9][a-z0-9-]*$/;
 /** novadev's own record names — their presence is what makes a batch "touched". */
@@ -45,9 +45,9 @@ export type BatchPlan = { readonly batch: string; readonly reused: boolean; read
 
 /**
  * The batch to file into: reuse the most recent batch a conversation created while it is still
- * UNTOUCHED — no todo in it carries any ai_ record — so several things filed in a row from a phone
- * land together. The moment work starts on it, or if the newest batch is human-authored, open a
- * fresh one.
+ * UNTOUCHED — no todo in it carries any ai_ record, and no agent holds its lock — so several things
+ * filed in a row from a phone land together. The moment work starts on it, or if the newest batch
+ * is human-authored, open a fresh one.
  */
 export function planBatch(nd: string, today = todayStamp()): BatchPlan {
   const todos = join(nd, 'todos');
@@ -58,6 +58,7 @@ export function planBatch(nd: string, today = todayStamp()): BatchPlan {
   for (const batch of reusable) {
     const dir = join(todos, batch);
     if (!existsSync(join(dir, CHAT_MARKER))) break; // a human batch, or one we did not create
+    if (existsSync(join(dir, WORK_LOCK_FILE))) break; // an agent is working it (or paused in it)
     const folders = listDirs(dir);
     if (folders.some((folder) => isTouched(join(dir, folder)))) break;
     return { batch, reused: true, nextNumber: folders.length + 1 };

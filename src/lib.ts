@@ -4,7 +4,7 @@ import { dirname, join, resolve } from 'node:path';
 import { readFrontmatterText } from './okf.ts';
 
 export const ROOT_DIR_NAME = '.novadev';
-export const NOVADEV_VERSION = '0.13.0';
+export const NOVADEV_VERSION = '0.14.0';
 
 /**
  * The project's knowledge — wiki, memories, features — is one Open Knowledge Format bundle under
@@ -77,10 +77,33 @@ export const RECORD_CONFIRMED = 'ai_confirmed.md';
 export const WORK_RECORDS = [RECORD_COMPLETED, RECORD_PROGRESS, RECORD_FAILED] as const;
 
 /**
+ * The batch's LOCK (work.ts): an agent is working the batch, or paused in it, and the file says who,
+ * since when, and where — the trail of waypoints, newest first. While it exists the batch is in
+ * work: never complete, never archived, never filed into.
+ */
+export const WORK_LOCK_FILE = 'working.md';
+
+/** The phases of the loop in skills/novadev-work.md, by number — a waypoint names one. */
+export const LOOP_PHASES = [
+  'ORIENT',
+  'INTAKE',
+  'PLAN',
+  'WORK',
+  'RECORD',
+  'VERIFY',
+  'REVIEW',
+  'REGISTER',
+  'REMEMBER',
+  'DOCUMENT',
+  'CLOSE',
+] as const;
+
+/**
  * Canonical skill playbooks shipped into <root>/skills/, and the slash commands that route to them.
  *
- * All four are named `novadev-*` so typing `/novadev` in an agent's chat offers the whole set:
- * `-work` is the development loop, the other three are the human's own entry points into it.
+ * All five are named `novadev-*` so typing `/novadev` in an agent's chat offers the whole set:
+ * `-work` is the development loop, `-pause` stops it where it is, the other three are the human's
+ * own entry points into it.
  */
 export const SKILLS = [
   {
@@ -106,6 +129,12 @@ export const SKILLS = [
     slug: 'novadev-test-review',
     description:
       'Write up a round of hand-testing the user already did: they say what they tested, what passed, what broke and what they want changed, attach their screenshots, and name the feature by number or by name — this files a fully formed review into that task\'s test-results/ folder with every file attached. Use when they say "/novadev-test-review", "I tested X", "here is what I found", "passed", or hand over testing notes without walking the queue first.',
+  },
+  {
+    file: 'novadev-pause.md',
+    slug: 'novadev-pause',
+    description:
+      'Pause the development loop where it is: record the work that landed, then write into the batch\'s lock (todos/<batch>/working.md) exactly where things stopped — the todo, the step, the state of the working tree, what comes next, how to resume, what is open — so a later `/novadev-work` picks the batch up from that waypoint instead of rediscovering it. Use when they say "/novadev-pause", "pause", "stop here", "let\'s continue tomorrow", "I have to go", or when the session must end with work in flight.',
   },
 ] as const;
 
@@ -839,8 +868,12 @@ export function todoState(todoDir: string): TodoState {
  *  test must keep its batch out of the archive, or the hand-off is lost. */
 export const TERMINAL_STATES: readonly TodoState[] = ['confirmed', 'completed', 'failed'];
 
-/** A batch is archivable when every todo folder inside carries a terminal record. */
+/**
+ * A batch is archivable when every todo folder inside carries a terminal record — and nobody holds
+ * its lock: a round that is paused, or still closing out, is not over, whatever the records say.
+ */
 export function batchIsDone(batchDir: string): boolean {
+  if (existsSync(join(batchDir, WORK_LOCK_FILE))) return false;
   const todos = listDirs(batchDir);
   if (todos.length === 0) return false;
   return todos.every((t) => TERMINAL_STATES.includes(todoState(join(batchDir, t))));

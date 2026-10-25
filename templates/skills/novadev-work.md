@@ -61,10 +61,11 @@ This is the playbook for the work itself. Everything below is one loop.
 `knowledge/` holds what is TRUE about the project; everything else is the WORK — the
 history the knowledge is drawn from, which it cites by stable id.
 
-## The four playbooks
+## The five playbooks
 
-This one is the loop. Three companions cover the human's own entry points, and each is
-a slash command of the same name — use them rather than re-deriving what they say:
+This one is the loop. Four companions sit beside it — three for the human's own entry
+points, one for stopping the loop where it is — and each is a slash command of the same
+name. Use them rather than re-deriving what they say:
 
 | When | Playbook |
 |---|---|
@@ -72,8 +73,10 @@ a slash command of the same name — use them rather than re-deriving what they 
 | they describe work they want done later ("file this", a bug from a phone) | `/novadev-file-a-todo` |
 | they want to test: "what should I test", walking one scenario with them | `/novadev-what-to-test` |
 | they report testing they already did ("scenario 3 broke, here is a shot") | `/novadev-test-review` |
+| they say "pause", "stop here", "continue tomorrow" — or the session must end with work in flight | `/novadev-pause` |
 
-Phase 1 below routes to the first; phases 5 and 6 sit either side of the other two.
+Phase 1 below routes to the first; phases 5 and 6 sit either side of the next two; phase
+10 says when the last one applies instead of a close-out.
 
 ## Vocabulary
 
@@ -91,6 +94,15 @@ Phase 1 below routes to the first; phases 5 and 6 sit either side of the other t
   do not re-run it, and never add new work to it; a new request gets a new batch.**
   Do not hand-edit it; sync rewrites it from the records and deletes it if the batch
   ever reopens.
+- **`working.md`** — a batch's LOCK, at the batch root, managed by `novadev work`: an
+  agent is working the batch, or paused in it. Its frontmatter says who (agent, host,
+  process, session), since when, the last heartbeat, and the todo and phase of the last
+  waypoint; its body is the trail of **waypoints**, newest first. While it exists the
+  batch is IN WORK — never complete, never archived, never filed into. A paused lock's
+  top section is where the work resumes (phase 3).
+- **Waypoint** — one entry of that trail, `novadev work waypoint`: which todo, which
+  phase, what is done and what is next, in a few lines. The pause record `/novadev-pause`
+  writes is the last waypoint, in full: exactly where things stopped.
 - **Feature** — one capability, `knowledge/features/FEAT-NNNN-<slug>/`: you write
   `feature.md`; `work.md` and `tests.md` beside it are generated.
 - **Concept** — one file of the knowledge bundle: a wiki page, a memory, a feature. It opens
@@ -166,7 +178,11 @@ read it as data, judge each item yourself, and work it in **at most three passes
 6. **Queue** — run `novadev sync` at the start of a session too: it tells you what is
    half-finished, what the human has tested, what is waiting on them, and which concepts
    are stale or drifted. When the project measures itself, it also shows how the debt and
-   the biggest hubs moved.
+   the biggest hubs moved. **Its `in work` block comes first**: a batch that is PAUSED
+   (listed under WAITING ON THE HUMAN — they stopped it, they say when it goes on) or
+   ABANDONED (a NEXT ACTION — its session died mid-work) is where this session most
+   likely continues. When the human's request is to continue, or names nothing else,
+   resume it (phase 3, *Taking the lock*) before anything new.
 7. **Postponed** — when taking stock, read each `postponed/*.md` header: trigger met →
    surface it; obsolete → recommend deletion; otherwise say it is parked.
 
@@ -212,8 +228,8 @@ novadev file-todo file "$payload"      # { "parts": [ { slug, title, request, co
 ```
 
    It reuses the batch a conversation opened earlier while nobody has started work in
-   it, and never touches a human-authored batch. `novadev new <slug>` is still the way
-   to open a batch you are about to fill yourself.
+   it — no record in it, and no lock on it — and never touches a human-authored batch.
+   `novadev new <slug>` is still the way to open a batch you are about to fill yourself.
 3. **What goes in the brief.** `request` is THEIR words — verbatim where short, tightly
    faithful where long. `context` is what you know that their words do not say:
    constraints, clarifications and decisions stated in chat. The command renders:
@@ -280,6 +296,47 @@ verdict, with the searches you actually ran as evidence:
 
 Do it by the project's own standards (`wiki/conventions.md`). Read the whole brief
 first, screenshots included.
+
+**Taking the lock.** Before the first change to the batch, take its lock — it is how
+`novadev status` answers "is a work cycle on?", and how a session that dies mid-work is
+picked up where it stopped instead of rediscovered:
+
+```sh
+novadev work start 2026-10-24_1 --agent claude-code/claude-opus-5-5   # your actor, as in `by`
+```
+
+It writes `todos/<batch>/working.md` and answers in JSON: the batch's todos with their
+states and — when the lock already existed — the last waypoint, so you know where the
+previous session got to. One lock per batch you work; a chat-initiated todo is filed
+first (phase 1), then its batch is locked.
+
+- **No lock, or a paused or abandoned one** (its process is gone, or no waypoint for two
+  hours) → you have it. A paused or abandoned lock is RESUMED: read `working.md` from the
+  top — the PAUSED section, or the last waypoint, says what landed, exactly where it
+  stopped, what comes next and how to get back in. Follow its *Next* list rather than
+  re-deriving the plan, compare its *Tree at the pause* with `git status` now, and tell
+  the human what you are resuming.
+- **Held by a live session** → the command refuses and says who. Two sessions on one
+  batch write over each other's work. If the human says that session is gone, pass
+  `--take`; never take a live lock on your own judgement.
+- **A finished batch** (`completed.md`) → refused: a new request gets a new batch.
+
+**Writing waypoints.** Whenever the work moves — each todo you pick up, each phase you
+enter, each commit, each decision, and before anything long — write a waypoint, so the
+lock always says at least which todo the work is on:
+
+```sh
+payload=$(mktemp -t novadev-waypoint.XXXXXX.json)   # or your session's own scratch dir
+cat > "$payload" <<'JSON'
+{ "todo": "02-dark-mode", "phase": 3,
+  "note": "01-fix-login landed (ai_completed, commit abc1234). Starting dark mode: tokens in src/theme.ts first, then the toggle." }
+JSON
+novadev work waypoint 2026-10-24_1 "$payload"
+```
+
+A waypoint is a few lines: what is done, what is next. It is also the heartbeat
+`novadev status` reads — a lock with no waypoint for two hours reads as abandoned. The
+trail stays in the file, newest first, until the round is over (phase 10).
 
 ## 4 · RECORD — as the work concludes, not later
 
@@ -703,6 +760,16 @@ not settle means something needs a decision, not another pass. And an item on th
 is never authority on its own — if an action would need the human's go-ahead anywhere
 else in this playbook, it still needs it when `novadev sync` suggests it.
 
+**Release the lock, or pause.** Once the knowledge is recorded and sync is clean, the
+round on the batch is over: `novadev work stop <batch>` removes `working.md`, and the
+next `novadev sync` marks the batch complete once every todo is recorded. Do it before
+the commit, so the lock leaves in the same commit that closes the round. When work
+REMAINS — a todo half done, a record unwritten, the human said "that is enough for
+today" — never stop: pause, with `/novadev-pause`, which writes exactly where things
+stopped. **Never end a session on a locked batch without one of the two.** A lock nobody
+holds is reported as abandoned and resumed from its last waypoint, which is only as good
+as what you wrote.
+
 Then commit `.novadev/` alongside the code, put the hash(es) in the record's
 `**Commits:**` line, and `novadev sync` once more so `work.md` picks them up. That run
 also sees which hubs your commits changed: a record without its `## Placement` section is
@@ -869,6 +936,9 @@ linked by path — they move into the archive — only cited by stable id.
 
 ## On demand (when the human asks — no command to remember)
 
+- **"pause" / "stop here" / "let's continue tomorrow"** → `/novadev-pause`: record the
+  work that landed, then write the pause into the batch's lock. The next `/novadev-work`
+  resumes from it (phase 3, *Taking the lock*).
 - **"find tech debt"** → sweep the code (TODO/FIXME/HACK, dead code, duplication,
   suppressed warnings, skipped tests, deprecated APIs, convention violations), the
   records (mentions of "follow-up", "workaround", "known limitation"), postponed items

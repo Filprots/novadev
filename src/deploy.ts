@@ -262,10 +262,17 @@ a \`totest/\` task → review their results when they land → update the featur
 memories → wiki, recording every knowledge change with \`novadev knowledge log\` → close out
 with \`novadev sync\`.
 
-Three companion playbooks sit beside it for the human's own entry points:
+Four companion playbooks sit beside it:
 \`novadev-file-a-todo.md\` (turn a chat request into a todo folder),
-\`novadev-what-to-test.md\` (walk the testing queue with them) and
-\`novadev-test-review.md\` (write up testing they already did).
+\`novadev-what-to-test.md\` (walk the testing queue with them),
+\`novadev-test-review.md\` (write up testing they already did) and
+\`novadev-pause.md\` (stop the loop where it is, so the next session resumes from there).
+
+A batch you work is LOCKED while you work it: \`novadev work start <batch>\` takes its
+lock (\`todos/<batch>/working.md\`), \`novadev work waypoint\` records where you are, and the
+round ends with \`novadev work stop\` — or with \`/novadev-pause\` when work remains, which
+writes exactly where things stopped. A paused or abandoned batch is where the next
+session starts: \`novadev sync\` lists it.
 
 The human writes todo briefs; you do the bookkeeping — but keep them informed and ask
 when a decision is theirs. A chat request to implement/fix/change anything no open todo
@@ -297,11 +304,17 @@ features — as one Open Knowledge Format bundle in \`${ROOT_DIR_NAME}/knowledge
 - **Knowledge is recorded, not just written.** Every change to a wiki page, a memory or
   a feature gets its stamp and its log entry from \`novadev knowledge log\` — who changed
   it, when, and why — so the bundle stays trustworthy for the next agent and the human.
-- **Three companion playbooks** cover the human's own entry points, and each is a
-  slash command of the same name:
-  \`/novadev-file-a-todo\` (turn what they just said into a todo folder, screenshots
+- **Four companion playbooks** sit beside it, and each is a slash command of the same
+  name: \`/novadev-file-a-todo\` (turn what they just said into a todo folder, screenshots
   included), \`/novadev-what-to-test\` (show the testing queue and walk one scenario
-  with them), \`/novadev-test-review\` (write up a round of testing they already did).
+  with them), \`/novadev-test-review\` (write up a round of testing they already did),
+  \`/novadev-pause\` (stop the loop where it is, writing exactly where things stopped).
+- **A batch in work is locked.** \`novadev work start <batch>\` takes the lock
+  (\`todos/<batch>/working.md\`) before the first change, \`novadev work waypoint\` records
+  where the work is as it moves, and a round ends with \`novadev work stop\` — or with
+  \`/novadev-pause\` when work remains. Never end a session on a locked batch without one
+  of the two. A paused or abandoned batch is where the next session starts: \`novadev sync\`
+  and \`novadev status\` list it, and the lock's top section says where to resume.
 - **The human writes todo briefs; you do everything else.** Never leave the human to
   remember a novadev command, an archive step, or which check to run. That is about
   CHORES: still tell them what you did and what you are about to do, and still ask when

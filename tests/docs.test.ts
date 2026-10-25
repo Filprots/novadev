@@ -351,7 +351,7 @@ describe('the knowledge bundle in the docs', () => {
   });
 
   test('the companion playbooks keep their hands off the bundle', () => {
-    for (const file of ['novadev-file-a-todo.md', 'novadev-what-to-test.md', 'novadev-test-review.md']) {
+    for (const file of ['novadev-file-a-todo.md', 'novadev-what-to-test.md', 'novadev-test-review.md', 'novadev-pause.md']) {
       expect(readFileSync(join(REPO, 'templates/skills', file), 'utf8')).toContain('Never edit `.novadev/knowledge/`');
     }
     expect(readFileSync(join(REPO, 'templates/skills/novadev-file-a-todo.md'), 'utf8')).toContain('**A standing rule is knowledge, not only a todo.**');
