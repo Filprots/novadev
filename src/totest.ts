@@ -34,6 +34,14 @@ export function totest(args: string[]): void {
 
   const tasks = listTestTasks(nd);
   const rounds = listTestRounds(nd);
+  if (opts.json) {
+    // The queue as data (a chat bot answering "what is waiting for me to test?"); the plan's scenarios: `test-result tasks`.
+    console.log(JSON.stringify({
+      tasks: tasks.map((t) => ({ id: t.id, features: t.featureIds, status: t.status, scenarios: t.scenarios, revision: t.revision || 1, lastTested: t.lastTested || null, readyForReview: t.hasResults, results: t.results, todos: t.todoRefs, scope: (t.fm['scope'] ?? '').trim() })),
+      ...(opts.all ? { rounds: rounds.map((r) => ({ task: r.taskId, round: r.round, verdict: r.verdict || null, year: r.year })) } : {}),
+    }, null, 2));
+    return;
+  }
   if (tasks.length === 0) {
     console.log('totest — nothing waiting on you. ✓');
     if (opts.all && rounds.length > 0) printRounds(rounds);
@@ -92,6 +100,7 @@ type Options = {
   new?: string;
   round?: string;
   all?: boolean;
+  json?: boolean;
   todos?: string;
   feature?: string;
   scope?: string;
@@ -115,6 +124,9 @@ function parseArgs(args: string[]): Options {
         break;
       case '--all':
         opts.all = true;
+        break;
+      case '--json':
+        opts.json = true;
         break;
       case '--todo':
       case '--todos':

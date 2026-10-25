@@ -43,6 +43,8 @@ novadev new fix-login add-dark-mode   # scaffold todos/2026-08-16_1/{01-fix-logi
 novadev sync                          # the close-out: measure (if set), derive, archive, validate, list what's left
 novadev totest                        # what needs YOUR hands-on testing
 novadev status                        # is a work cycle on? then open todos + record states, postponed, health
+novadev status --json                 # the same as data (a tool, a chat bot); totest --json too
+novadev todo list --state open        # open todos with their titles; `todo show <ref>` gives one as JSON
 novadev work start 2026-08-16_1       # take a batch's lock (agents do this; see Work in progress)
 novadev features --touching src/auth  # which features already own this code (conflict pre-flight)
 novadev features --hubs               # which features lean on each hub (see Placement)
@@ -97,6 +99,16 @@ playbook, `/novadev-pause`, and the lock of a batch in work, `todos/<batch>/work
 which `novadev deploy` teaches the agents (see *Work in progress* below). A repo with no
 lock behaves exactly as before; the one visible change is that `novadev status` starts
 with whether a work cycle is on.
+
+0.15.0 changes no layout: `migrate-repo` only stamps the version. It is for tools that run
+novadev for a person who is away from the repository (a chat bot on the same computer):
+`novadev status --json` and `novadev totest --json` give the stock-take and the test queue
+as data, and `novadev todo` works one todo at a time — `list`, `show <ref>` (the brief and
+its records), `addendum <ref> payload.json` (a dated *Chat addendum* to an open todo's
+brief, the playbook's intake rule) and `cancel <ref> payload.json` (an `ai_failed.md` of the
+*cancelled* kind). A ref is `2026-10-16_2/02-…`, `2026-10-16_2/02`, or a word only one open
+todo has. Both writes refuse a todo with a terminal record or a test gate (that is a new
+todo) and a batch an agent holds right now.
 
 ## The system
 
@@ -821,6 +833,9 @@ novadev test-result write payload.json  # one scenario's verdict → scenario-<N
 novadev test-result review payload.json # a whole round → review.md                   (APPENDS)
 
 novadev work pause <batch> payload.json # the pause record, newest entry of the batch's lock
+
+novadev todo addendum <ref> payload.json # {text}: a Chat addendum to an open todo's brief
+novadev todo cancel <ref> payload.json   # {reason}: the person decided against it → ai_failed.md (cancelled)
 ```
 
 All take a JSON **file**, because the content is a person's own multi-line words and

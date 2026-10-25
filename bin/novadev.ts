@@ -17,8 +17,12 @@ usage:
   novadev deploy            create/upgrade .novadev/ + the playbook + agent adapters
                             (on an older layout, run migrate-repo first)
   novadev new [slug…]       scaffold today's next batch (todos/YYYY-MM-DD_N/), optional todo folders
-  novadev status            is a work cycle on? the batches in work (who, since when, where, paused
-                            or abandoned), then open todos + record states, postponed, knowledge
+  novadev status [--json]   is a work cycle on? the batches in work (who, since when, where, paused
+                            or abandoned), then open todos + record states, postponed, knowledge;
+                            --json: the same as data (for a tool or a chat bot)
+  novadev todo …            one todo, away from the repo: "list [--state s,…] [--json]", "show <ref>" (JSON:
+                            brief + records), "addendum <ref> <payload.json>" ({text}: a Chat addendum to an
+                            open todo's brief), "cancel <ref> <payload.json>" ({reason}: a *cancelled* ai_failed)
   novadev work …            the lock of a batch in work (todos/<batch>/working.md): "start <batch>"
                             takes or resumes it, "waypoint <batch> <payload.json>" records where the
                             work is, "pause <batch> <payload.json>" writes exactly where it stopped
@@ -34,8 +38,8 @@ usage:
                             --new <slug> scaffolds an entry
   novadev links [--fix]     validate the link graph (records ↔ features ↔ commits);
                             --fix regenerates each feature's derived work.md and tests.md
-  novadev totest [--all]    what still needs YOUR hands-on testing, and what is ready
-                            for review; --new <slug> scaffolds a test task
+  novadev totest [--all] [--json]   what still needs YOUR hands-on testing, and what is ready
+                            for review (--json: as data); --new <slug> scaffolds a test task
   novadev file-todo …       the command half of /novadev-file-a-todo: "plan" says which batch
                             a chat request lands in, "file <payload.json>" writes the folders
   novadev test-result …     the command half of /novadev-what-to-test and /novadev-test-review:
@@ -60,7 +64,7 @@ switch (command) {
   }
   case 'status': {
     const { status } = await import('../src/status.ts');
-    status();
+    status(args);
     break;
   }
   case 'work': {
@@ -96,6 +100,11 @@ switch (command) {
   case 'file-todo': {
     const { fileTodo } = await import('../src/file-todo.ts');
     fileTodo(args);
+    break;
+  }
+  case 'todo': {
+    const { todoCommand } = await import('../src/todo.ts');
+    todoCommand(args);
     break;
   }
   case 'test-result': {

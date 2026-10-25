@@ -17,7 +17,8 @@ import {
   todoState,
 } from './lib.ts';
 import { metricsStatusLine } from './metrics-audit.ts';
-import { auditWork, readWorkLock } from './work.ts';
+import { listTodos } from './todo.ts';
+import { auditWork, latestLine, listWorkLocks, lockLiveness, phaseLabel, readWorkLock } from './work.ts';
 
 const STATE_MARK = {
   confirmed: '✓✓',
@@ -28,9 +29,58 @@ const STATE_MARK = {
   open: '·',
 } as const;
 
-export function status(): void {
+/**
+ * `novadev status --json`: the same stock-take as data, for a tool that answers a person away from the repository
+ * (a chat bot): the batches in work with their holder and newest waypoint, every open todo with its title and state,
+ * the human-test queue, postponed items, and the counts.
+ */
+export function statusData(nd: string, now: Date = new Date()): Record<string, unknown> {
+  const inWork = listWorkLocks(nd).map((read) => {
+    if (read.state === 'invalid') return { batch: read.batch, state: 'unreadable', error: read.error };
+    const lock = read.lock;
+    const live = lockLiveness(lock, now);
+    return {
+      batch: read.batch, state: lock.state, live: live.live, liveness: live.reason, minutesSinceUpdate: live.ageMinutes,
+      agent: lock.agent, host: lock.host, started: lock.started, updated: lock.updated, resumed: lock.resumed,
+      todo: lock.todo, phase: lock.phase, phaseLabel: lock.phase === null ? null : phaseLabel(lock.phase),
+      latest: latestLine(lock), entries: lock.entries.length,
+    };
+  });
+  const todos = listTodos(nd);
+  const batches = listDirs(join(nd, 'todos')).map((batch) => {
+    const lock = readWorkLock(nd, batch);
+    return {
+      batch,
+      readyToArchive: batchIsDone(join(nd, 'todos', batch)),
+      inWork: lock === null ? null : lock.state === 'invalid' ? 'unreadable' : lock.lock.state,
+      todos: todos.filter((t) => t.batch === batch).map(({ todo, title, state }) => ({ todo, title, state })),
+    };
+  });
+  const counts: Record<string, number> = {};
+  for (const t of todos) counts[t.state] = (counts[t.state] ?? 0) + 1;
+  const tasks = listTestTasks(nd).map((t) => ({ id: t.id, features: t.featureIds, scenarios: t.scenarios, revision: t.revision || 1, lastTested: t.lastTested || null, readyForReview: t.hasResults, results: t.results, todos: t.todoRefs }));
+  const postponed = listFiles(join(nd, 'postponed')).filter((f) => f.endsWith('.md') && f !== 'README.md').map((file) => {
+    const fm = readFrontmatter(join(nd, 'postponed', file)) ?? {};
+    return { file, title: fm.title ?? null, doWhen: fm['do-when'] ?? null, discardIf: fm['discard-if'] ?? null };
+  });
+  const features: Record<string, number> = {};
+  for (const f of listFeatures(nd)) features[f.status] = (features[f.status] ?? 0) + 1;
+  let archived = 0;
+  for (const year of listDirs(join(nd, 'archive'))) archived += listDirs(join(nd, 'archive', year)).length;
+  return {
+    inWork, batches, todoCounts: counts, totest: tasks, postponed,
+    sparks: listFiles(join(nd, 'sparks')).filter((f) => f !== 'README.md').length,
+    features, archivedBatches: archived,
+  };
+}
+
+export function status(args: string[] = []): void {
   const root = requireProjectRoot();
   const nd = novadevDir(root);
+  if (args.includes('--json')) {
+    console.log(JSON.stringify(statusData(nd), null, 2));
+    return;
+  }
 
   // Is a work cycle on? The batches in work come first: who holds each lock, whether they are
   // still there, and where the work is — the one thing a person opening the project wants to know.
