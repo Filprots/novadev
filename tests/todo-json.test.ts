@@ -1,6 +1,6 @@
 // `novadev todo` and the --json views of status and totest: the data a tool away from the repository (a chat bot) reads.
 import { describe, expect, test } from 'bun:test';
-import { addAddendum, briefTitle, cancelTodo, listTodos, resolveTodo, showTodo } from '../src/todo.ts';
+import { addAddendum, briefParts, briefTitle, cancelTodo, editTodo, listTodos, resolveTodo, showTodo } from '../src/todo.ts';
 import { statusData } from '../src/status.ts';
 import { exists, project, read, run, todo, write } from './helpers.ts';
 
@@ -58,6 +58,62 @@ describe('novadev todo', () => {
     expect(() => addAddendum(nd, '01-dark', { text: ' ' }, now)).toThrow(/needs a 'text'/);
     write(root, '.novadev/todos/2026-10-01_1/working.md', lockText(now.toISOString()));
     expect(() => addAddendum(nd, '01-dark', { text: 'y' }, now)).toThrow(/in work right now/);
+  });
+
+  test('addendum with attachments: a screenshot sent later is copied into the todo folder and named in the dated line; text is optional then', () => {
+    const root = project();
+    todo(root, '2026-10-01_1/01-dark-mode', { 'prompt.md': BRIEF('Dark mode') });
+    write(root, 'shots/screen.png', 'PNG');
+    write(root, 'shots/prompt.md', 'a note that must not become the brief');
+    const nd = `${root}/.novadev`;
+    const now = new Date('2026-10-25T12:00:00Z');
+    const r = addAddendum(nd, '01-dark', { attachments: [`${root}/shots/screen.png`], by: 'from the chat bot' }, now);
+    expect(r).toMatchObject({ attached: ['screen.png'] });
+    expect(read(root, '.novadev/todos/2026-10-01_1/01-dark-mode/screen.png')).toBe('PNG');
+    expect(read(root, '.novadev/todos/2026-10-01_1/01-dark-mode/prompt.md')).toEndWith('More.\n\n**Chat addendum, 2026-10-25 (from the chat bot):** Attached: `screen.png`\n');
+    // the same name again is numbered; a text file goes under attachments/; a path that is gone is reported, not fatal
+    const r2 = addAddendum(nd, '01-dark', { text: 'The menu too.', attachments: [`${root}/shots/screen.png`, `${root}/shots/prompt.md`, `${root}/gone.png`] }, now);
+    expect(r2).toMatchObject({ attached: ['screen-2.png', 'attachments/prompt.md'], missing: [`${root}/gone.png`] });
+    expect(read(root, '.novadev/todos/2026-10-01_1/01-dark-mode/prompt.md')).toEndWith('**Chat addendum, 2026-10-25:** The menu too. Attached: `screen-2.png`, `attachments/prompt.md`\n');
+    expect(() => addAddendum(nd, '01-dark', { attachments: [`${root}/gone.png`] }, now)).toThrow(/None of the attachments exists/);
+    expect(() => addAddendum(nd, '01-dark', { attachments: 'x' }, now)).toThrow(/list of file paths/);
+  });
+
+  test('edit: title, request or context rewritten as asked; attachments and addenda kept; the old brief kept and the change noted; refused where an addendum is', () => {
+    const root = project();
+    todo(root, '2026-10-01_1/01-dark-mode', { 'prompt.md': `${BRIEF('Dark mode')}\n## Attached\n\n- \`shot.png\`\n\n**Chat addendum, 2026-10-02:** Also the minimap.\n` });
+    todo(root, '2026-10-01_1/02-export', { 'prompt.md': BRIEF('Export'), 'ai_completed.md': '# done\n' });
+    const nd = `${root}/.novadev`;
+    const now = new Date('2026-10-25T12:00:00Z');
+    const r = editTodo(nd, '01-dark', { title: 'Dark mode for the editor and the minimap', request: 'Dark mode everywhere.', reason: 'the person asked', by: 'from the chat bot' }, now);
+    expect(r).toMatchObject({ changed: ['title', 'request'], previous: 'todos/2026-10-01_1/01-dark-mode/.brief-history/2026-10-25T12-00-00-000Z.md' });
+    const brief = read(root, '.novadev/todos/2026-10-01_1/01-dark-mode/prompt.md');
+    expect(brief).toBe(
+      '# prompt — x\n\n**Source:** chat-initiated — 2026-10-01\n\n## Dark mode for the editor and the minimap\n\nDark mode everywhere.\n\n' +
+        '## Context from the conversation\n\nMore.\n\n## Attached\n\n- `shot.png`\n\n**Chat addendum, 2026-10-02:** Also the minimap.\n\n' +
+        '**Edited, 2026-10-25 (from the chat bot):** title, request changed — the person asked (before: `.brief-history/2026-10-25T12-00-00-000Z.md`)\n',
+    );
+    expect(read(root, '.novadev/todos/2026-10-01_1/01-dark-mode/.brief-history/2026-10-25T12-00-00-000Z.md')).toContain('## Dark mode\nThe words.');
+    expect(listTodos(nd)[0]!.title).toBe('Dark mode for the editor and the minimap');
+    expect(showTodo(nd, '01-dark').files).not.toContain('.brief-history');
+    // nothing different: nothing written; a finished todo, an empty request, nothing to change: refused
+    expect(editTodo(nd, '01-dark', { context: 'More.' }, now)).toMatchObject({ written: null, changed: [] });
+    expect(() => editTodo(nd, '02-export', { title: 'x' }, now)).toThrow(/terminal record/);
+    expect(() => editTodo(nd, '01-dark', { request: ' ' }, now)).toThrow(/without one/);
+    expect(() => editTodo(nd, '01-dark', {}, now)).toThrow(/needs a 'title', a 'request' or a 'context'/);
+    // the CLI, and a later edit of the context only
+    write(root, 'edit.json', JSON.stringify({ context: 'Seen on a 4K screen.' }));
+    const cli = run(root, 'todo', 'edit', '2026-10-01_1/01', 'edit.json');
+    expect(cli.code).toBe(0);
+    expect(JSON.parse(cli.stdout)).toMatchObject({ changed: ['context'] });
+    expect(read(root, '.novadev/todos/2026-10-01_1/01-dark-mode/prompt.md')).toContain('## Context from the conversation\n\nSeen on a 4K screen.\n');
+  });
+
+  test('briefParts: a filed brief in its parts; a free brief is all request under its first line', () => {
+    expect(briefParts(`${BRIEF('Dark mode')}\n**Chat addendum, 2026-10-02:** More words\non two lines.\n`, 'x')).toEqual({
+      head: '# prompt — x\n\n**Source:** chat-initiated — 2026-10-01', title: 'Dark mode', request: 'The words.', context: 'More.', attached: '', notes: ['**Chat addendum, 2026-10-02:** More words\non two lines.'],
+    });
+    expect(briefParts('Fix the crash on save\n\nIt crashes when the disk is full.\n', 'fallback')).toMatchObject({ head: '', title: 'Fix the crash on save', request: 'Fix the crash on save\n\nIt crashes when the disk is full.' });
   });
 
   test('cancel: an ai_failed.md of the cancelled kind, through the CLI with a payload file', () => {

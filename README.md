@@ -105,9 +105,13 @@ novadev for a person who is away from the repository (a chat bot on the same com
 `novadev status --json` and `novadev totest --json` give the stock-take and the test queue
 as data, and `novadev todo` works one todo at a time — `list`, `show <ref>` (the brief and
 its records), `addendum <ref> payload.json` (a dated *Chat addendum* to an open todo's
-brief, the playbook's intake rule) and `cancel <ref> payload.json` (an `ai_failed.md` of the
-*cancelled* kind). A ref is `2026-10-16_2/02-…`, `2026-10-16_2/02`, or a word only one open
-todo has. Both writes refuse a todo with a terminal record or a test gate (that is a new
+brief, the playbook's intake rule; with `attachments`, files the person sends later — a
+screenshot for a todo filed without one — are copied into the todo folder as filing copies
+them, and named in the addendum), `edit <ref> payload.json` (the brief's title, request or
+context changed as the person asked; the previous brief kept in the todo's `.brief-history/`
+and the change noted at the end, dated) and `cancel <ref> payload.json` (an `ai_failed.md` of
+the *cancelled* kind). A ref is `2026-10-16_2/02-…`, `2026-10-16_2/02`, or a word only one open
+todo has. The writes refuse a todo with a terminal record or a test gate (that is a new
 todo) and a batch an agent holds right now.
 
 ## The system
@@ -834,7 +838,8 @@ novadev test-result review payload.json # a whole round → review.md           
 
 novadev work pause <batch> payload.json # the pause record, newest entry of the batch's lock
 
-novadev todo addendum <ref> payload.json # {text}: a Chat addendum to an open todo's brief
+novadev todo addendum <ref> payload.json # {text, attachments}: a Chat addendum to an open todo's brief (files copied in)
+novadev todo edit <ref> payload.json     # {title, request, context, reason}: the brief changed, the old one in .brief-history/
 novadev todo cancel <ref> payload.json   # {reason}: the person decided against it → ai_failed.md (cancelled)
 ```
 

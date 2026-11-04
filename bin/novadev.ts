@@ -21,8 +21,10 @@ usage:
                             or abandoned), then open todos + record states, postponed, knowledge;
                             --json: the same as data (for a tool or a chat bot)
   novadev todo …            one todo, away from the repo: "list [--state s,…] [--json]", "show <ref>" (JSON:
-                            brief + records), "addendum <ref> <payload.json>" ({text}: a Chat addendum to an
-                            open todo's brief), "cancel <ref> <payload.json>" ({reason}: a *cancelled* ai_failed)
+                            brief + records), "addendum <ref> <payload.json>" ({text, attachments}: a Chat
+                            addendum to an open todo's brief, files copied into its folder), "edit <ref>
+                            <payload.json>" ({title, request, context, reason}: the brief changed, the old one
+                            kept in .brief-history/), "cancel <ref> <payload.json>" ({reason}: a *cancelled* ai_failed)
   novadev work …            the lock of a batch in work (todos/<batch>/working.md): "start <batch>"
                             takes or resumes it, "waypoint <batch> <payload.json>" records where the
                             work is, "pause <batch> <payload.json>" writes exactly where it stopped

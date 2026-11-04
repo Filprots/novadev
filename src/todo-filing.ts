@@ -109,7 +109,7 @@ export function fileTodos(nd: string, parts: readonly TodoPart[]): readonly File
  * - everything else (images, archives, a project snapshot) sits beside the brief, the way the
  *   human's own todo folders look, with a reserved name defensively prefixed anyway.
  */
-function copyAttachments(dir: string, paths: readonly string[]): readonly string[] {
+export function copyAttachments(dir: string, paths: readonly string[]): readonly string[] {
   const written: string[] = [];
   for (const from of paths) {
     if (!existsSync(from)) continue; // a path that did not travel is not fatal; the caller reports it

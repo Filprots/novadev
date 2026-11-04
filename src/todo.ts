@@ -2,14 +2,17 @@
 //
 //   novadev todo list [--state open,progress,…] [--json]   the open todos with their titles and states
 //   novadev todo show <ref>                                  one todo as JSON: its brief and its records
-//   novadev todo addendum <ref> <payload.json>               {text}: a "Chat addendum" appended to the brief
+//   novadev todo addendum <ref> <payload.json>               {text, attachments}: a "Chat addendum" appended to the brief;
+//                                                            attachments (screenshots) are copied into the todo folder
+//   novadev todo edit <ref> <payload.json>                   {title, request, context, reason}: the brief rewritten where
+//                                                            asked, the previous one kept in .brief-history/
 //   novadev todo cancel <ref> <payload.json>                 {reason}: an ai_failed.md that says *cancelled*
 //
 // A <ref> is how people name a todo: `2026-10-16_2/02-router-…`, `2026-10-16_2/02`, or a word of its slug that only one
 // open todo has. The two writes follow the playbook's intake rules: a todo with a terminal record, or one waiting on a
 // human test, gets a NEW todo rather than an addendum; a batch an agent holds right now is not written behind its back.
 // Answers are JSON on stdout; errors are `{ "error": … }` with a non-zero exit (as `test-result` and `file-todo`).
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import {
   RECORD_COMPLETED,
@@ -25,6 +28,7 @@ import {
   todoState,
 } from './lib.ts';
 import { lockLiveness, readWorkLock } from './work.ts';
+import { copyAttachments } from './todo-filing.ts';
 
 const PROMPT = 'prompt.md';
 const RECORDS = [RECORD_NEEDSTEST, RECORD_CONFIRMED, RECORD_COMPLETED, RECORD_FAILED, RECORD_PROGRESS] as const;
@@ -33,7 +37,8 @@ const MAX_TEXT_BYTES = 20000;
 const USAGE =
   'usage: novadev todo list [--state open,progress,needstest,…] [--json]\n' +
   '       novadev todo show <ref>\n' +
-  '       novadev todo addendum <ref> <payload.json>   ({ "text": … })\n' +
+  '       novadev todo addendum <ref> <payload.json>   ({ "text": …, "attachments": [paths] })\n' +
+  '       novadev todo edit <ref> <payload.json>       ({ "title"?, "request"?, "context"?, "reason"? })\n' +
   '       novadev todo cancel <ref> <payload.json>     ({ "reason": … })';
 
 export type TodoItem = { ref: string; batch: string; todo: string; title: string; state: TodoState };
@@ -122,16 +127,118 @@ function body(text: unknown, key: string): string {
   return text.trim();
 }
 
-/** A "Chat addendum" — the playbook's way a later word from the person joins an open todo's brief. */
+const byOf = (payload: Record<string, unknown>) => (typeof payload['by'] === 'string' && payload['by'].trim() !== '' ? ` (${payload['by'].trim()})` : '');
+
+/** Paths from a payload's `attachments` (strings only). */
+function paths(value: unknown): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.some((v) => typeof v !== 'string')) throw new Error("'attachments' must be a list of file paths.");
+  return (value as string[]).map((v) => v.trim()).filter(Boolean);
+}
+
+/**
+ * A "Chat addendum" — the playbook's way a later word from the person joins an open todo's brief. Files the person sends
+ * later (a screenshot for a todo filed without one) come in the same way: copied into the todo folder as filing copies
+ * them, and named in the addendum line. Text, attachments or both.
+ */
 export function addAddendum(nd: string, ref: string, payload: Record<string, unknown>, now: Date = new Date()): Record<string, unknown> {
   const t = resolveTodo(nd, ref);
   writable(nd, t, 'an addendum', now);
-  const text = body(payload['text'], 'text');
-  const by = typeof payload['by'] === 'string' && payload['by'].trim() !== '' ? ` (${payload['by'].trim()})` : '';
-  const path = join(nd, 'todos', t.batch, t.todo, PROMPT);
+  const files = paths(payload['attachments']);
+  const text = files.length > 0 && (payload['text'] === undefined || (typeof payload['text'] === 'string' && payload['text'].trim() === '')) ? '' : body(payload['text'], 'text');
+  const dir = join(nd, 'todos', t.batch, t.todo);
+  const missing = files.filter((f) => !existsSync(f));
+  if (files.length > 0 && missing.length === files.length) throw new Error(`None of the attachments exists: ${missing.join(', ')}`);
+  const attached = copyAttachments(dir, files);
+  const path = join(dir, PROMPT);
   const before = existsSync(path) ? readFileSync(path, 'utf8').trimEnd() : `# prompt — ${t.todo}`;
-  writeFileSync(path, `${before}\n\n**Chat addendum, ${today(now)}${by}:** ${text}\n`);
-  return { ref: t.ref, written: `todos/${t.ref}/${PROMPT}` };
+  const note = [text, attached.length > 0 ? `Attached: ${attached.map((a) => `\`${a}\``).join(', ')}` : ''].filter(Boolean).join(' ');
+  writeFileSync(path, `${before}\n\n**Chat addendum, ${today(now)}${byOf(payload)}:** ${note}\n`);
+  return { ref: t.ref, written: `todos/${t.ref}/${PROMPT}`, ...(attached.length > 0 ? { attached } : {}), ...(missing.length > 0 ? { missing } : {}) };
+}
+
+/** A brief in its parts: the lines before the first section, the title and request, the context, the attached list, and the
+ *  dated notes after them (addenda, edits). A brief a person wrote freely is all request under its own first line. */
+export function briefParts(text: string, fallbackTitle: string): { head: string; title: string; request: string; context: string; attached: string; notes: string[] } {
+  const lines = text.replace(/\r\n/g, '\n').trimEnd().split('\n');
+  const notes: string[] = [];
+  // dated notes are paragraphs of their own at the end: take them off first
+  let body = lines.join('\n');
+  for (;;) {
+    const m = /\n\n(\*\*(?:Chat addendum|Edited),[^\n]*(?:\n(?!\n)[^\n]*)*)$/.exec(body);
+    if (!m) break;
+    notes.unshift(m[1]!);
+    body = body.slice(0, m.index);
+  }
+  const at = body.search(/^## /m);
+  if (at === -1) {
+    const head = /^# prompt\b.*$/m.exec(body)?.[0] ?? '';
+    const rest = body.replace(/^# prompt\b.*$/m, '').trim();
+    return { head, title: briefTitle(body) || fallbackTitle, request: rest, context: '', attached: '', notes };
+  }
+  const head = body.slice(0, at).trimEnd();
+  const sections = body.slice(at).split(/^(?=## )/m).map((s) => {
+    const [first, ...more] = s.split('\n');
+    return { name: first!.replace(/^##\s+/, '').trim(), text: more.join('\n').trim() };
+  });
+  const ctx = sections.find((s) => /^context from the conversation$/i.test(s.name));
+  const att = sections.find((s) => /^attached$/i.test(s.name));
+  const main = sections.filter((s) => s !== ctx && s !== att);
+  const [first, ...others] = main;
+  return {
+    head,
+    title: first?.name ?? fallbackTitle,
+    request: [first?.text ?? '', ...others.map((s) => `## ${s.name}\n\n${s.text}`)].filter(Boolean).join('\n\n'),
+    context: ctx?.text ?? '',
+    attached: att?.text ?? '',
+    notes,
+  };
+}
+
+/**
+ * Change an open todo's brief: its title, request or context, as the person asked (a chat bot acting for them). The previous
+ * brief is kept in `.brief-history/` and the change is noted at the end, dated, so the work agent sees what moved. Refused
+ * where the playbook refuses an addendum: a finished or test-waiting todo, a batch someone holds right now.
+ */
+export function editTodo(nd: string, ref: string, payload: Record<string, unknown>, now: Date = new Date()): Record<string, unknown> {
+  const t = resolveTodo(nd, ref);
+  writable(nd, t, 'an edit', now);
+  const want: Record<'title' | 'request' | 'context', string | undefined> = { title: undefined, request: undefined, context: undefined };
+  for (const key of ['title', 'request', 'context'] as const) {
+    const v = payload[key];
+    if (v === undefined) continue;
+    if (typeof v !== 'string') throw new Error(`'${key}' must be text.`);
+    if (key !== 'context' && v.trim() === '') throw new Error(`An empty '${key}' would leave the todo without one.`);
+    if (Buffer.byteLength(v, 'utf8') > MAX_TEXT_BYTES) throw new Error(`That ${key} is too large to record.`);
+    want[key] = v.trim();
+  }
+  if (want.title === undefined && want.request === undefined && want.context === undefined) throw new Error("The payload needs a 'title', a 'request' or a 'context'.");
+  const dir = join(nd, 'todos', t.batch, t.todo);
+  const path = join(dir, PROMPT);
+  const before = existsSync(path) ? readFileSync(path, 'utf8') : `# prompt — ${t.todo}\n`;
+  const p = briefParts(before, t.title || t.todo);
+  const changed = (['title', 'request', 'context'] as const).filter((k) => want[k] !== undefined && want[k] !== p[k]);
+  if (changed.length === 0) return { ref: t.ref, written: null, changed: [] };
+  const next = { ...p, ...Object.fromEntries(changed.map((k) => [k, want[k]!])) };
+  const history = join(dir, '.brief-history');
+  mkdirSync(history, { recursive: true });
+  const stamp = now.toISOString().replace(/[:.]/g, '-');
+  writeFileSync(join(history, `${stamp}.md`), before);
+  const reason = typeof payload['reason'] === 'string' && payload['reason'].trim() !== '' ? ` — ${payload['reason'].trim()}` : '';
+  const out = [
+    next.head || `# prompt — ${t.todo}`,
+    '',
+    `## ${next.title}`,
+    '',
+    next.request,
+    ...(next.context ? ['', '## Context from the conversation', '', next.context] : []),
+    ...(next.attached ? ['', '## Attached', '', next.attached] : []),
+    ...next.notes.flatMap((n) => ['', n]),
+    '',
+    `**Edited, ${today(now)}${byOf(payload)}:** ${changed.join(', ')} changed${reason} (before: \`.brief-history/${stamp}.md\`)`,
+  ];
+  writeFileSync(path, `${out.join('\n')}\n`);
+  return { ref: t.ref, written: `todos/${t.ref}/${PROMPT}`, changed, previous: `todos/${t.ref}/.brief-history/${stamp}.md` };
 }
 
 /** The person decided against it: an ai_failed.md of the *cancelled* kind, so the batch can close. */
@@ -178,6 +285,7 @@ export function todoCommand(args: string[]): void {
     if (ref === undefined) throw new Error(USAGE);
     if (command === 'show') return void console.log(JSON.stringify(showTodo(nd, ref), null, 2));
     if (command === 'addendum') return void console.log(JSON.stringify(addAddendum(nd, ref, readPayload(argument)), null, 2));
+    if (command === 'edit') return void console.log(JSON.stringify(editTodo(nd, ref, readPayload(argument)), null, 2));
     if (command === 'cancel') return void console.log(JSON.stringify(cancelTodo(nd, ref, readPayload(argument)), null, 2));
     throw new Error(USAGE);
   } catch (error) {
