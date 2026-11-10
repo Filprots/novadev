@@ -1,0 +1,16 @@
+{
+  "novadev": true,
+  "version": "0.15.0",
+  "deployedAt": "2026-11-10",
+  "metrics": null,
+  "debtBudget": null,
+  "hubs": null,
+  "placementSince": "2026-11-10",
+  "knowledge": {
+    "reviewDays": {
+      "wiki": 90,
+      "memories": 180,
+      "features": 365
+    }
+  }
+}

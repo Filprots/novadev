@@ -1,0 +1,26 @@
+# Knowledge log
+
+## 2026-11-10
+
+* **Initialization**: novadev 0.15.0 started this knowledge bundle — an Open Knowledge Format (OKF 0.2) bundle for the project's wiki, memories and features.
+* **Creation**: [Overview](wiki/overview.md) — The wiki's first build, from the code, the README, the tests and the git history (novadev deployed into its own repository on 2026-11-10). (claude-code/claude-opus-5-5)
+* **Creation**: [Stack](wiki/stack.md) — The wiki's first build, from the code, the README, the tests and the git history (novadev deployed into its own repository on 2026-11-10). (claude-code/claude-opus-5-5)
+* **Creation**: [Architecture](wiki/architecture.md) — The wiki's first build, from the code, the README, the tests and the git history (novadev deployed into its own repository on 2026-11-10). (claude-code/claude-opus-5-5)
+* **Creation**: [Conventions](wiki/conventions.md) — The wiki's first build, from the code, the README, the tests and the git history (novadev deployed into its own repository on 2026-11-10). (claude-code/claude-opus-5-5)
+* **Creation**: [Workflows](wiki/workflows.md) — The wiki's first build, from the code, the README, the tests and the git history (novadev deployed into its own repository on 2026-11-10). (claude-code/claude-opus-5-5)
+* **Creation**: [Glossary](wiki/glossary.md) — The wiki's first build, from the code, the README, the tests and the git history (novadev deployed into its own repository on 2026-11-10). (claude-code/claude-opus-5-5)
+* **Creation**: [Deploy: the novadev tree, the playbooks and the agent adapters](features/FEAT-0001-deploy-and-adapters/feature.md) — Registry built from the code and the release history: an existing, tested capability. (claude-code/claude-opus-5-5)
+* **Creation**: [Batches and the stock-take: novadev new and novadev status](features/FEAT-0002-batches-and-status/feature.md) — Registry built from the code and the release history: an existing, tested capability. (claude-code/claude-opus-5-5)
+* **Creation**: [Doctor: a read-only structure check](features/FEAT-0003-doctor/feature.md) — Registry built from the code and the release history: an existing, tested capability. (claude-code/claude-opus-5-5)
+* **Creation**: [Archive with a grace period](features/FEAT-0004-archive-grace-period/feature.md) — Registry built from the code and the release history: an existing, tested capability. (claude-code/claude-opus-5-5)
+* **Creation**: [Features registry and the link graph](features/FEAT-0005-features-and-links/feature.md) — Registry built from the code and the release history: an existing, tested capability. (claude-code/claude-opus-5-5)
+* **Creation**: [The human-testing queue (totest)](features/FEAT-0006-totest-queue/feature.md) — Registry built from the code and the release history: an existing, tested capability. (claude-code/claude-opus-5-5)
+* **Creation**: [migrate-repo: version-aware layout migrations](features/FEAT-0007-migrate-repo/feature.md) — Registry built from the code and the release history: an existing, tested capability. (claude-code/claude-opus-5-5)
+* **Creation**: [sync: the close-out, and its --check gate](features/FEAT-0008-sync-close-out/feature.md) — Registry built from the code and the release history: an existing, tested capability. (claude-code/claude-opus-5-5)
+* **Creation**: [Filing a todo from chat](features/FEAT-0009-todo-filing/feature.md) — Registry built from the code and the release history: an existing, tested capability. (claude-code/claude-opus-5-5)
+* **Creation**: [Recording a person's test results](features/FEAT-0010-test-result-recording/feature.md) — Registry built from the code and the release history: an existing, tested capability. (claude-code/claude-opus-5-5)
+* **Creation**: [Metrics hook, debt budget and the wiki budgets block](features/FEAT-0011-metrics-debt-budget/feature.md) — Registry built from the code and the release history: an existing, tested capability. (claude-code/claude-opus-5-5)
+* **Creation**: [Placement check and hubs](features/FEAT-0012-placement-and-hubs/feature.md) — Registry built from the code and the release history: an existing, tested capability. (claude-code/claude-opus-5-5)
+* **Creation**: [The knowledge bundle (OKF) and the knowledge log](features/FEAT-0013-knowledge-bundle/feature.md) — Registry built from the code and the release history: an existing, tested capability. (claude-code/claude-opus-5-5)
+* **Creation**: [The work lock: waypoints, pause and resume](features/FEAT-0014-work-lock/feature.md) — Registry built from the code and the release history: an existing, tested capability. (claude-code/claude-opus-5-5)
+* **Creation**: [novadev todo: one todo at a time, away from the repository](features/FEAT-0015-todo-command/feature.md) — Registry built from the code and the release history: an existing, tested capability. (claude-code/claude-opus-5-5)
