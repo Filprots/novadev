@@ -427,6 +427,39 @@ which files its commit changed, so a hub inside it (`"hubs": ["repos/irrippr/src
 works like any other. Two sub-repos with one name are a problem: a record could not tell them
 apart.
 
+### Locks every worktree sees, and claims: one owner per file
+
+A batch's lock, `todos/<batch>/working.md`, is a file on the branch it was taken on, so a
+worktree on another branch cannot see it. Every `novadev work` command therefore also writes
+a small entry into the folder all worktrees of a repository share:
+`<git common dir>/novadev/locks/<batch>.json`. The entry records where the batch is in work
+(the worktree and its branch), who holds it, its state, its last waypoint and its claims.
+That folder is inside `.git`, so the entry is never committed. `working.md` stays exactly as
+it was: its trail and its pause record travel with the branch.
+
+- `novadev work start` refuses a batch that is in work in another worktree. It says where,
+  and that you resume a paused batch in the worktree where its pause record is; `--take`
+  moves the batch here anyway. A lock elsewhere whose session is gone is taken over, as it
+  would be here, and the answer says where it came from. An entry whose worktree no longer
+  exists is dropped.
+- `novadev status` lists the repository's worktrees (when there is more than one) with each
+  one's branch and the batches in work there; `status --json` has them as `worktrees`.
+  `novadev sync` prints batches in work elsewhere in its *in work* block (`◦ …`) as
+  information only.
+- A batch in work elsewhere is not complete here: it is not archived, `file-todo` does not
+  file into it, and `todo addendum/edit/cancel` wait while a live session holds it.
+
+**Claims.** A batch in work claims the paths it will change: the `touches:` of every feature
+a `**Feature:**` line in its files names, plus the paths given with
+`novadev work start <batch> --claim <path>` (repeatable) or later with
+`novadev work claim <batch> <path>…`. A claim may name a sub-repo's path as
+`irrippr:ps/layouting/`. `work start` and `work claim` refuse a claim that overlaps (the same
+path, or one inside the other) a claim of a batch in work in another worktree, and they name
+that batch, its worktree and its branch. `--allow-overlap` is for when the lead decided the
+two may share. The lock's frontmatter keeps the claims (`claims: src/auth, docs`), and the
+answer says where each came from. A batch that claims nothing is told that no overlap was
+checked.
+
 ### Merging parallel branches: `.gitattributes` and `sync --after-merge`
 
 Two branches that both record knowledge, or both regenerate a derived file, would conflict on

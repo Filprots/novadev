@@ -15,6 +15,7 @@ The work that built [FEAT-0002 — Batches and the stock-take: novadev new and n
 
 ## Todos
 
+- `2026-11-10_1/01-worktree-visible-locks` — completed · 2026-11-10
 - `2026-11-10_2/02-history-batches-and-status` — completed · 2026-11-10 · archived
 
 ## Commits

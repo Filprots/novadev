@@ -12,12 +12,19 @@
 //                                       { todo?, phase?, stopped, next, done?, resume?, open? } —
 //                                       the command half of /novadev-pause: the exhaustive stop
 //   novadev work stop <batch> [--take]  release the lock when the round is over
+//   novadev work claim <batch> <path>… [--allow-overlap]
+//                                       add paths the batch owns (start takes --claim too)
 //
 // The lock is `todos/<batch>/working.md`: flat frontmatter novadev reads (the state, the holder,
 // the timestamps, the todo and phase of the last waypoint) and a markdown body a person reads —
 // the trail of waypoints, NEWEST FIRST, so the top section is where the work resumes. It is
 // tracked like every file of `.novadev/`: a pause is development history, and a session on
 // another machine (or after a crash) finds it where it was left.
+//
+// Every command also mirrors the lock into the registry in the common git folder (registry.ts), so
+// a worktree on another branch sees that the batch is in work, where, and which paths it claims:
+// `work start` refuses a batch in work in another worktree, and a batch whose claims overlap the
+// claims of one. The lock's `claims:` line holds the same paths.
 //
 // While the lock exists the batch is IN WORK: `novadev sync` never marks it complete, the archive
 // never takes it, and `novadev file-todo` never files into it. A lock is a gate, like
@@ -29,9 +36,20 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
-import { isAbsolute, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { dirtyPaths, headSummary } from './git.ts';
 import { humanActor } from './knowledge-log.ts';
+import {
+  type ElsewhereLock,
+  batchClaims,
+  claimOverlaps,
+  locksElsewhere,
+  normalizeClaim,
+  overlapText,
+  pruneGone,
+  removeRegistryLock,
+  writeRegistryLock,
+} from './registry.ts';
 import {
   BATCH_COMPLETE_FILE,
   BATCH_RE,
@@ -87,6 +105,8 @@ export type WorkLock = {
   /** The todo and loop phase of the newest entry. */
   todo: string | null;
   phase: number | null;
+  /** The paths the batch owns while it is in work, project-relative (registry.ts, "Claims"). */
+  claims: string[];
   /** Newest first. */
   entries: LockEntry[];
 };
@@ -158,6 +178,7 @@ function readLock(batch: string, path: string): LockRead {
       resumed: resumed || null,
       todo: (fm.todo ?? '').trim() || null,
       phase,
+      claims: (fm.claims ?? '').split(',').map((claim) => claim.trim()).filter(Boolean),
       entries: parseEntries(body),
     },
   };
@@ -243,12 +264,39 @@ export function renderLock(lock: WorkLock): string {
   if (lock.resumed !== null) header.push(`resumed: ${lock.resumed}`);
   if (lock.todo !== null) header.push(`todo: ${lock.todo}`);
   if (lock.phase !== null) header.push(`phase: ${lock.phase}`);
+  if ((lock.claims ?? []).length > 0) header.push(`claims: ${lock.claims.join(', ')}`);
   const entries = lock.entries.map((entry) => `${entry.heading}\n\n${entry.body}`);
   return `${[`---\n${header.join('\n')}\n---`, `# Working — ${lock.batch}`, LOCK_COMMENT, ...entries].join('\n\n')}\n`;
 }
 
 function writeLock(lock: WorkLock): void {
   writeFileSync(lock.path, renderLock(lock));
+  mirror(lock);
+}
+
+/** The project root of a lock: working.md sits at <root>/.novadev/todos/<batch>/. */
+function rootOf(lock: WorkLock): string {
+  return dirname(dirname(dirname(dirname(lock.path))));
+}
+
+/** Copy the lock into the registry every worktree reads (nothing outside git). */
+function mirror(lock: WorkLock): void {
+  const root = rootOf(lock);
+  writeRegistryLock(root, {
+    batch: lock.batch,
+    worktree: root,
+    branch: headSummary(root)?.branch ?? null,
+    state: lock.state,
+    agent: lock.agent,
+    host: lock.host,
+    pid: lock.pid,
+    session: lock.session,
+    started: lock.started,
+    updated: lock.updated,
+    todo: lock.todo,
+    phase: lock.phase,
+    claims: lock.claims,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -426,6 +474,18 @@ export function auditWork(nd: string, now: Date = new Date(), holder: Holder = c
       out.notes.push(`${rel}: the batch also carries ${BATCH_COMPLETE_FILE} — \`novadev sync\` reopens it while the lock exists`);
     }
   }
+  // Batches in work in the repository's OTHER worktrees (registry.ts): information only — the
+  // session there owns them; its own sync lists what it has to do.
+  for (const there of locksElsewhere(dirname(nd))) {
+    if (there.gone) continue;
+    const liveness = lockLiveness(asWorkLock(there), now, holder);
+    const state = there.state === 'paused' ? 'PAUSED' : liveness.live ? 'WORKING' : 'ABANDONED';
+    const where = [there.todo, there.phase === null ? null : phaseLabel(there.phase)].filter((p): p is string => p !== null).join(' · ');
+    const claims = there.claims.length > 0 ? `; claims ${there.claims.join(', ')}` : '';
+    out.lines.push(
+      `◦ ${there.batch} — ${state} in another worktree: ${there.worktree}${there.branch ? ` (branch ${there.branch})` : ''} — ${there.agent}, last waypoint ${ageText(liveness.ageMinutes)}${where ? `, at ${where}` : ''}${claims}`,
+    );
+  }
   return out;
 }
 
@@ -438,10 +498,11 @@ function isTerminal(state: TodoState): boolean {
 // ---------------------------------------------------------------------------
 
 const USAGE =
-  'usage: novadev work start <batch> [--agent <actor>] [--session <id>] [--take]\n' +
+  'usage: novadev work start <batch> [--agent <actor>] [--session <id>] [--take] [--claim <path>]… [--allow-overlap]\n' +
   '       novadev work waypoint <batch> <payload.json>\n' +
   '       novadev work pause <batch> <payload.json>\n' +
-  '       novadev work stop <batch> [--take]';
+  '       novadev work stop <batch> [--take]\n' +
+  '       novadev work claim <batch> <path>… [--allow-overlap]';
 
 export function work(args: string[]): void {
   const [command, ...rest] = args;
@@ -449,8 +510,15 @@ export function work(args: string[]): void {
   const nd = novadevDir(root);
   try {
     if (command === 'start') {
-      const opts = parseOptions(rest, ['--agent', '--session'], ['--take']);
+      const opts = parseOptions(rest, ['--agent', '--session', '--claim'], ['--take', '--allow-overlap']);
+      if (opts.positional.length > 1) throw new Error(`One batch at a time — to claim paths, use --claim <path>.\n${USAGE}`);
       console.log(JSON.stringify(startWork(root, nd, requireBatch(nd, opts.positional[0]), opts), null, 2));
+      return;
+    }
+    if (command === 'claim') {
+      const opts = parseOptions(rest, [], ['--allow-overlap']);
+      const batch = requireBatch(nd, opts.positional[0]);
+      console.log(JSON.stringify(claimWork(nd, batch, opts.positional.slice(1), opts.allowOverlap), null, 2));
       return;
     }
     if (command === 'waypoint' || command === 'pause') {
@@ -475,10 +543,10 @@ export function work(args: string[]): void {
   }
 }
 
-type Options = { positional: string[]; agent?: string; session?: string; take: boolean };
+type Options = { positional: string[]; agent?: string; session?: string; take: boolean; claims: string[]; allowOverlap: boolean };
 
 function parseOptions(args: string[], valued: string[], flags: string[]): Options {
-  const out: Options = { positional: [], take: false };
+  const out: Options = { positional: [], take: false, claims: [], allowOverlap: false };
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
     if (valued.includes(arg)) {
@@ -486,9 +554,11 @@ function parseOptions(args: string[], valued: string[], flags: string[]): Option
       if (value === undefined || value.startsWith('--')) throw new Error(`${arg} needs a value.\n${USAGE}`);
       if (arg === '--agent') out.agent = value;
       if (arg === '--session') out.session = value;
+      if (arg === '--claim') out.claims.push(value);
       i++;
     } else if (flags.includes(arg)) {
       if (arg === '--take') out.take = true;
+      if (arg === '--allow-overlap') out.allowOverlap = true;
     } else if (arg.startsWith('--')) {
       throw new Error(`Unknown option "${arg}".\n${USAGE}`);
     } else {
@@ -610,7 +680,9 @@ function relPath(path: string): string {
 
 // --- start ---------------------------------------------------------------
 
-export function startWork(root: string, nd: string, batch: string, opts: { agent?: string; session?: string; take: boolean }, now: Date = new Date()): unknown {
+type StartOptions = { agent?: string; session?: string; take: boolean; claims?: string[]; allowOverlap?: boolean };
+
+export function startWork(root: string, nd: string, batch: string, opts: StartOptions, now: Date = new Date()): unknown {
   const batchDir = join(nd, 'todos', batch);
   if (existsSync(join(batchDir, BATCH_COMPLETE_FILE))) {
     throw new Error(`Batch ${batch} is finished (${BATCH_COMPLETE_FILE}) — a new request gets a new batch (\`novadev new\`, or \`novadev file-todo\`).`);
@@ -620,6 +692,43 @@ export function startWork(root: string, nd: string, batch: string, opts: { agent
   if (opts.session !== undefined && opts.session.trim() !== '') holder.session = opts.session.trim();
   const at = nowTimestamp(now);
   const existing = readWorkLock(nd, batch);
+
+  // In work in another worktree? That worktree's working.md is on its own branch, invisible here;
+  // the registry says so. A live or paused one is refused (resume it where it is); an abandoned one
+  // is taken over, like an abandoned lock here.
+  pruneGone(root);
+  const there = locksElsewhere(root).find((lock) => lock.batch === batch && !lock.gone);
+  let takenFrom: ElsewhereLock | null = null;
+  if (there !== undefined) {
+    const liveness = lockLiveness(asWorkLock(there), now, holder);
+    if ((liveness.live || there.state === 'paused') && !opts.take) {
+      const where = `${there.worktree}${there.branch ? ` (branch ${there.branch})` : ''}`;
+      throw new Error(
+        there.state === 'paused'
+          ? `Batch ${batch} is paused in another worktree: ${where}, by ${there.agent} — resume it there, where its pause record is; pass --take to move it here.`
+          : `Batch ${batch} is in work in another worktree: ${where} — ${there.agent} on ${there.host || '?'}, last waypoint ${ageText(liveness.ageMinutes)}. If that session is gone, pass --take.`,
+      );
+    }
+    takenFrom = there;
+  }
+
+  // The paths this batch claims: given now, kept from the lock, and the touches of its features.
+  const claimed = batchClaims(root, nd, batch, [...(opts.claims ?? []), ...(existing?.state === 'ok' ? existing.lock.claims : [])]);
+  const overlaps = claimOverlaps(root, claimed.claims, batch);
+  if (overlaps.length > 0 && !opts.allowOverlap) {
+    throw new Error(
+      `Batch ${batch} claims paths another worktree's batch owns — one owner per file:\n` +
+        overlaps.map((o) => `  ${overlapText(o)}`).join('\n') +
+        '\nNarrow the claims (fewer --claim paths, or features that do not touch them), wait for that batch, or pass --allow-overlap when the lead decided they may share.',
+    );
+  }
+  const claimInfo = {
+    claims: claimed.claims,
+    claimsFrom: claimed.from,
+    ...(claimed.claims.length === 0 ? { claimNote: 'this batch claims no path, so no overlap with other worktrees is checked — add some with --claim or `novadev work claim`' } : {}),
+    ...(overlaps.length > 0 ? { overlaps: overlaps.map(overlapText) } : {}),
+    ...(takenFrom !== null ? { takenFromWorktree: { worktree: takenFrom.worktree, branch: takenFrom.branch, agent: takenFrom.agent, state: takenFrom.state, updated: takenFrom.updated } } : {}),
+  };
 
   if (existing === null) {
     const lock: WorkLock = {
@@ -635,10 +744,11 @@ export function startWork(root: string, nd: string, batch: string, opts: { agent
       resumed: null,
       todo: null,
       phase: null,
+      claims: claimed.claims,
       entries: [],
     };
     writeLock(lock);
-    return answer(nd, lock, { taken: true, resumed: false, from: null });
+    return answer(nd, lock, { taken: true, resumed: false, from: null, ...claimInfo });
   }
   if (existing.state === 'invalid') {
     throw new Error(`todos/${batch}/${WORK_LOCK_FILE} cannot be read: ${existing.error} — fix it, or delete it and start again.`);
@@ -665,9 +775,51 @@ export function startWork(root: string, nd: string, batch: string, opts: { agent
   lock.pid = holder.pid;
   lock.session = holder.session;
   lock.updated = at;
+  lock.claims = claimed.claims;
   if (from !== 'same-session') lock.resumed = at;
   writeLock(lock);
-  return answer(nd, lock, { taken: true, resumed: from !== 'same-session', from, previous });
+  return answer(nd, lock, { taken: true, resumed: from !== 'same-session', from, previous, ...claimInfo });
+}
+
+/** The batch's lock in ANOTHER worktree when a live session holds it there (registry.ts), else null. */
+export function liveElsewhere(nd: string, batch: string, now: Date = new Date()): ElsewhereLock | null {
+  const there = locksElsewhere(dirname(nd)).find((lock) => lock.batch === batch && !lock.gone);
+  if (there === undefined || there.state !== 'working') return null;
+  return lockLiveness(asWorkLock(there), now).live ? there : null;
+}
+
+/** A registry entry as a lock, for `lockLiveness`. */
+function asWorkLock(entry: ElsewhereLock): WorkLock {
+  return {
+    batch: entry.batch, path: '', state: entry.state, agent: entry.agent, host: entry.host, pid: entry.pid,
+    session: entry.session, started: entry.started, updated: entry.updated, resumed: null, todo: entry.todo,
+    phase: entry.phase, claims: entry.claims, entries: [],
+  };
+}
+
+// --- claim ---------------------------------------------------------------
+
+/** Add paths to the claims of a batch in work (or paused): checked against the other worktrees first. */
+export function claimWork(nd: string, batch: string, paths: readonly string[], allowOverlap: boolean): unknown {
+  if (paths.length === 0) throw new Error(`Name the paths to claim.\n${USAGE}`);
+  const lock = requireLock(nd, batch, true);
+  const root = rootOf(lock);
+  const added: string[] = [];
+  for (const raw of paths) {
+    const claim = normalizeClaim(root, raw);
+    if (!claim.ok) throw new Error(claim.error);
+    if (!lock.claims.includes(claim.value) && !added.includes(claim.value)) added.push(claim.value);
+  }
+  const overlaps = claimOverlaps(root, added, batch);
+  if (overlaps.length > 0 && !allowOverlap) {
+    throw new Error(
+      `Claiming them would overlap another worktree's batch — one owner per file:\n${overlaps.map((o) => `  ${overlapText(o)}`).join('\n')}\n` +
+        'Pass --allow-overlap when the lead decided they may share.',
+    );
+  }
+  lock.claims = [...lock.claims, ...added];
+  writeLock(lock);
+  return { batch, path: relPath(lock.path), state: lock.state, added, claims: lock.claims, ...(overlaps.length > 0 ? { overlaps: overlaps.map(overlapText) } : {}) };
 }
 
 function answer(nd: string, lock: WorkLock, extra: Record<string, unknown>): unknown {
@@ -680,6 +832,7 @@ function answer(nd: string, lock: WorkLock, extra: Record<string, unknown>): unk
     started: lock.started,
     todo: lock.todo,
     phase: lock.phase,
+    claims: lock.claims,
     latest: latestEntry(lock),
     todos: todoStates(nd, lock.batch),
   };
@@ -788,6 +941,7 @@ export function stopWork(nd: string, batch: string, take: boolean, now: Date = n
   if (read.state === 'invalid') {
     // An unreadable lock is still a lock: releasing it is what the person asked for.
     rmSync(read.path, { force: true });
+    removeRegistryLock(dirname(nd), batch);
     return { batch, state: 'released', path: relPath(read.path), unreadable: read.error, todos: todoStates(nd, batch) };
   }
   const lock = read.lock;
@@ -799,6 +953,7 @@ export function stopWork(nd: string, batch: string, take: boolean, now: Date = n
     );
   }
   rmSync(lock.path, { force: true });
+  removeRegistryLock(dirname(nd), batch, take);
   const todos = todoStates(nd, batch);
   const unfinished = todos.filter((t) => !isTerminal(t.state)).map((t) => t.todo);
   return {

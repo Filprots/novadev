@@ -5,8 +5,8 @@ host: irrisketch-server-1
 pid: 609663
 session: 901fd7fe-7537-4b7d-9e55-46c9f88efcf1
 started: 2026-11-10T15:19:15+01:00
-updated: 2026-11-10T15:28:11+01:00
-todo: 03-merge-rules-for-parallel-branches
+updated: 2026-11-10T15:32:43+01:00
+todo: 01-worktree-visible-locks
 phase: 3
 ---
 
@@ -15,6 +15,10 @@ phase: 3
 <!-- The batch's LOCK, managed by `novadev work`: an agent is working this batch, or paused in it.
      Newest entry first — the top section is where the work resumes. Never edit it by hand:
      `novadev work waypoint` and `/novadev-pause` write it, `novadev work stop` removes it. -->
+
+## Waypoint 3 — 2026-11-10 15:32 · 01-worktree-visible-locks · phase 3 WORK
+
+03 landed (9345706, FEAT-0017). Starting the 01+05 seam: a lock registry in <common>/novadev/locks/<batch>.json written by every work command (working.md stays); claims from --claim, work claim, and the batch's features' touches; status lists the worktrees.
 
 ## Waypoint 2 — 2026-11-10 15:28 · 03-merge-rules-for-parallel-branches · phase 3 WORK
 

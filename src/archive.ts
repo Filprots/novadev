@@ -3,9 +3,10 @@
 // Only on the project's default branch (src/branch.ts): on a task branch the sweep moves nothing and
 // says what the default branch will archive, so two branches never move the same folder.
 import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { archivePlace, type ArchivePlace } from './branch.ts';
 import { auditLinks } from './links.ts';
+import { batchesInWorkElsewhere } from './registry.ts';
 import {
   BATCH_COMPLETE_FILE,
   BATCH_RE,
@@ -83,11 +84,13 @@ export function sweepBatches(nd: string, move = true): string[] {
   const grace = archiveGraceDays(nd);
   const today = todayStamp();
 
+  // A batch in work in another worktree is not done here either: its round is not over.
+  const elsewhere = batchesInWorkElsewhere(dirname(nd));
   for (const batch of listDirs(todosDir)) {
     const batchDir = join(todosDir, batch);
     const markerPath = join(batchDir, BATCH_COMPLETE_FILE);
 
-    if (!batchIsDone(batchDir)) {
+    if (!batchIsDone(batchDir) || elsewhere.has(batch)) {
       // Reopened (a new todo, or a gate that swung back) — the marker would be a lie.
       if (existsSync(markerPath)) rmSync(markerPath);
       continue;
@@ -198,6 +201,9 @@ export function archive(args: string[]): void {
     if (!existsSync(src)) fail(`batch not found: todos/${batch}`);
     const m = batch.match(BATCH_RE);
     if (!m) fail(`batch name "${batch}" does not match YYYY-MM-DD_N`);
+    if (batchesInWorkElsewhere(root).has(batch)) {
+      fail(`batch ${batch} is in work in another worktree — the round on it is not over (run \`novadev status\` to see where).`);
+    }
     if (existsSync(join(src, WORK_LOCK_FILE))) {
       fail(
         `batch ${batch} is in work (${WORK_LOCK_FILE}) — the round on it is not over. Release the lock first: \`novadev work stop ${batch}\` (run \`novadev status\` to see who holds it).`,

@@ -22,7 +22,8 @@ usage:
                             (on an older layout, run migrate-repo first)
   novadev new [slug…]       scaffold today's next batch (todos/YYYY-MM-DD_N/), optional todo folders
   novadev status [--json]   is a work cycle on? the batches in work (who, since when, where, paused
-                            or abandoned), then open todos + record states, postponed, knowledge;
+                            or abandoned), the worktrees and their batches, then open todos + record
+                            states, postponed, knowledge;
                             --json: the same as data (for a tool or a chat bot)
   novadev todo …            one todo, away from the repo: "list [--state s,…] [--json]", "show <ref>" (JSON:
                             brief + records), "addendum <ref> <payload.json>" ({text, attachments}: a Chat
@@ -32,7 +33,10 @@ usage:
   novadev work …            the lock of a batch in work (todos/<batch>/working.md): "start <batch>"
                             takes or resumes it, "waypoint <batch> <payload.json>" records where the
                             work is, "pause <batch> <payload.json>" writes exactly where it stopped
-                            (the command half of /novadev-pause), "stop <batch>" releases it
+                            (the command half of /novadev-pause), "stop <batch>" releases it,
+                            "claim <batch> <path>…" adds paths the batch owns (start: --claim);
+                            every worktree sees the locks (a registry in the common git dir), and
+                            overlapping claims across worktrees are refused (--allow-overlap)
   novadev archive <batch>…  move fully-recorded batch(es) to archive/<year>/   (or: --done for all);
                             on the default branch only — a task branch leaves the moves to it
   novadev knowledge [words] the knowledge bundle (.novadev/knowledge/, Open Knowledge Format 0.2):

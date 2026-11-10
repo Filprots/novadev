@@ -19,7 +19,7 @@ The work that built [FEAT-0017 — Merge rules for parallel branches, and sync -
 
 ## Commits
 
-(no linked commits yet)
+- `9345706` — 2026-11-10_1/03-merge-rules-for-parallel-branches
 
 _Linked by `**Feature:** FEAT-0017` in each todo's record._
 <!-- novadev:work:end -->

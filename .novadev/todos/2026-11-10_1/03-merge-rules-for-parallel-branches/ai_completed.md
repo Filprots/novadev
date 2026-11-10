@@ -2,6 +2,7 @@
 
 **Date:** 2026-11-10
 **Feature:** FEAT-0017
+**Commits:** 9345706
 
 ## Prompt
 Two branches that both touch the knowledge log or derived files (index.md, features' work.md/tests.md,

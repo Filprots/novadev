@@ -12,8 +12,8 @@ sources:
   - resource: repo:src/debt-budget.ts
   - resource: repo:src/placement.ts
   - resource: repo:templates/skills/novadev-work.md
-generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:32:05+01:00 }
-stale_after: 2027-02-08T15:32:05+01:00
+generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:38:47+01:00 }
+stale_after: 2027-02-08T15:38:47+01:00
 ---
 
 # Glossary
@@ -114,6 +114,10 @@ wording for agents; this page maps each word to the code.
 - **Sub-repo** — an independent repository nested in the project, listed by `"subrepos"`
   (`["repos/*"]`) and named by its folder; **`repo@hash`** — a record's way to name its commit
   (`irrippr@abc1234`); **`**Repos:**`** — the sub-repos a todo changed (`src/subrepos.ts`).
+- **Registry** — `<git common dir>/novadev/`, shared by every worktree of a clone: `locks/<batch>.json`
+  mirrors each lock (worktree, branch, holder, claims) so other worktrees see it (`src/registry.ts`).
+- **Claim** — a path a batch in work owns (its features' `touches:`, `--claim`, `work claim`;
+  `irrippr:ps/` for a sub-repo). Overlapping claims across worktrees are refused: one owner per file.
 - **Merge rules** — novadev's block in `.gitattributes`: the log merges by `union`, derived files
   by the **`novadev-derived`** driver (keep ours; defined in the clone's git config by deploy).
   **After-merge** — `novadev sync --after-merge`: repair the log, sync, commit `.novadev/`.

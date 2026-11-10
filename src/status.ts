@@ -1,6 +1,6 @@
 // `novadev status` — stock-take of the novadev tree without an agent.
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { knowledgeStatusLine } from './knowledge.ts';
 import {
   FEATURE_STATUSES,
@@ -16,7 +16,9 @@ import {
   requireProjectRoot,
   todoState,
 } from './lib.ts';
+import { worktreeList } from './git.ts';
 import { metricsStatusLine } from './metrics-audit.ts';
+import { registryLocks, samePlace } from './registry.ts';
 import { listTodos } from './todo.ts';
 import { auditWork, latestLine, listWorkLocks, lockLiveness, phaseLabel, readWorkLock } from './work.ts';
 
@@ -34,6 +36,26 @@ const STATE_MARK = {
  * (a chat bot): the batches in work with their holder and newest waypoint, every open todo with its title and state,
  * the human-test queue, postponed items, and the counts.
  */
+/**
+ * The repository's worktrees (git worktree list), each with its branch and the batches in work there
+ * (the registry, registry.ts; this worktree's own locks from its files). Null outside git.
+ */
+export function worktreesData(nd: string): { path: string; branch: string | null; current: boolean; main: boolean; batches: { batch: string; state: string; agent: string; claims: string[] }[] }[] | null {
+  const root = dirname(nd);
+  const list = worktreeList(root);
+  if (list === null) return null;
+  const registry = registryLocks(root);
+  return list
+    .filter((w) => !w.bare)
+    .map((w) => {
+      const current = samePlace(w.path, root);
+      const batches = current
+        ? listWorkLocks(nd).flatMap((read) => (read.state === 'ok' ? [{ batch: read.batch, state: read.lock.state, agent: read.lock.agent, claims: read.lock.claims }] : []))
+        : registry.filter((lock) => samePlace(lock.worktree, w.path)).map((lock) => ({ batch: lock.batch, state: lock.state, agent: lock.agent, claims: lock.claims }));
+      return { path: w.path, branch: w.branch, current, main: w.main, batches };
+    });
+}
+
 export function statusData(nd: string, now: Date = new Date()): Record<string, unknown> {
   const inWork = listWorkLocks(nd).map((read) => {
     if (read.state === 'invalid') return { batch: read.batch, state: 'unreadable', error: read.error };
@@ -68,7 +90,7 @@ export function statusData(nd: string, now: Date = new Date()): Record<string, u
   let archived = 0;
   for (const year of listDirs(join(nd, 'archive'))) archived += listDirs(join(nd, 'archive', year)).length;
   return {
-    inWork, batches, todoCounts: counts, totest: tasks, postponed,
+    inWork, worktrees: worktreesData(nd), batches, todoCounts: counts, totest: tasks, postponed,
     sparks: listFiles(join(nd, 'sparks')).filter((f) => f !== 'README.md').length,
     features, archivedBatches: archived,
   };
@@ -94,6 +116,17 @@ export function status(args: string[] = []): void {
     for (const problem of inWork.problems) console.log(`  ⚠ ${problem}`);
     if (inWork.waiting.length > 0) console.log(`  → a paused batch resumes with \`/novadev-work\`; it reads the PAUSED section of ${WORK_LOCK_FILE} first`);
     if (inWork.actions.length > 0) console.log(`  → an abandoned lock is resumed (\`novadev work start <batch>\`) or released (\`novadev work stop <batch>\`)`);
+  }
+
+  // The repository's worktrees, when it has more than one: which branch each is on, and which
+  // batch is in work there — the registry every worktree shares says so.
+  const worktrees = worktreesData(nd);
+  if (worktrees !== null && worktrees.length > 1) {
+    console.log(`\nworktrees — ${worktrees.length} (* = this one)`);
+    for (const w of worktrees) {
+      const batches = w.batches.map((b) => `${b.batch} ${b.state === 'paused' ? 'PAUSED' : 'in work'} (${b.agent})${b.claims.length > 0 ? `, claims ${b.claims.join(', ')}` : ''}`);
+      console.log(`  ${w.current ? '*' : ' '} ${w.path}  ${w.branch ?? '(detached)'}${w.main ? '  [main checkout]' : ''}${batches.length > 0 ? ` — ${batches.join('; ')}` : ''}`);
+    }
   }
 
   // Open batches.

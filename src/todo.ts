@@ -27,7 +27,7 @@ import {
   requireProjectRoot,
   todoState,
 } from './lib.ts';
-import { lockLiveness, readWorkLock } from './work.ts';
+import { liveElsewhere, lockLiveness, readWorkLock } from './work.ts';
 import { copyAttachments } from './todo-filing.ts';
 
 const PROMPT = 'prompt.md';
@@ -113,6 +113,10 @@ function writable(nd: string, t: TodoItem, what: string, now: Date): void {
   const lock = readWorkLock(nd, t.batch);
   if (lock !== null && lock.state === 'ok' && lock.lock.state === 'working' && lockLiveness(lock.lock, now).live) {
     throw new Error(`${t.batch} is in work right now (${lock.lock.agent}): tell that session, or try again when it pauses or stops.`);
+  }
+  const there = liveElsewhere(nd, t.batch, now);
+  if (there !== null) {
+    throw new Error(`${t.batch} is in work right now in another worktree (${there.worktree}, ${there.agent}): tell that session, or try again when it pauses or stops.`);
   }
 }
 

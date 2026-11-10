@@ -320,6 +320,15 @@ first (phase 1), then its batch is locked.
   batch write over each other's work. If the human says that session is gone, pass
   `--take`; never take a live lock on your own judgement.
 - **A finished batch** (`completed.md`) → refused: a new request gets a new batch.
+- **In work in another worktree** → refused, with where. A paused one resumes in ITS worktree,
+  where its pause record is; never `--take` it from here unless the human says so.
+
+**Claims — one owner per file.** In a repository with several worktrees, a batch owns the
+paths it will change: the `touches:` of the features its todos name, plus what you add with
+`--claim <path>` on `work start` or `novadev work claim <batch> <path>…` once the plan says
+which files the work needs (`irrippr:ps/layouting/` for a sub-repo's path). An overlap with a
+batch in work in another worktree is refused. Narrow your plan, or ask the human. Pass
+`--allow-overlap` only when the human or the lead decided the two may share.
 
 **Writing waypoints.** Whenever the work moves — each todo you pick up, each phase you
 enter, each commit, each decision, and before anything long — write a waypoint, so the

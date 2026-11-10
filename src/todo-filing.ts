@@ -5,8 +5,9 @@
 // agent writing the folder by hand would get wrong, and one of them — the `**Feature:**` defanging
 // — is the difference between a filed todo and a `novadev sync` that fails on a quoted record.
 import { copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { BATCH_RE, WORK_LOCK_FILE, listDirs, todayStamp } from './lib.ts';
+import { batchesInWorkElsewhere } from './registry.ts';
 
 const SLUG = /^[a-z0-9][a-z0-9-]*$/;
 /** novadev's own record names — their presence is what makes a batch "touched". */
@@ -55,10 +56,12 @@ export function planBatch(nd: string, today = todayStamp()): BatchPlan {
   const reusable = listDirs(todos)
     .filter((name) => BATCH_RE.test(name) && name.startsWith(`${today}_`))
     .sort((a, b) => Number(BATCH_RE.exec(b)![4]) - Number(BATCH_RE.exec(a)![4]));
+  const elsewhere = reusable.length > 0 ? batchesInWorkElsewhere(dirname(nd)) : new Set<string>();
   for (const batch of reusable) {
     const dir = join(todos, batch);
     if (!existsSync(join(dir, CHAT_MARKER))) break; // a human batch, or one we did not create
     if (existsSync(join(dir, WORK_LOCK_FILE))) break; // an agent is working it (or paused in it)
+    if (elsewhere.has(batch)) break; // … in another worktree of this repository
     const folders = listDirs(dir);
     if (folders.some((folder) => isTouched(join(dir, folder)))) break;
     return { batch, reused: true, nextNumber: folders.length + 1 };

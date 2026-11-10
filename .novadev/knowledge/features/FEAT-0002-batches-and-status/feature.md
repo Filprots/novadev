@@ -17,8 +17,8 @@ sources:
   - resource: commit:bc17f04
   - resource: commit:5c9f453
   - resource: commit:fb0170f
-generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:18:33+01:00 }
-stale_after: 2027-11-10T15:18:33+01:00
+generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:38:47+01:00 }
+stale_after: 2027-11-10T15:38:47+01:00
 ---
 
 # FEAT-0002 — Batches and the stock-take: novadev new and novadev status
@@ -47,6 +47,7 @@ builds the JSON view; the lock lines come from `src/work.ts`.
 - 2026-08-19 — 0.2.0 (commit 5c9f453): the batch number skips same-day batches already archived
 - 2026-10-25 — 0.14.0 (commit 6655fee): status opens with whether a work cycle is on
 - 2026-10-25 — 0.15.0 (commit fb0170f): `status --json`
+- 2026-11-10 — `status` lists the repository's worktrees with each one's branch and batches in work; `status --json` has `worktrees` (`2026-11-10_1/01-worktree-visible-locks`)
 
 ## Open questions
 
