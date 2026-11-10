@@ -38,6 +38,11 @@ usage:
                             "claim <batch> <path>…" adds paths the batch owns (start: --claim);
                             every worktree sees the locks (a registry in the common git dir), and
                             overlapping claims across worktrees are refused (--allow-overlap)
+  novadev worktree …        one worktree per task across the project and the sub-repos it changes, on
+                            one branch: "create <name> [<sub-repo>…] [--claim <path>]…", "list", "status",
+                            "gate" (the checks before a merge request), "mr" (its text), "sync" (merge the
+                            default branches in), "merge <name> [--yes]" (the lead: all or nothing, then
+                            sync --after-merge), "remove <name> [--force]"
   novadev archive <batch>…  move fully-recorded batch(es) to archive/<year>/   (or: --done for all);
                             on the default branch only — a task branch leaves the moves to it
   novadev knowledge [words] the knowledge bundle (.novadev/knowledge/, Open Knowledge Format 0.2):
@@ -82,6 +87,11 @@ switch (command) {
   case 'work': {
     const { work } = await import('../src/work.ts');
     work(args);
+    break;
+  }
+  case 'worktree': {
+    const { worktree } = await import('../src/worktree.ts');
+    worktree(args);
     break;
   }
   case 'archive': {

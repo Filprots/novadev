@@ -42,3 +42,7 @@
 * **Update**: [novadev todo: one todo at a time, away from the repository](features/FEAT-0015-todo-command/feature.md) — todo review; no addendum to a todo waiting for its review or merge. (claude-code/claude-opus-5-5 · 2026-11-10_1/06-review-record)
 * **Update**: [Architecture](wiki/architecture.md) — src/review.ts (the review gate todoState asks) and the team setting. (claude-code/claude-opus-5-5 · 2026-11-10_1/06-review-record)
 * **Update**: [Glossary](wiki/glossary.md) — The review states (changes, review, unmerged), review and team mode. (claude-code/claude-opus-5-5 · 2026-11-10_1/06-review-record)
+* **Creation**: [novadev worktree: one worktree per task across repositories](features/FEAT-0019-worktree-command/feature.md) — New capability: novadev worktree create|list|status|gate|mr|sync|merge|remove, generalised from irris-worktree. (claude-code/claude-opus-5-5 · 2026-11-10_1/07-worktree-command)
+* **Update**: [Architecture](wiki/architecture.md) — src/worktree.ts; the registry holds worktrees too; the worktree command is a named git writer. (claude-code/claude-opus-5-5 · 2026-11-10_1/07-worktree-command)
+* **Update**: [Conventions](wiki/conventions.md) — src/worktree.ts is the other module allowed to write to git; nothing pushes. (claude-code/claude-opus-5-5 · 2026-11-10_1/07-worktree-command)
+* **Update**: [Glossary](wiki/glossary.md) — novadev's worktree, gate, mr, the lead's merge. (claude-code/claude-opus-5-5 · 2026-11-10_1/07-worktree-command)

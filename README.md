@@ -526,6 +526,68 @@ it is **approved and merged**:
 Neither waiting state is the builder's to clear, so sync does not count them as NEXT
 ACTIONS. A todo in either state takes no addendum: new work gets a new todo.
 
+### `novadev worktree` — one worktree per task, across repositories
+
+The whole flow, generalised from the IRRIS company's `irris-worktree`:
+
+```sh
+novadev worktree create irr-12-layout irrippr --claim irrippr:ps/layouting/   # the builder
+novadev worktree list [--json]          # every worktree novadev made: branch, sub-repos, claims, batches in work
+novadev worktree status irr-12-layout   # per repository: commits ahead, behind, uncommitted, diffstat
+novadev worktree gate irr-12-layout     # the checks that must pass before a merge request
+novadev worktree mr irr-12-layout       # the merge request's text: commits per repository (irrippr@hash), claims
+novadev worktree sync irr-12-layout     # merge the default branches into the worktree (then sync --after-merge)
+novadev worktree merge irr-12-layout    # the lead: a dry run; --yes merges, all or nothing
+novadev worktree remove irr-12-layout   # after the merge: worktrees, links, merged branches (--force: unmerged too)
+```
+
+`create` makes `<dir>/<name>/`: a worktree of the project's repository on branch
+`<branchPrefix><name>`, made from its default branch. Inside it, each sub-repo you name gets
+a worktree of its own on the same branch, made from that sub-repo's default branch. A
+sub-repo you do not name is a link to the main checkout's, so checks still find their
+siblings; read it, never write it. The git-ignored folders `share` names (`node_modules`) are
+links to the main checkout's too. The links are kept out of `git status` through the
+repository's `info/exclude`. `--claim` paths belong to the worktree: one that overlaps a
+claim of another worktree, or of a batch in work elsewhere, is refused (`--allow-overlap`
+when the lead decided). The worktree is recorded in the registry,
+`<git common dir>/novadev/worktrees/<name>.json`.
+
+`gate` fails on any of these, per repository:
+
+- uncommitted changes;
+- whitespace errors (`git diff --check`);
+- a changed file outside the worktree's claims (`.novadev/` aside);
+- `novadev sync --check` failing in the worktree;
+- a failing command from the project's `gate` setting.
+
+Each gate command runs in that repository's worktree with `NOVADEV_WORKTREE`,
+`NOVADEV_BRANCH`, `NOVADEV_BASE` and `NOVADEV_CHANGED` (the changed files, one per line) set.
+
+`merge` runs on the main checkout, and only when every repository there is on its default
+branch with no uncommitted change. It refuses a branch that still carries a batch's lock
+(`working.md`): stop or pause the batch first. It tries every merge with `git merge-tree`
+(git 2.38 or newer) and merges nothing unless all of them would go through. Then it merges
+the sub-repos first and the project last, `--no-ff`, so records never land without their
+code, and runs `novadev sync --after-merge`. novadev never pushes.
+
+```json
+"worktree": {
+  "dir": "../_wt",
+  "branchPrefix": "",
+  "share": ["node_modules"],
+  "linkSubrepos": true,
+  "gate": { ".": ["bun test"], "irrisketch_locales": ["node ../irrippr/util/hydra-check/tutorials-lint.js tutorials"] }
+}
+```
+
+| Key | Default | Means |
+|---|---|---|
+| `dir` | `../<project folder>-worktrees` | where worktrees go: relative to the main checkout, or absolute |
+| `branchPrefix` | `""` | put before the name to make the branch (`"task/"`) |
+| `share` | `[]` | names of git-ignored folders linked from the main checkout, in every repository |
+| `linkSubrepos` | `true` | link the sub-repos a worktree does not change |
+| `gate` | `{}` | commands per repository: `"."` is the project's own, otherwise a sub-repo's name |
+
 ## Knowledge — an Open Knowledge Format bundle
 
 Knowledge rots when nobody can tell a fresh fact from an old guess. novadev keeps the

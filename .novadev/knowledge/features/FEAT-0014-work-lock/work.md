@@ -17,6 +17,7 @@ The work that built [FEAT-0014 — The work lock: waypoints, pause and resume](f
 
 - `2026-11-10_1/01-worktree-visible-locks` — completed · 2026-11-10
 - `2026-11-10_1/05-batch-path-ownership` — completed · 2026-11-10
+- `2026-11-10_1/07-worktree-command` — completed · 2026-11-10
 - `2026-11-10_2/14-history-work-lock` — completed · 2026-11-10 · archived
 
 ## Commits

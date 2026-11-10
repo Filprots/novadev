@@ -8,6 +8,9 @@
 //   <common git dir>/novadev/locks/<batch>.json      who holds the batch, in which worktree, on
 //                                                    which branch, where the work is, and the
 //                                                    paths the batch claims
+//   <common git dir>/novadev/worktrees/<name>.json   a worktree `novadev worktree create` made
+//                                                    (worktree.ts): its branch, its sub-repos, its
+//                                                    claims, what it linked in
 //
 // It is never committed (it lives inside .git), and it is only a mirror: the lock that counts in a
 // worktree is that worktree's working.md; the registry answers "is this batch in work ELSEWHERE,
@@ -17,8 +20,9 @@
 // Claims — "one owner per file". A batch in work claims the paths it will change: the ones given
 // with `--claim` / `novadev work claim`, and the `touches:` of the features its todos name. A
 // claim may be written `<sub-repo>:<path>` (`irrippr:ps/layouting/`), which is the sub-repo's
-// folder plus the path. `novadev work start` refuses a batch whose claims overlap the claims of a
-// batch in work in another worktree.
+// folder plus the path. A worktree made by `novadev worktree create --claim` claims paths too.
+// `novadev work start` refuses a batch whose claims overlap the claims of a batch in work in
+// another worktree, or of another worktree; `novadev worktree create` refuses the same.
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { commonGitDir, worktreeList } from './git.ts';
@@ -186,29 +190,122 @@ export function normalizeClaim(root: string, raw: string): { ok: true; value: st
   return { ok: true, value: path };
 }
 
-/** One overlap: our claim, theirs, and whose it is. */
-export type Overlap = { claim: string; theirs: string; batch: string; worktree: string; branch: string | null; agent: string };
+// ---------------------------------------------------------------------------
+// Worktrees made by `novadev worktree create`
+// ---------------------------------------------------------------------------
 
-/** Where `claims` overlap the claims of a batch in work in another worktree (one that still exists). */
-export function claimOverlaps(root: string, claims: readonly string[], except?: string): Overlap[] {
+/** One worktree novadev made: the project's checkout plus worktrees of some sub-repos, on one branch. */
+export type RegistryWorktree = {
+  name: string;
+  branch: string;
+  /** The worktree's root (the project's checkout), absolute. */
+  path: string;
+  /** The main checkout it was made from, absolute. */
+  main: string;
+  /** The sub-repos it has worktrees of (the others are linked to the main checkout's, or absent). */
+  repos: { name: string; rel: string }[];
+  claims: string[];
+  /** The symbolic links it made (shared folders, unchanged sub-repos), absolute. */
+  links: string[];
+  /** Each repository's default branch and the commit it started from: "." is the project's own. */
+  base: Record<string, { branch: string; commit: string }>;
+  created: string;
+};
+
+function asWorktree(value: unknown): RegistryWorktree | null {
+  if (!isPlainObject(value)) return null;
+  const v = value as Record<string, unknown>;
+  if (typeof v.name !== 'string' || typeof v.branch !== 'string' || typeof v.path !== 'string' || typeof v.main !== 'string') return null;
+  const strings = (x: unknown) => (Array.isArray(x) ? x.filter((i): i is string => typeof i === 'string') : []);
+  return {
+    name: v.name,
+    branch: v.branch,
+    path: v.path,
+    main: v.main,
+    repos: Array.isArray(v.repos)
+      ? v.repos.filter((r): r is { name: string; rel: string } => isPlainObject(r) && typeof r.name === 'string' && typeof r.rel === 'string')
+      : [],
+    claims: strings(v.claims),
+    links: strings(v.links),
+    base: isPlainObject(v.base) ? (v.base as RegistryWorktree['base']) : {},
+    created: typeof v.created === 'string' ? v.created : '',
+  };
+}
+
+/** Every worktree `novadev worktree create` registered; [] outside git. */
+export function registryWorktrees(root: string): RegistryWorktree[] {
+  const dir = registryDir(root);
+  if (dir === null || !existsSync(join(dir, 'worktrees'))) return [];
+  const out: RegistryWorktree[] = [];
+  for (const file of readdirSync(join(dir, 'worktrees')).sort()) {
+    if (!file.endsWith('.json')) continue;
+    try {
+      const entry = asWorktree(JSON.parse(readFileSync(join(dir, 'worktrees', file), 'utf8')));
+      if (entry !== null) out.push(entry);
+    } catch {
+      // unreadable: says nothing
+    }
+  }
+  return out;
+}
+
+export function writeRegistryWorktree(root: string, entry: RegistryWorktree): void {
+  const dir = registryDir(root);
+  if (dir === null) return;
+  mkdirSync(join(dir, 'worktrees'), { recursive: true });
+  writeFileSync(join(dir, 'worktrees', `${entry.name}.json`), `${JSON.stringify(entry, null, 2)}\n`);
+}
+
+export function removeRegistryWorktree(root: string, name: string): void {
+  const dir = registryDir(root);
+  if (dir !== null) rmSync(join(dir, 'worktrees', `${name}.json`), { force: true });
+}
+
+// ---------------------------------------------------------------------------
+// Overlaps
+// ---------------------------------------------------------------------------
+
+/** Who holds claims: a batch in work, or a worktree novadev made. */
+export type ClaimHolder = { kind: 'batch' | 'worktree'; id: string; worktree: string; branch: string | null; agent: string | null; claims: string[] };
+
+/** Every holder of claims in the repository whose worktree still exists, except those in `exceptPlace`. */
+export function claimHolders(root: string, exceptPlace: string | null): ClaimHolder[] {
+  const out: ClaimHolder[] = [];
+  const worktrees = liveWorktrees(root);
+  const exists = (path: string) => existsSync(path) && (worktrees === null || worktrees.has(real(path)));
+  for (const lock of registryLocks(root)) {
+    if (!exists(lock.worktree) || (exceptPlace !== null && samePlace(lock.worktree, exceptPlace))) continue;
+    out.push({ kind: 'batch', id: lock.batch, worktree: lock.worktree, branch: lock.branch, agent: lock.agent, claims: lock.claims });
+  }
+  for (const w of registryWorktrees(root)) {
+    if (!exists(w.path) || (exceptPlace !== null && samePlace(w.path, exceptPlace))) continue;
+    out.push({ kind: 'worktree', id: w.name, worktree: w.path, branch: w.branch, agent: null, claims: w.claims });
+  }
+  return out;
+}
+
+/** One overlap: our claim, theirs, and whose it is. */
+export type Overlap = { claim: string; theirs: string; holder: ClaimHolder };
+
+/** Where `claims` overlap the claims of holders in other worktrees (`holders`, or those not in `root`). */
+export function claimOverlaps(root: string, claims: readonly string[], exceptBatch?: string, holders: ClaimHolder[] = claimHolders(root, root)): Overlap[] {
   const out: Overlap[] = [];
-  for (const lock of locksElsewhere(root)) {
-    if (lock.gone || lock.batch === except) continue;
+  for (const holder of holders) {
+    if (holder.kind === 'batch' && holder.id === exceptBatch) continue;
     for (const claim of claims) {
-      for (const theirs of lock.claims) {
-        if (pathsOverlap(claim, theirs)) {
-          out.push({ claim, theirs, batch: lock.batch, worktree: lock.worktree, branch: lock.branch, agent: lock.agent });
-        }
+      for (const theirs of holder.claims) {
+        if (pathsOverlap(claim, theirs)) out.push({ claim, theirs, holder });
       }
     }
   }
   return out;
 }
 
-/** "src/a.ts (yours) overlaps src/ (2026-11-10_2 in /wt/x on branch b, claude-code/…)". */
+/** "src/a.ts overlaps src — claimed by batch 2026-11-10_2 in /wt/x on branch b (claude-code/…)". */
 export function overlapText(overlap: Overlap): string {
-  const where = `${overlap.worktree}${overlap.branch ? ` on branch ${overlap.branch}` : ''}`;
-  return `${overlap.claim} overlaps ${overlap.theirs} — claimed by batch ${overlap.batch} in ${where} (${overlap.agent})`;
+  const h = overlap.holder;
+  const where = `${h.worktree}${h.branch ? ` on branch ${h.branch}` : ''}`;
+  return `${overlap.claim} overlaps ${overlap.theirs} — claimed by ${h.kind} ${h.id} in ${where}${h.agent ? ` (${h.agent})` : ''}`;
 }
 
 /**

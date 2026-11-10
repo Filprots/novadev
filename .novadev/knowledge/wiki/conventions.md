@@ -12,8 +12,8 @@ sources:
   - resource: repo:tests/helpers.ts
   - resource: repo:tests/docs.test.ts
   - resource: repo:tests/migrations.test.ts
-generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:32:05+01:00 }
-stale_after: 2027-02-08T15:32:05+01:00
+generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:50:53+01:00 }
+stale_after: 2027-02-08T15:50:53+01:00
 ---
 
 # Conventions
@@ -77,8 +77,9 @@ working tree. `src/git.ts` is the shared home for them (a sub-repo is asked with
 a hook's GIT_* variables); UNVERIFIED: whether new ones must go there — five modules still call
 git directly (see [architecture](architecture.md)). A git WRITE lives only in the module of the
 command a person runs to get it, never in `src/git.ts`: `src/merge-rules.ts` (deploy's driver
-config, `sync --after-merge`'s commit of `.novadev/`). No other command commits, stages,
-branches or resets.
+config, `sync --after-merge`'s commit of `.novadev/`) and `src/worktree.ts` (worktrees, their
+branches, the lead's merge). No other command commits, stages, branches or resets, and none
+pushes.
 
 ## Prose: messages, comments, docs
 

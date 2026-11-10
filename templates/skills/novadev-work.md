@@ -815,7 +815,12 @@ a problem then (phase 4).
 **The limits on that commit are not optional.** Commit only to the branch the working
 tree is already on. **Never create a branch, never `push`, never `merge`, and never
 rewrite history** (no rebase, no force, no amend of a commit you did not just make)
-unless the human asks for that exact thing. If the working tree is on the repository's
+unless the human asks for that exact thing. `novadev worktree create` makes branches and
+`novadev worktree merge` merges: use them only when the human asked for that way of working
+(in the brief, or in the project's rules they wrote: "one worktree per task", "the lead
+merges"). Run `merge` only as the lead they named, or when they ask for that merge. In a
+worktree, work and commit there only, and close a task with `novadev worktree gate` and
+`novadev worktree mr`. If the working tree is on the repository's
 **default branch** (`main` / `master`), **ask before committing** and say what you are
 about to commit. A project may narrow this further; it may not widen it.
 

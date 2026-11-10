@@ -12,8 +12,8 @@ sources:
   - resource: repo:src/debt-budget.ts
   - resource: repo:src/placement.ts
   - resource: repo:templates/skills/novadev-work.md
-generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:44:33+01:00 }
-stale_after: 2027-02-08T15:44:33+01:00
+generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:50:53+01:00 }
+stale_after: 2027-02-08T15:50:53+01:00
 ---
 
 # Glossary
@@ -122,6 +122,10 @@ wording for agents; this page maps each word to the code.
 - **Review** — `ai_review.md`: a reviewer's APPROVE / CHANGES on a finished todo (`novadev todo
   review`). **Team mode** — `"team": true`: completed = approved + merged (the record's commits on
   the default branch).
+- **Worktree (novadev's)** — `novadev worktree create <name>`: the project's checkout at
+  `<dir>/<name>` plus worktrees of the named sub-repos, one branch, claims; **gate** — its checks
+  before a merge request; **mr** — the request's text; the **lead's merge** — all or nothing
+  (`git merge-tree` first), sub-repos before the project (`src/worktree.ts`).
 - **Merge rules** — novadev's block in `.gitattributes`: the log merges by `union`, derived files
   by the **`novadev-derived`** driver (keep ours; defined in the clone's git config by deploy).
   **After-merge** — `novadev sync --after-merge`: repair the log, sync, commit `.novadev/`.

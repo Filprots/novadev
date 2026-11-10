@@ -2,6 +2,7 @@
 
 **Date:** 2026-11-10
 **Feature:** FEAT-0018, FEAT-0015
+**Commits:** 76f52b5
 
 ## Prompt
 Add `ai_review.md` (verdict APPROVE / CHANGES, the checks run with results, the reviewer) to the

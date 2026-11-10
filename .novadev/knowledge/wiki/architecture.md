@@ -12,8 +12,8 @@ sources:
   - resource: repo:src/knowledge.ts
   - resource: repo:src/links.ts
   - resource: repo:src/work.ts
-generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:44:33+01:00 }
-stale_after: 2027-02-08T15:44:33+01:00
+generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:50:53+01:00 }
+stale_after: 2027-02-08T15:50:53+01:00
 ---
 
 # Architecture
@@ -51,6 +51,7 @@ walking up from the cwd to the folder that contains `.novadev/` (`requireProject
 | sub-repos (`"subrepos"`, `repo@hash` commits, `**Repos:**`) | `src/subrepos.ts` — used by links and placement |
 | merge rules (`.gitattributes` block, driver) and `sync --after-merge` | `src/merge-rules.ts` |
 | the review record and team mode (`todoState`'s review gate) | `src/review.ts` — imported by `lib.ts` |
+| `worktree …` (one worktree per task across repositories) | `src/worktree.ts` |
 | git (read-only questions) | `src/git.ts` — but see *The git boundary* |
 
 Dependency direction: command modules → audits/mechanics → `lib.ts` → `okf.ts`. `okf.ts`
@@ -99,7 +100,7 @@ the fixes and reports them as "stale" instead of writing.
 | archive | `.novadev/archive/<year>/{todos,totest}/` | `sync`, `archive` |
 | knowledge | `.novadev/knowledge/` (concepts, derived `index.md`s, `log.md`) | agent + `knowledge log`; `sync` derives |
 | metrics snapshot | `.novadev/metrics/latest.json` | `sync` only |
-| the lock registry (every worktree's batches in work, with their claims) | `<git common dir>/novadev/locks/<batch>.json` — inside `.git`, never committed | `work` only (`src/registry.ts`) |
+| the registry (every worktree's batches in work with their claims; the worktrees novadev made) | `<git common dir>/novadev/locks/<batch>.json`, `…/worktrees/<name>.json` — inside `.git`, never committed | `work`, `worktree` (`src/registry.ts`) |
 
 All of it is meant to be committed, except the registry: it is a mirror of the locks for the
 other worktrees of the same clone. Work files
@@ -109,9 +110,10 @@ YAML read by `src/okf.ts`.
 
 ## The git boundary
 
-novadev **writes to git in two named places only**: `novadev deploy` defines the
+novadev **writes to git in named places only**: `novadev deploy` defines the
 `novadev-derived` merge driver in the clone's config, and `novadev sync --after-merge` commits
-what it regenerated in `.novadev/` (both in `src/merge-rules.ts`). Everything else is
+what it regenerated in `.novadev/` (both in `src/merge-rules.ts`); `novadev worktree` makes and
+removes worktrees and branches and merges them (`src/worktree.ts`). Everything else is
 read-only and answers `null` when git cannot tell, and callers then fall back to
 the working tree. `src/git.ts` is the shared home of those questions (`lastCommitDate`,
 `headSummary`, `dirtyPaths`, `fileAtHead`, `unchangedSinceHead`, `commitPaths`).
