@@ -7,14 +7,18 @@ const [command, ...args] = process.argv.slice(2);
 const HELP = `novadev ${NOVADEV_VERSION} — structured development system
 
 usage:
-  novadev sync [--check]    THE close-out: run the metrics hook (if set), regenerate derived
+  novadev sync [--check | --after-merge]
+                            THE close-out: run the metrics hook (if set), regenerate derived
                             links and the knowledge indexes, archive what is finished, validate
                             (the knowledge bundle and its log included), and print what the agent
                             + the human still have to do; --check writes nothing and fails on
                             problems, stale derived files (the metrics snapshot and the wiki
                             block included), an unreadable snapshot, a budget raise sync has not
-                            written yet, a debt budget it cannot check, or known debt over budget
-  novadev deploy            create/upgrade .novadev/ + the playbook + agent adapters
+                            written yet, a debt budget it cannot check, or known debt over budget;
+                            --after-merge (after merging a branch): repair the knowledge log, run
+                            sync, and commit what it changed in .novadev/
+  novadev deploy            create/upgrade .novadev/ + the playbook + agent adapters, and the
+                            merge rules (.gitattributes + the merge driver in this clone's git config)
                             (on an older layout, run migrate-repo first)
   novadev new [slug…]       scaffold today's next batch (todos/YYYY-MM-DD_N/), optional todo folders
   novadev status [--json]   is a work cycle on? the batches in work (who, since when, where, paused

@@ -23,6 +23,7 @@ import {
   todayStamp,
 } from './lib.ts';
 import { REVIEW_DAYS_DEFAULT, derivedIndexes, initialLog, listConcepts } from './knowledge.ts';
+import { GITATTRIBUTES, MERGE_DRIVER, configureMergeDriver, writeMergeRules } from './merge-rules.ts';
 import { pendingMigrations } from './migrations.ts';
 import { LOG_FILE } from './okf.ts';
 
@@ -193,6 +194,12 @@ export function deploy(cwd: string = process.cwd()): void {
     const changed = upsertManagedSection(join(cwd, entry));
     if (changed) refreshed.push(entry);
   }
+
+  // 6. How novadev's own files merge between parallel branches: a managed block in .gitattributes
+  // (tracked, so every clone has the rules) and the driver it names in this clone's git config.
+  const hadAttributes = existsSync(join(cwd, GITATTRIBUTES));
+  if (writeMergeRules(cwd)) (hadAttributes ? refreshed : created).push(GITATTRIBUTES);
+  if (configureMergeDriver(cwd) === true) refreshed.push(`git config merge.${MERGE_DRIVER}`);
 
   const report = [
     `novadev ${NOVADEV_VERSION} deployed into ${ROOT_DIR_NAME}/`,

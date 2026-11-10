@@ -758,6 +758,13 @@ So a batch in `todos/` carrying `completed.md` is **finished, not pending** — 
 the marker before assuming there is work in it. If you need one gone early,
 `novadev archive <batch>` overrides the grace.
 
+**After a merge** of another branch into this one (a worktree's branch into the default
+branch, or the default branch into a task branch), run `novadev sync --after-merge`: it joins
+the knowledge log's split days, regenerates every derived file, and commits what it changed in
+`.novadev/`. The merge itself never conflicts on those files: `novadev deploy` wrote the merge
+rules into `.gitattributes`. If sync says this clone lacks the `novadev-derived` driver, run
+`novadev deploy`.
+
 **Archiving happens on the default branch only.** On a task branch, sync moves nothing
 and lists what the default branch will archive after the merge ("not archived here"); that
 line is information, not a NEXT ACTION. Never archive by hand on a task branch: the same

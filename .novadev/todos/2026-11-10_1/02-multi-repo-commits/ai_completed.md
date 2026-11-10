@@ -2,6 +2,7 @@
 
 **Date:** 2026-11-10
 **Feature:** FEAT-0016, FEAT-0005, FEAT-0012
+**Commits:** 71c2451
 
 ## Prompt
 `**Commits:** abc123` is ambiguous when a todo changes several sub-repos (irris, irrippr,

@@ -427,6 +427,43 @@ which files its commit changed, so a hub inside it (`"hubs": ["repos/irrippr/src
 works like any other. Two sub-repos with one name are a problem: a record could not tell them
 apart.
 
+### Merging parallel branches: `.gitattributes` and `sync --after-merge`
+
+Two branches that both record knowledge, or both regenerate a derived file, would conflict on
+every merge. `novadev deploy` writes a managed block into the project's `.gitattributes`:
+
+```
+# novadev:begin — managed by `novadev deploy`: how novadev's own files merge (see the README, "Parallel work")
+.novadev/knowledge/log.md merge=union
+.novadev/knowledge/**/index.md merge=novadev-derived
+.novadev/knowledge/features/*/work.md merge=novadev-derived
+.novadev/knowledge/features/*/tests.md merge=novadev-derived
+.novadev/todos/*/completed.md merge=novadev-derived
+.novadev/metrics/latest.json merge=novadev-derived
+# novadev:end
+```
+
+The knowledge log only ever gains entries, so a union keeps both sides'. Every derived file
+merges with the `novadev-derived` driver, which keeps this side's copy, because the next sync
+rewrites it anyway. Deploy defines that driver in the clone's git config
+(`merge.novadev-derived.driver true`). The config lives in the common git dir, so every
+worktree of the clone has it. A fresh clone gets the rules from git but not the driver, so
+`novadev sync` asks you to run `novadev deploy` there. Lines outside the block are your own
+and are kept.
+
+After a merge, run:
+
+```sh
+novadev sync --after-merge
+```
+
+It refuses while the merge is still in progress, and when `.novadev/` holds uncommitted
+changes. Otherwise it repairs the knowledge log: a union can leave one day in two sections,
+so it joins them and orders the days newest first, keeping each entry once. Then it runs a
+normal sync and **commits what that changed in `.novadev/`** ("novadev sync after merge — N
+file(s) …"). It commits nothing else, whatever else the index holds. This is the only commit
+novadev makes on its own, and the person merging asked for it.
+
 ## Knowledge — an Open Knowledge Format bundle
 
 Knowledge rots when nobody can tell a fresh fact from an old guess. novadev keeps the

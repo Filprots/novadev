@@ -12,8 +12,8 @@ sources:
   - resource: repo:src/knowledge.ts
   - resource: repo:src/links.ts
   - resource: repo:src/work.ts
-generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:28:02+01:00 }
-stale_after: 2027-02-08T15:28:02+01:00
+generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:32:05+01:00 }
+stale_after: 2027-02-08T15:32:05+01:00
 ---
 
 # Architecture
@@ -49,6 +49,7 @@ walking up from the cwd to the folder that contains `.novadev/` (`requireProject
 | metrics hook, snapshot, deltas | `src/metrics.ts`; the debt budget in `src/debt-budget.ts`; file-only judgements + wiki budgets block in `src/metrics-audit.ts` |
 | hub paths / the `## Placement` check | `src/hubs.ts` / `src/placement.ts` |
 | sub-repos (`"subrepos"`, `repo@hash` commits, `**Repos:**`) | `src/subrepos.ts` — used by links and placement |
+| merge rules (`.gitattributes` block, driver) and `sync --after-merge` | `src/merge-rules.ts` |
 | git (read-only questions) | `src/git.ts` — but see *The git boundary* |
 
 Dependency direction: command modules → audits/mechanics → `lib.ts` → `okf.ts`. `okf.ts`
@@ -105,8 +106,10 @@ YAML read by `src/okf.ts`.
 
 ## The git boundary
 
-novadev **never writes to git** — no command commits, stages, branches or resets. All git
-access is read-only and answers `null` when git cannot tell, and callers then fall back to
+novadev **writes to git in two named places only**: `novadev deploy` defines the
+`novadev-derived` merge driver in the clone's config, and `novadev sync --after-merge` commits
+what it regenerated in `.novadev/` (both in `src/merge-rules.ts`). Everything else is
+read-only and answers `null` when git cannot tell, and callers then fall back to
 the working tree. `src/git.ts` is the shared home of those questions (`lastCommitDate`,
 `headSummary`, `dirtyPaths`, `fileAtHead`, `unchangedSinceHead`, `commitPaths`).
 `lastCommitDate` alone asks the repository that *holds* the path (possibly one nested in

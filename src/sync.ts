@@ -30,6 +30,7 @@ import {
   listTestTasks,
   novadevDir,
   NOVADEV_VERSION,
+  ROOT_DIR_NAME,
   readFrontmatter,
   requireProjectRoot,
   todoState,
@@ -39,19 +40,36 @@ import { auditLinks } from './links.ts';
 import { displayCommand, refreshMetrics } from './metrics.ts';
 import { auditMetrics } from './metrics-audit.ts';
 import { auditPlacement } from './placement.ts';
+import { afterMergeRefusal, commitAfterMerge, MERGE_DRIVER, hasMergeRules, mergeDriverConfigured, repairLogFile } from './merge-rules.ts';
 import { auditWork } from './work.ts';
 
 export async function sync(args: string[]): Promise<void> {
   const check = args.includes('--check');
+  const afterMerge = args.includes('--after-merge');
   for (const a of args) {
-    if (a !== '--check') {
-      console.error(`novadev: unknown option "${a}"\nusage: novadev sync [--check]`);
+    if (a !== '--check' && a !== '--after-merge') {
+      console.error(`novadev: unknown option "${a}"\nusage: novadev sync [--check | --after-merge]`);
       process.exit(1);
     }
+  }
+  if (check && afterMerge) {
+    console.error('novadev: --check writes nothing and --after-merge commits — use one of them');
+    process.exit(1);
   }
 
   const root = requireProjectRoot();
   const nd = novadevDir(root);
+
+  // After a merge: the tree must hold the merge and nothing else in .novadev/, so the commit below
+  // carries only what sync derives. Then the log a union merge left is repaired first.
+  if (afterMerge) {
+    const refusal = afterMergeRefusal(root);
+    if (refusal !== null) {
+      console.error(`novadev: sync --after-merge: ${refusal}`);
+      process.exit(1);
+    }
+    if (repairLogFile(nd)) console.log('after merge: the knowledge log has one section per day again, newest first');
+  }
 
   // A repo on an older layout must migrate before anything else is trustworthy.
   const deployed = deployedVersion(nd);
@@ -162,6 +180,21 @@ export async function sync(args: string[]): Promise<void> {
         : '\nsync: clean. ✓',
     );
   }
+  // After a merge, what this run changed in .novadev/ is committed — problems or not: the derived
+  // files are right either way, and the problems are listed above for the person to settle.
+  if (afterMerge) {
+    const made = commitAfterMerge(root);
+    if (made.error !== null) {
+      console.log(`\nafter merge: ✗ the commit failed — ${made.error}. The regenerated files are left in the tree.`);
+      process.exit(1);
+    }
+    console.log(
+      made.committed
+        ? `\nafter merge: committed ${made.files.length} file(s) of ${ROOT_DIR_NAME}/ as ${made.hash}`
+        : '\nafter merge: nothing in .novadev/ needed regenerating — no commit',
+    );
+  }
+
   // `--check` is the gate: a stale derived file, an unreadable snapshot, a raise sync has not
   // written yet, a budget nothing can be checked against, or a debt budget that is exceeded (and
   // not raised in a record) fails it. Plain `sync` writes the files and lists the rest as NEXT
@@ -185,6 +218,14 @@ export async function sync(args: string[]): Promise<void> {
 /** Work only an agent can do — the loop keeps running until this list is empty. */
 function agentActions(root: string, nd: string, notes: string[]): string[] {
   const out: string[] = [];
+
+  // The merge rules are written, but this clone does not define their driver: a merge would fall
+  // back to a text merge and conflict on every derived file.
+  if (hasMergeRules(root) && mergeDriverConfigured(root) === false) {
+    out.push(
+      `this clone does not define the merge driver "${MERGE_DRIVER}" that .gitattributes names — run \`novadev deploy\` here (it sets it in the git config every worktree shares)`,
+    );
+  }
 
   // (A missing wiki is the knowledge audit's first action.)
   if (!existsSync(join(featuresDir(nd), 'index.md')) && listFeatures(nd).length === 0) {

@@ -19,7 +19,7 @@ The work that built [FEAT-0016 — Sub-repos: commits in nested repositories](fe
 
 ## Commits
 
-(no linked commits yet)
+- `71c2451` — 2026-11-10_1/02-multi-repo-commits
 
 _Linked by `**Feature:** FEAT-0016` in each todo's record._
 <!-- novadev:work:end -->

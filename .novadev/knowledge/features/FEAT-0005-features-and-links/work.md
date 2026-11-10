@@ -20,6 +20,7 @@ The work that built [FEAT-0005 — Features registry and the link graph](feature
 
 ## Commits
 
+- `71c2451` — 2026-11-10_1/02-multi-repo-commits
 - `2ec3236` — 2026-11-10_2/05-history-features-and-links
 - `72e0194` — 2026-11-10_2/05-history-features-and-links
 - `01411ee` — 2026-11-10_2/05-history-features-and-links

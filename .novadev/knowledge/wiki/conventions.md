@@ -1,7 +1,7 @@
 ---
 type: Wiki Page
 title: Conventions
-description: "How code is written in novadev: zero dependencies, one exported function per command module, JSON-file payloads and JSON answers for agent-facing commands, Parsed<T>/refuse() for settings, marker-fenced derived files, read-only git, plain-English messages, fixture-only tests, and docs.test.ts keeping the README and playbooks honest."
+description: "How code is written in novadev: zero dependencies, one exported function per command module, JSON-file payloads and JSON answers for agent-facing commands, Parsed<T>/refuse() for settings, marker-fenced derived files, read-only git questions and git writes only where a person asked, plain-English messages, fixture-only tests, and docs.test.ts keeping the README and playbooks honest."
 tags: [conventions, style, errors, payloads, derived-files, tests, docs, messages]
 sources:
   - resource: repo:src/lib.ts
@@ -12,8 +12,8 @@ sources:
   - resource: repo:tests/helpers.ts
   - resource: repo:tests/docs.test.ts
   - resource: repo:tests/migrations.test.ts
-generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:18:33+01:00 }
-stale_after: 2027-02-08T15:18:33+01:00
+generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:32:05+01:00 }
+stale_after: 2027-02-08T15:32:05+01:00
 ---
 
 # Conventions
@@ -72,10 +72,13 @@ stale_after: 2027-02-08T15:18:33+01:00
 
 ## Git
 
-Read-only, always; `null` when git cannot tell, then fall back to the working tree. No
-command may commit, stage, branch or reset. `src/git.ts` is the shared home for git
-questions; UNVERIFIED: whether new ones must go there — five modules still call git
-directly (see [architecture](architecture.md)).
+Questions are read-only and answer `null` when git cannot tell; callers then fall back to the
+working tree. `src/git.ts` is the shared home for them (a sub-repo is asked with `nested`, without
+a hook's GIT_* variables); UNVERIFIED: whether new ones must go there — five modules still call
+git directly (see [architecture](architecture.md)). A git WRITE lives only in the module of the
+command a person runs to get it, never in `src/git.ts`: `src/merge-rules.ts` (deploy's driver
+config, `sync --after-merge`'s commit of `.novadev/`). No other command commits, stages,
+branches or resets.
 
 ## Prose: messages, comments, docs
 

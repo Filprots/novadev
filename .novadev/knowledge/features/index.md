@@ -4,6 +4,7 @@
 
 * [● FEAT-0003 — Doctor: a read-only structure check](FEAT-0003-doctor/feature.md) - shipped · Run `novadev doctor` to validate a project's whole .novadev/ tree without changing anything — batch and todo naming, records, test tasks, the link graph, the knowledge bundle, metrics settings, placement, the locks, the deployed version — exiting 1 on problems.
 * [● FEAT-0008 — sync: the close-out, and its --check gate](FEAT-0008-sync-close-out/feature.md) - shipped · Run `novadev sync` after every round to measure (if set), regenerate every derived file, archive what is finished, validate the tree, and get two lists — NEXT ACTIONS for the agent and WAITING ON THE HUMAN; `--check` writes nothing and fails, for a hook or CI.
+* [● FEAT-0017 — Merge rules for parallel branches, and sync --after-merge](FEAT-0017-merge-rules/feature.md) - shipped · Branches that both record knowledge or regenerate derived files merge without conflicts: deploy writes a .gitattributes block (the log by union, derived files keep ours) and the merge driver, and `novadev sync --after-merge` repairs the log, regenerates and commits.
 
 # knowledge
 
