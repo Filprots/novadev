@@ -659,6 +659,14 @@ function requireLock(nd: string, batch: string, allowPaused = false): WorkLock {
   if (read.lock.state === 'paused' && !allowPaused) {
     throw new Error(`Batch ${batch} is paused — \`novadev work start ${batch}\` resumes it first.`);
   }
+  // Taken over in another worktree (`work start --take` there): this lock is stale, and writing it
+  // would point the registry back here — two sessions on one batch.
+  const there = locksElsewhere(dirname(nd)).find((lock) => lock.batch === batch && !lock.gone);
+  if (there !== undefined) {
+    throw new Error(
+      `Batch ${batch} was taken over in another worktree: ${there.worktree}${there.branch ? ` (branch ${there.branch})` : ''}, by ${there.agent} — this lock is stale. Release it here with \`novadev work stop ${batch}\`.`,
+    );
+  }
   return read.lock;
 }
 
@@ -956,7 +964,9 @@ export function stopWork(nd: string, batch: string, take: boolean, now: Date = n
     );
   }
   rmSync(lock.path, { force: true });
-  removeRegistryLock(dirname(nd), batch, take);
+  // Only this worktree's entry: another worktree that took the batch over keeps its own (--take
+  // releases the lock HERE, never the one there).
+  removeRegistryLock(dirname(nd), batch);
   const todos = todoStates(nd, batch);
   const unfinished = todos.filter((t) => !isTerminal(t.state)).map((t) => t.todo);
   return {

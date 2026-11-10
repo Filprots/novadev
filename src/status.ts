@@ -18,7 +18,7 @@ import {
 } from './lib.ts';
 import { worktreeList } from './git.ts';
 import { metricsStatusLine } from './metrics-audit.ts';
-import { registryLocks, samePlace } from './registry.ts';
+import { insideWorktree, registryLocks } from './registry.ts';
 import { listTodos } from './todo.ts';
 import { auditWork, latestLine, listWorkLocks, lockLiveness, phaseLabel, readWorkLock } from './work.ts';
 
@@ -48,13 +48,18 @@ export function worktreesData(nd: string): { path: string; branch: string | null
   const list = worktreeList(root);
   if (list === null) return null;
   const registry = registryLocks(root);
+  // A project root belongs to the deepest worktree top that holds it (a worktree may sit inside the
+  // main checkout's folder).
+  const tops = list.filter((w) => !w.bare).map((w) => w.path).sort((a, b) => b.length - a.length);
+  const topOf = (path: string) => tops.find((top) => insideWorktree(path, top)) ?? null;
+  const here = topOf(root);
   return list
     .filter((w) => !w.bare)
     .map((w) => {
-      const current = samePlace(w.path, root);
+      const current = here === w.path;
       const batches = current
         ? listWorkLocks(nd).flatMap((read) => (read.state === 'ok' ? [{ batch: read.batch, state: read.lock.state, agent: read.lock.agent, claims: read.lock.claims }] : []))
-        : registry.filter((lock) => samePlace(lock.worktree, w.path)).map((lock) => ({ batch: lock.batch, state: lock.state, agent: lock.agent, claims: lock.claims }));
+        : registry.filter((lock) => topOf(lock.worktree) === w.path).map((lock) => ({ batch: lock.batch, state: lock.state, agent: lock.agent, claims: lock.claims }));
       return { path: w.path, branch: w.branch, current, main: w.main, batches };
     });
 }

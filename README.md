@@ -114,6 +114,19 @@ the *cancelled* kind). A ref is `2026-10-16_2/02-…`, `2026-10-16_2/02`, or a w
 todo has. The writes refuse a todo with a terminal record or a test gate (that is a new
 todo) and a batch an agent holds right now.
 
+0.16.0 changes no layout: `migrate-repo` only stamps the version. It is for several agents at
+once: parallel branches, git worktrees, and super-repos whose sub-repos are repositories of
+their own (see *Parallel work* below). `novadev deploy` now also writes a managed block into
+the project's `.gitattributes` and defines the `novadev-derived` merge driver in the clone's
+git config. Run it once in every clone, so that merges of novadev's own files do not
+conflict. The new settings are all off when absent: `defaultBranch`, `subrepos`, `team` and
+`worktree`. Three things change for everyone:
+
+- `novadev sync` archives only on the default branch.
+- A completed todo whose `ai_review.md` says CHANGES is open again.
+- Every `novadev work` command also mirrors the batch's lock into
+  `<git common dir>/novadev/locks/`, so other worktrees see it.
+
 ## The system
 
 ```
@@ -441,7 +454,9 @@ it was: its trail and its pause record travel with the branch.
   and that you resume a paused batch in the worktree where its pause record is; `--take`
   moves the batch here anyway. A lock elsewhere whose session is gone is taken over, as it
   would be here, and the answer says where it came from. An entry whose worktree no longer
-  exists is dropped.
+  exists is dropped. After a takeover, the old holder's lock is stale: its waypoints, pauses
+  and claims are refused (it can only `stop`), and a `stop --take` there never removes the
+  new holder's entry.
 - `novadev status` lists the repository's worktrees (when there is more than one) with each
   one's branch and the batches in work there; `status --json` has them as `worktrees`.
   `novadev sync` prints batches in work elsewhere in its *in work* block (`◦ …`) as
@@ -524,7 +539,10 @@ it is **approved and merged**:
 | `completed` | approved and merged | — |
 
 Neither waiting state is the builder's to clear, so sync does not count them as NEXT
-ACTIONS. A todo in either state takes no addendum: new work gets a new todo.
+ACTIONS. A todo in either state takes no addendum: new work gets a new todo. The merge is
+judged from git's history, which differs between clones (a shallow CI checkout lacks old
+commits). So derived files leave it out: a feature's `work.md` shows an approved todo as
+`completed`, and `sync --check` gives the same answer in every clone.
 
 ### `novadev worktree` — one worktree per task, across repositories
 
@@ -564,11 +582,18 @@ Each gate command runs in that repository's worktree with `NOVADEV_WORKTREE`,
 `NOVADEV_BRANCH`, `NOVADEV_BASE` and `NOVADEV_CHANGED` (the changed files, one per line) set.
 
 `merge` runs on the main checkout, and only when every repository there is on its default
-branch with no uncommitted change. It refuses a branch that still carries a batch's lock
-(`working.md`): stop or pause the batch first. It tries every merge with `git merge-tree`
-(git 2.38 or newer) and merges nothing unless all of them would go through. Then it merges
-the sub-repos first and the project last, `--no-ff`, so records never land without their
-code, and runs `novadev sync --after-merge`. novadev never pushes.
+branch with no uncommitted change. It also refuses:
+
+- an untracked file there that the branch would write;
+- a branch on which a batch is still in work, meaning a `working` lock the branch added or
+  changed. Stop it first. A paused lock may go: its pause record is meant to travel with the branch.
+
+It tries every merge with `git merge-tree` (git 2.38 or newer) and merges nothing unless all
+of them would go through. Then it merges the sub-repos first and the project last, `--no-ff`,
+so records never land without their code. If a merge still fails late (a hook refuses it),
+the merges this run made are undone, so nothing is merged. Then it runs
+`novadev sync --after-merge`. `sync` always ends with `--after-merge` in the worktree, so a
+run that stopped at a conflict regenerates on the next one. novadev never pushes.
 
 ```json
 "worktree": {

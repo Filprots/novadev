@@ -40,3 +40,7 @@ One owner per file: a batch declares the paths it will touch (from its features'
 - Claims are checked at `work start` and `work claim`. A feature named by a record written later
   does not grow the claims by itself: claim it (`work claim`) when the plan names the files.
   The worktree command (07) checks a worktree's claims against these too.
+
+- **Independent review, 2026-11-10** (a fresh agent read the committed code; 11 findings, 10
+  reproduced; all fixed in the 0.16.0 release commit, one regression test each in
+  `tests/review016-findings.test.ts`, each failing on the code before): claims spelled `src//auth/` or `src/./auth` missed overlaps (one spelling now), and `_common:src/` was not read as a sub-repo claim (any folder name now).

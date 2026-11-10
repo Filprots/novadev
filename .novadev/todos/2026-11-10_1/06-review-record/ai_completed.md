@@ -48,3 +48,7 @@ and a merge commit on the default branch.
 ## Notes
 - The playbook forbids self-review; the command cannot enforce it (a record does not name its
   builder). Open question in FEAT-0018.
+
+- **Independent review, 2026-11-10** (a fresh agent read the committed code; 11 findings, 10
+  reproduced; all fixed in the 0.16.0 release commit, one regression test each in
+  `tests/review016-findings.test.ts`, each failing on the code before): in team mode the merge state went into the derived work.md, so `sync --check` differed between clones (shallow CI, no local main) and between before and after committing a record (derived files now leave the merge out); `todoState` re-asked git for every call (now once per todo and per repository per run: 40 approved todos took `sync --check` from 53 ms to about 1 s before).

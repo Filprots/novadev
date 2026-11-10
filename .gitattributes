@@ -1,0 +1,8 @@
+# novadev:begin — managed by `novadev deploy`: how novadev's own files merge (see the README, "Parallel work")
+.novadev/knowledge/log.md merge=union
+.novadev/knowledge/**/index.md merge=novadev-derived
+.novadev/knowledge/features/*/work.md merge=novadev-derived
+.novadev/knowledge/features/*/tests.md merge=novadev-derived
+.novadev/todos/*/completed.md merge=novadev-derived
+.novadev/metrics/latest.json merge=novadev-derived
+# novadev:end

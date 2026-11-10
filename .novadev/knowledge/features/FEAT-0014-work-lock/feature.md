@@ -15,8 +15,8 @@ superseded-by: []
 conflicts-with: []
 sources:
   - resource: commit:6655fee
-generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:38:47+01:00 }
-stale_after: 2027-11-10T15:38:47+01:00
+generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T16:13:07+01:00 }
+stale_after: 2027-11-10T16:13:07+01:00
 ---
 
 # FEAT-0014 — The work lock: waypoints, pause and resume
@@ -39,8 +39,10 @@ stale_after: 2027-11-10T15:38:47+01:00
 
 - **Across worktrees** (0.16.0): every `work` command mirrors the lock into
   `<git common dir>/novadev/locks/<batch>.json`, which every worktree of the repository reads.
-  `work start` refuses a batch in work (or paused) in another worktree (`--take` moves it), takes
-  over an abandoned one, and drops entries whose worktree is gone; sync's *in work* block lists
+  `work start` refuses a batch in work (or paused) in another worktree (`--take` moves it — the old
+  holder's lock is then stale: its waypoints, pauses and claims are refused, and its `stop --take`
+  leaves the new entry alone), takes over an abandoned one, and drops entries whose worktree is
+  gone (a project below its repository's top included); sync's *in work* block lists
   the others (`◦`); a batch in work elsewhere is not complete, archived, filed into, or written
   by `todo addendum/edit/cancel` while live.
 - **Claims**: the paths a batch owns — its features' `touches:` plus `--claim` / `novadev work
@@ -60,6 +62,7 @@ and the claims (`normalizeClaim`, `claimOverlaps`); `writeLock` in work.ts mirro
 
 - 2026-10-25 — landed in 0.14.0 (commit 6655fee): `working.md`, `novadev work`, `/novadev-pause`, "in work" in status and sync
 - 2026-11-10 — locks every worktree sees, and claims between batches (`2026-11-10_1/01-worktree-visible-locks`, `2026-11-10_1/05-batch-path-ownership`)
+- 2026-11-10 — fixes from the independent review of batch 2026-11-10_1, before the 0.16.0 release (`2026-11-10_1/07-worktree-command`)
 
 ---
 

@@ -15,8 +15,8 @@ superseded-by: []
 conflicts-with: []
 sources:
   - resource: todo:2026-11-10_1/02-multi-repo-commits
-generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:28:02+01:00 }
-stale_after: 2027-11-10T15:28:02+01:00
+generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T16:13:07+01:00 }
+stale_after: 2027-11-10T16:13:07+01:00
 ---
 
 # FEAT-0016 — Sub-repos: commits in nested repositories
@@ -46,6 +46,7 @@ Git is asked of a sub-repo without the variables a hook exports, so the sub-repo
 ## Progress
 
 - 2026-11-10 — built: `2026-11-10_1/02-multi-repo-commits`
+- 2026-11-10 — fixes from the independent review of batch 2026-11-10_1, before the 0.16.0 release (`2026-11-10_1/07-worktree-command`)
 
 ---
 

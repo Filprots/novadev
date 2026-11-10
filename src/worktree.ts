@@ -426,16 +426,16 @@ export function syncWorktree(root: string, name: string): { ok: boolean; lines: 
   for (const repo of reposOf(entry)) {
     if (dirty(repo.path).length > 0) return { ok: false, lines: [...lines, `✗ ${label(repo)}: commit first (uncommitted changes in ${repo.path})`] };
   }
-  let projectMerged = false;
   for (const repo of reposOf(entry)) {
     const before = git(repo.path, 'rev-parse', 'HEAD').out;
     const merge = git(repo.path, 'merge', '--no-edit', repo.base);
     if (!merge.ok) return { ok: false, lines: [...lines, `✗ ${label(repo)}: conflicts merging ${repo.base} — resolve them in ${repo.path}, commit, then sync again`] };
     const moved = git(repo.path, 'rev-parse', 'HEAD').out !== before;
-    if (repo.name === '.' && moved) projectMerged = true;
     lines.push(`✓ ${label(repo)}: up to date with ${repo.base}${moved ? '' : ' (nothing new)'}`);
   }
-  if (projectMerged && existsSync(novadevDir(entry.path))) lines.push(...afterMerge(entry.path));
+  // Always, not only when the project moved in THIS run: an earlier run may have merged the project
+  // and stopped at a sub-repo's conflict before regenerating. Nothing to regenerate = no commit.
+  if (existsSync(novadevDir(entry.path))) lines.push(...afterMerge(entry.path));
   return { ok: true, lines };
 }
 
@@ -457,10 +457,20 @@ export function mergeWorktree(root: string, name: string, yes: boolean): { ok: b
     const current = git(repo.main, 'branch', '--show-current').out;
     if (current !== repo.base) return stop(`✗ ${label(repo)}: the main checkout (${repo.main}) is on ${current || 'a detached HEAD'}, not ${repo.base}`);
     if (dirty(repo.main, false).length > 0) return stop(`✗ ${label(repo)}: the main checkout has uncommitted changes — nobody should write there; sort it out first`);
+    // git merge-tree cannot see untracked files, and `git merge` refuses to overwrite one: an
+    // untracked file the branch would write must go first, or the merge stops half way.
+    const writes = new Set(git(repo.main, 'diff', '--name-only', '--diff-filter=AMR', `${repo.base}...${entry.branch}`).out.split('\n').filter(Boolean));
+    const blocking = git(repo.main, 'ls-files', '--others', '--exclude-standard').out.split('\n').filter((f) => writes.has(f));
+    if (blocking.length > 0) return stop(`✗ ${label(repo)}: the main checkout has untracked files the branch would write (${blocking.slice(0, 5).join(', ')}) — move them away first`);
   }
-  // A branch that still carries a batch's lock would put that lock on the default branch.
-  const locks = git(entry.main, 'ls-tree', '-r', '--name-only', entry.branch, '--', `${ROOT_DIR_NAME}/todos`).out.split('\n').filter((f) => f.endsWith(`/${WORK_LOCK_FILE}`));
-  if (locks.length > 0) return stop(`✗ the branch carries a batch's lock (${locks.join(', ')}) — stop or pause the batch in the worktree, commit, then merge`);
+  // A batch still WORKING on the branch would land on the default branch as in work. Only the locks
+  // the branch added or changed count, and a paused one may go: its pause record travels on purpose.
+  const own = reposOf(entry)[0]!;
+  const touched = git(entry.main, 'diff', '--name-only', '--diff-filter=AM', `${own.base}...${entry.branch}`, '--', `${ROOT_DIR_NAME}/todos`).out.split('\n');
+  const working = touched
+    .filter((f) => f.endsWith(`/${WORK_LOCK_FILE}`))
+    .filter((f) => /^state:\s*working\s*$/m.test(git(entry.main, 'show', `${entry.branch}:${f}`).out));
+  if (working.length > 0) return stop(`✗ the branch carries a batch still in work (${working.join(', ')}) — stop it (or pause it) in the worktree, commit, then merge`);
   const plan = repos.filter((repo) => aheadBehind(repo.main, repo.base, entry.branch).ahead > 0);
   if (plan.length === 0) return { ok: true, lines: [`nothing to merge: ${entry.branch} has no commit ahead of the default branches`] };
   // All or nothing: every merge is tried first, and nothing merges unless all would.
@@ -473,14 +483,21 @@ export function mergeWorktree(root: string, name: string, yes: boolean): { ok: b
   if (!yes) {
     return { ok: true, lines: ['Dry run — every merge would go through. Add --yes to merge, in this order:', ...order.map((r) => `  ${label(r)}: ${entry.branch} → ${r.base} (${aheadBehind(r.main, r.base, entry.branch).ahead} commit(s))`)] };
   }
-  const done: string[] = [];
+  const done: { repo: Repo; before: string }[] = [];
   for (const repo of order) {
+    const before = must(git(repo.main, 'rev-parse', 'HEAD'), `git rev-parse (${label(repo)})`);
     const merge = git(repo.main, 'merge', '--no-ff', '-m', `Merge ${entry.branch} (worktree ${entry.name})`, entry.branch);
     if (!merge.ok) {
       git(repo.main, 'merge', '--abort');
-      return stop(`✗ ${label(repo)}: the merge failed (${merge.err.split('\n')[0] || 'conflicts'}) — aborted there. Merged so far: ${done.join(', ') || 'nothing'}.`);
+      // All or nothing, even when a merge fails late (a hook, a file appearing): the merges this run
+      // made are undone — they are its own commits, a moment old, never pushed.
+      const undone = [...done].reverse().map(({ repo: r, before: b }) => (git(r.main, 'reset', '--keep', b).ok ? label(r) : `${label(r)} (COULD NOT UNDO — reset it to ${b})`));
+      return stop(
+        `✗ ${label(repo)}: the merge failed (${(merge.err || merge.out).split('\n')[0] || 'conflicts'}) — aborted there.` +
+          (undone.length > 0 ? ` Undone: ${undone.join(', ')}. Nothing is merged.` : ' Nothing is merged.'),
+      );
     }
-    done.push(label(repo));
+    done.push({ repo, before });
     lines.push(`✓ merged ${entry.branch} into ${label(repo)} ${repo.base}`);
   }
   if (plan.some((r) => r.name === '.') && existsSync(novadevDir(entry.main))) lines.push(...afterMerge(entry.main));

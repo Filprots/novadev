@@ -61,6 +61,14 @@ export async function sync(args: string[]): Promise<void> {
   const root = requireProjectRoot();
   const nd = novadevDir(root);
 
+  // A repo on an older layout must migrate before anything else is trustworthy.
+  const deployed = deployedVersion(nd);
+  if (deployed && compareVersions(deployed, NOVADEV_VERSION) < 0) {
+    console.log(`sync: repo is at ${deployed}, installed novadev is ${NOVADEV_VERSION}.`);
+    console.log('  Run `novadev migrate-repo` (then `novadev deploy`) before syncing.');
+    process.exit(1);
+  }
+
   // After a merge: the tree must hold the merge and nothing else in .novadev/, so the commit below
   // carries only what sync derives. Then the log a union merge left is repaired first.
   if (afterMerge) {
@@ -70,14 +78,6 @@ export async function sync(args: string[]): Promise<void> {
       process.exit(1);
     }
     if (repairLogFile(nd)) console.log('after merge: the knowledge log has one section per day again, newest first');
-  }
-
-  // A repo on an older layout must migrate before anything else is trustworthy.
-  const deployed = deployedVersion(nd);
-  if (deployed && compareVersions(deployed, NOVADEV_VERSION) < 0) {
-    console.log(`sync: repo is at ${deployed}, installed novadev is ${NOVADEV_VERSION}.`);
-    console.log('  Run `novadev migrate-repo` (then `novadev deploy`) before syncing.');
-    process.exit(1);
   }
 
   // 0. Metrics: run the project's command, compare, apply budget raises. A missing or failing

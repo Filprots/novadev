@@ -6,7 +6,7 @@ import { readFrontmatterText } from './okf.ts';
 import { reviewGate } from './review.ts';
 
 export const ROOT_DIR_NAME = '.novadev';
-export const NOVADEV_VERSION = '0.15.0';
+export const NOVADEV_VERSION = '0.16.0';
 
 /**
  * The project's knowledge — wiki, memories, features — is one Open Knowledge Format bundle under
@@ -856,11 +856,13 @@ export type TodoState =
  * and while it is open the todo is waiting on a person, not on an agent. Then the review gate
  * (review.ts): a completed todo whose `ai_review.md` asks for CHANGES is `changes`; in team mode
  * one not yet approved is `review`, and one approved but not on the default branch `unmerged`.
+ * `{ merged: false }` leaves the merge out — what the FILES say, the same in every clone: derived
+ * files are written from it, so a shallow clone or another branch layout never makes them stale.
  */
-export function todoState(todoDir: string): TodoState {
+export function todoState(todoDir: string, opts: { merged?: boolean } = {}): TodoState {
   if (existsSync(join(todoDir, RECORD_NEEDSTEST))) return 'needstest';
   if (existsSync(join(todoDir, RECORD_COMPLETED))) {
-    const gate = reviewGate(todoDir);
+    const gate = reviewGate(todoDir, opts.merged !== false);
     if (gate !== null) return gate;
   }
   if (existsSync(join(todoDir, RECORD_CONFIRMED))) return 'confirmed';

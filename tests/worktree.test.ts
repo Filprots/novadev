@@ -188,7 +188,7 @@ describe('sync, merge and remove', () => {
     git(wt, 'reset', '-q', '--hard', 'HEAD~1');
     expect(run(wt, 'work', 'start', '2026-11-10_1', '--agent', 'claude-code/test').code).toBe(0);
     commit(wt, 'lock');
-    expect(run(main, 'worktree', 'merge', 'irr-1').stdout).toContain("✗ the branch carries a batch's lock (.novadev/todos/2026-11-10_1/working.md)");
+    expect(run(main, 'worktree', 'merge', 'irr-1').stdout).toContain('✗ the branch carries a batch still in work (.novadev/todos/2026-11-10_1/working.md)');
   });
 
   test('sync merges the default branches into the worktree; remove keeps an unmerged branch unless --force', () => {

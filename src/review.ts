@@ -65,6 +65,8 @@ const teamCache = new Map<string, boolean>();
 export function forgetReviewCache(): void {
   teamCache.clear();
   mergedCache.clear();
+  todoMergedCache.clear();
+  repositoryCache.clear();
 }
 
 /**
@@ -83,16 +85,38 @@ function openTodoNd(todoDir: string): string | null {
  * changes), and in team mode `review` (no APPROVE yet) and `unmerged` (approved, not on the default
  * branch yet). `todoState` calls this for a todo with ai_completed.md.
  */
-export function reviewGate(todoDir: string): 'changes' | 'review' | 'unmerged' | null {
+export function reviewGate(todoDir: string, checkMerge = true): 'changes' | 'review' | 'unmerged' | null {
   const verdict = reviewVerdict(todoDir);
   if (verdict === 'CHANGES') return 'changes';
   const nd = openTodoNd(todoDir);
   if (nd === null || !teamMode(nd)) return null;
   if (verdict !== 'APPROVE') return 'review';
-  return merged(dirname(nd), todoDir).merged ? null : 'unmerged';
+  if (!checkMerge) return null;
+  // One run asks this many times per todo (status, links, the sweep, the lists); the history does
+  // not move under it, so the answer is kept for the run.
+  let answer = todoMergedCache.get(todoDir);
+  if (answer === undefined) {
+    answer = merged(dirname(nd), todoDir).merged;
+    todoMergedCache.set(todoDir, answer);
+  }
+  return answer ? null : 'unmerged';
 }
 
 const mergedCache = new Map<string, boolean | null>();
+const todoMergedCache = new Map<string, boolean>();
+const repositoryCache = new Map<string, { inGit: boolean; branch: string | null; configured: string | null }>();
+
+/** Whether the project is in git, its default branch, and the setting that named it — asked once per run. */
+function repository(root: string): { inGit: boolean; branch: string | null; configured: string | null } {
+  const known = repositoryCache.get(root);
+  if (known) return known;
+  const setting = readManifest(join(root, ROOT_DIR_NAME))?.defaultBranch;
+  const configured = typeof setting === 'string' && setting.trim() !== '' ? setting.trim() : null;
+  const inGit = headSummary(root) !== null;
+  const answer = { inGit, branch: inGit ? defaultBranch(root, configured) : null, configured };
+  repositoryCache.set(root, answer);
+  return answer;
+}
 
 /** Is `hash` in the history of the default branch of the repository at `path`? Null: git cannot tell. */
 function onDefault(path: string, hash: string, nested: boolean, configured: string | null): boolean | null {
@@ -115,10 +139,8 @@ export function merged(root: string, todoDir: string): MergeCheck {
   const record = join(todoDir, RECORD_COMPLETED);
   const text = existsSync(record) ? readFileSync(record, 'utf8') : '';
   const refs = commitRefsIn(readField(text, 'Commits') ?? '');
-  const setting = readManifest(join(root, ROOT_DIR_NAME))?.defaultBranch;
-  const configured = typeof setting === 'string' && setting.trim() !== '' ? setting.trim() : null;
-  if (headSummary(root) === null) return { merged: true, missing: [], why: null };
-  const branch = defaultBranch(root, configured);
+  const { inGit, branch, configured } = repository(root);
+  if (!inGit) return { merged: true, missing: [], why: null };
   if (branch === null) return { merged: false, missing: [], why: 'git cannot name the default branch — set "defaultBranch" in novadev.json' };
   if (refs.length === 0) {
     const on = fileOnBranch(root, branch, relative(root, record));

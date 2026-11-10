@@ -60,6 +60,7 @@ export type Audit = { problems: string[]; notes: string[]; fixes: Fix[] };
 type TodoLinks = {
   todo: TodoRef;
   state: string;
+  shown: string;
   date: string;
   featureIds: string[];
   /** The commits the record names, as written: `abc1234`, or `irrippr@abc1234` for a sub-repo's. */
@@ -363,6 +364,9 @@ function readTodoLinks(todo: TodoRef): TodoLinks {
   return {
     todo,
     state: todoState(todo.dir),
+    // What work.md shows: the files' account, without the merge (lib.ts, todoState) — so the derived
+    // file is the same in every clone, shallow or not, on every branch.
+    shown: todoState(todo.dir, { merged: false }),
     date,
     featureIds: [...new Set(featureIds)],
     commits: [...new Set(refs.map((ref) => ref.text))],
@@ -445,7 +449,7 @@ function renderWork(linked: TodoLinks[], f: Feature): string {
   } else {
     lines.push('');
     for (const t of linked) {
-      const bits = [t.state, t.date, t.todo.archived ? 'archived' : '', t.repos.length > 0 ? `repos: ${t.repos.join(', ')}` : ''].filter(Boolean);
+      const bits = [t.shown, t.date, t.todo.archived ? 'archived' : '', t.repos.length > 0 ? `repos: ${t.repos.join(', ')}` : ''].filter(Boolean);
       lines.push(`- \`${t.todo.ref}\` — ${bits.join(' · ')}`);
     }
   }

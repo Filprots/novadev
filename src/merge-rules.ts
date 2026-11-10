@@ -42,14 +42,29 @@ function block(): string {
 
 /** The project's .gitattributes with novadev's block written in (added at the end, or replaced in place). */
 export function withMergeRules(text: string): string {
-  const lines = text.replace(/\r\n/g, '\n').split('\n');
-  const begin = lines.findIndex((line) => line.startsWith('# novadev:begin'));
-  const end = begin === -1 ? -1 : lines.findIndex((line, i) => i > begin && line.trim() === END);
-  if (begin !== -1 && end !== -1) {
-    lines.splice(begin, end - begin + 1, ...block().split('\n'));
+  let lines = text.replace(/\r\n/g, '\n').split('\n');
+  const isBegin = (line: string) => line.startsWith('# novadev:begin');
+  // The block is the LAST begin before the first end: a begin whose end someone deleted must never
+  // make a later block swallow the project's own lines between them.
+  const end = lines.findIndex((line) => line.trim() === END);
+  let begin = -1;
+  for (let i = 0; i < (end === -1 ? 0 : end); i++) if (isBegin(lines[i]!)) begin = i;
+  // Any other begin line is an orphan: it goes, with the rule lines of ours right under it — and
+  // nothing else.
+  const rules = new Set(MERGE_RULES);
+  const keep = lines.map(() => true);
+  lines.forEach((line, i) => {
+    if (!isBegin(line) || i === begin) return;
+    keep[i] = false;
+    for (let j = i + 1; j < lines.length && rules.has(lines[j]!.trim()); j++) keep[j] = false;
+  });
+  if (begin !== -1) {
+    const before = lines.slice(0, begin).filter((_, i) => keep[i]);
+    const after = lines.slice(end + 1).filter((_, i) => keep[end + 1 + i]);
+    lines = [...before, ...block().split('\n'), ...after];
     return `${lines.join('\n').replace(/\n+$/, '')}\n`;
   }
-  const body = text.replace(/\r\n/g, '\n').replace(/\n+$/, '');
+  const body = lines.filter((_, i) => keep[i]).join('\n').replace(/\n+$/, '');
   return `${body === '' ? '' : `${body}\n\n`}${block()}\n`;
 }
 

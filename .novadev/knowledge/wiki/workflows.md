@@ -1,7 +1,7 @@
 ---
 type: Wiki Page
 title: Workflows
-description: "Exact commands to install (bun link), run (bun bin/novadev.ts vs the linked novadev, which is this working tree), test (bun test, ~26 s, 508 tests), and release a version (the bump places, migrations, migrate-repo + deploy here and in consumer projects); no CI, no hooks, no secrets."
+description: "Exact commands to install (bun link), run (bun bin/novadev.ts vs the linked novadev, which is this working tree), test (bun test, ~35 s, 566 tests), and release a version (the bump places, migrations, migrate-repo + deploy here and in consumer projects); no CI, no hooks, no secrets."
 tags: [workflows, install, run, test, release, version, deploy, dogfooding]
 sources:
   - resource: repo:package.json
@@ -12,8 +12,8 @@ sources:
   - resource: repo:src/sync.ts
   - resource: repo:src/deploy.ts
   - resource: repo:README.md
-generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:18:33+01:00 }
-stale_after: 2027-02-08T15:18:33+01:00
+generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:53:17+01:00 }
+stale_after: 2027-02-08T15:53:17+01:00
 ---
 
 # Workflows
@@ -41,7 +41,7 @@ No build step, no install step: there are no dependencies. Bun >= 1.4 is require
 ## Test
 
 ```sh
-bun test                     # the whole suite: 508 tests in 23 files, ~26 s (verified 2026-11-10)
+bun test                     # the whole suite: 566 tests in 29 files, ~35 s (verified 2026-11-10, 0.16.0)
 bun test tests/work.test.ts  # one file
 bun test -t "novadev work stop"   # by test name
 ```
@@ -65,8 +65,10 @@ There is no type-check, lint or format command (see [stack](stack.md)).
 
 ## Release a version
 
-Read off the release commits (`git log --oneline`: `novadev 0.14.0 — …`). Everything
-lands in **one commit**:
+Read off the release commits (`git log --oneline`: `novadev 0.14.0 — …`). Up to 0.15.0
+everything landed in **one commit**; 0.16.0 landed as one commit per todo, each with its code,
+tests and docs, and the bump in a last `novadev 0.16.0 — …` commit (the owner's choice for a
+large batch). Either way:
 
 1. Code + tests + `README.md` + the affected `templates/` (playbooks, folder READMEs).
 2. Bump the version in **both** `package.json` `version` and `NOVADEV_VERSION` in
@@ -82,8 +84,10 @@ lands in **one commit**:
 
 Then, in **this repo** and in every project that uses novadev: `novadev migrate-repo`
 (applies pending migrations, refuses a dirty tree without `--force`; `--dry-run` previews)
-→ `novadev deploy` (refreshes playbooks, adapters, READMEs; refuses while migrations are
-pending) → `novadev sync`. Until then `novadev sync` in an older project stops with
+→ `novadev deploy` (refreshes playbooks, adapters, READMEs, and since 0.16.0 the
+`.gitattributes` merge block and the clone's `novadev-derived` merge driver; refuses while
+migrations are pending) → `novadev sync`. Deploying into the other projects changes them: it
+waits for the owner's go-ahead. Until then `novadev sync` in an older project stops with
 "repo is at X, installed novadev is Y".
 
 UNVERIFIED: which consumer projects exist besides this one — the tests name a
@@ -91,7 +95,8 @@ UNVERIFIED: which consumer projects exist besides this one — the tests name a
 Releases are not tagged (`git tag` lists none, 2026-11-10).
 Commit `772a96c` (2026-11-04) added `todo edit` and attachments to `todo addendum`
 without a version bump; the README's 0.15.0 paragraph already describes them.
-TODO(wiki): does a feature commit between releases always wait for the next bump?
+A feature commit between releases waits for the next bump (772a96c waited for 0.16.0; so did
+the commits of batch 2026-11-10_1).
 
 ## Editing the playbooks
 

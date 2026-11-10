@@ -15,8 +15,8 @@ superseded-by: []
 conflicts-with: []
 sources:
   - resource: todo:2026-11-10_1/06-review-record
-generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:44:33+01:00 }
-stale_after: 2027-11-10T15:44:33+01:00
+generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T16:13:07+01:00 }
+stale_after: 2027-11-10T16:13:07+01:00
 ---
 
 # FEAT-0018 — The review record (ai_review.md) and team mode
@@ -36,7 +36,9 @@ this is a code review of a finished todo, by another agent, the lead or a person
   `unmerged` until merged — every commit on its `**Commits:**` line reachable from the default
   branch (a sub-repo's `repo@hash` from that repository's default branch), or, with no commits,
   the record itself committed there. sync lists both under WAITING ON REVIEW OR MERGE, not as
-  NEXT ACTIONS. Neither takes an addendum.
+  NEXT ACTIONS. Neither takes an addendum. Derived files leave the merge out (`todoState(dir,
+  { merged: false })`): `work.md` shows an approved todo as completed in every clone, so `sync
+  --check` does not depend on how deep a clone is.
 
 ## How it works
 
@@ -50,6 +52,7 @@ are gated; archived ones keep the state their records give.
 ## Progress
 
 - 2026-11-10 — built: `2026-11-10_1/06-review-record`
+- 2026-11-10 — fixes from the independent review of batch 2026-11-10_1, before the 0.16.0 release (`2026-11-10_1/07-worktree-command`)
 
 ## Open questions
 

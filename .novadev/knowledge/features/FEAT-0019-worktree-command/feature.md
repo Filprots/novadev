@@ -15,8 +15,8 @@ superseded-by: []
 conflicts-with: []
 sources:
   - resource: todo:2026-11-10_1/07-worktree-command
-generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:50:53+01:00 }
-stale_after: 2027-11-10T15:50:53+01:00
+generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T16:13:07+01:00 }
+stale_after: 2027-11-10T16:13:07+01:00
 ---
 
 # FEAT-0019 — novadev worktree: one worktree per task across repositories
@@ -36,11 +36,14 @@ stale_after: 2027-11-10T15:50:53+01:00
   novadev.json (with NOVADEV_WORKTREE/BRANCH/BASE/CHANGED). Exit 1 on a failure.
 - `mr <name>` — the merge request's text: commits per repository (`irrippr@hash`), claims,
   batches still in work, the gate line and the checklist.
-- `sync <name>` — merge each default branch into the worktree, then `sync --after-merge`.
+- `sync <name>` — merge each default branch into the worktree, then always `sync --after-merge`
+  (a run stopped by a sub-repo conflict regenerates on the next).
 - `merge <name> [--yes]` — the lead, on the main checkout: refuses dirt, a main checkout off
-  its default branch, a branch carrying a lock; `git merge-tree` pre-checks every repository
-  and merges nothing unless all would go; sub-repos first, the project last, `--no-ff`; then
-  `novadev sync --after-merge`. Without `--yes`, a dry run.
+  its default branch, an untracked file there the branch would write, and a batch still WORKING
+  on the branch (a lock it added or changed; a paused one may go); `git merge-tree` pre-checks
+  every repository and merges nothing unless all would go; sub-repos first, the project last,
+  `--no-ff`; a merge that still fails late (a hook) undoes the ones this run made (`reset
+  --keep`); then `novadev sync --after-merge`. Without `--yes`, a dry run.
 - `remove <name> [--force]` — links, worktrees (sub-repos first), merged branches (`-d`;
   `--force` drops unmerged ones and uncommitted changes), its registry entries.
 
@@ -55,6 +58,7 @@ the project's default branch from `src/branch.ts`.
 ## Progress
 
 - 2026-11-10 — built: `2026-11-10_1/07-worktree-command`
+- 2026-11-10 — fixes from the independent review of batch 2026-11-10_1, before the 0.16.0 release (`2026-11-10_1/07-worktree-command`)
 
 ## Open questions
 

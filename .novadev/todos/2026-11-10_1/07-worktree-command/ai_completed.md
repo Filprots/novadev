@@ -2,6 +2,7 @@
 
 **Date:** 2026-11-10
 **Feature:** FEAT-0019, FEAT-0014
+**Commits:** c0df0d2
 
 ## Prompt
 Generalise ~/_work/paperclip/scripts/irris-worktree into `novadev worktree
@@ -59,3 +60,7 @@ branch, claims, a gate whose checks are configured per repo in novadev.json, an 
   `gate` commands cover its checks; the guard could become a later todo if wanted.
 - `~/_work/paperclip/scripts/irris-worktree` stays as it is; switching the IRRIS company to
   `novadev worktree` is the owner's call once 0.16.0 is deployed there.
+
+- **Independent review, 2026-11-10** (a fresh agent read the committed code; 11 findings, 10
+  reproduced; all fixed in the 0.16.0 release commit, one regression test each in
+  `tests/review016-findings.test.ts`, each failing on the code before): `merge --yes` could merge a sub-repo and then fail on the project (an untracked file in the main checkout, or a hook) — now an untracked file the branch would write refuses up front, and a late failure undoes the merges that run made; any `working.md` on the branch blocked the merge, even a paused one or one from main (now only a WORKING lock the branch added or changed); `sync` skipped `--after-merge` for good after a sub-repo conflict (now always runs it).

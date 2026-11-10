@@ -1,6 +1,6 @@
 {
   "novadev": true,
-  "version": "0.15.0",
+  "version": "0.16.0",
   "deployedAt": "2026-11-10",
   "metrics": null,
   "debtBudget": null,
@@ -12,5 +12,6 @@
       "memories": 180,
       "features": 365
     }
-  }
+  },
+  "migratedAt": "2026-11-10"
 }

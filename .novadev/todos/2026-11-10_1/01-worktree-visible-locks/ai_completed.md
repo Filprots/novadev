@@ -49,3 +49,7 @@ that counts in its worktree (trail and pause record in git, travelling with the 
   planned in the batch's ai_progress.md.
 - The registry is only a mirror. A worktree whose `working.md` was deleted by hand leaves an entry
   until the next `work` command there or `novadev worktree remove` (07).
+
+- **Independent review, 2026-11-10** (a fresh agent read the committed code; 11 findings, 10
+  reproduced; all fixed in the 0.16.0 release commit, one regression test each in
+  `tests/review016-findings.test.ts`, each failing on the code before): a project below its repository's top made every other worktree's entry look gone (now: inside a live worktree); a cross-worktree `--take` left the old holder able to mirror back (its lock writes are now refused as stale); `stop --take` removed the other worktree's entry (now only this worktree's); status matches a root to its deepest worktree top.

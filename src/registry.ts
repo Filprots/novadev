@@ -135,9 +135,27 @@ export function removeRegistryLock(root: string, batch: string, any = false): vo
 }
 
 /** The worktrees git knows for this repository, as real paths; null outside git. */
-function liveWorktrees(root: string): Set<string> | null {
+function liveWorktrees(root: string): string[] | null {
   const list = worktreeList(root);
-  return list === null ? null : new Set(list.map((w) => real(w.path)));
+  return list === null ? null : list.map((w) => real(w.path));
+}
+
+/**
+ * Is `path` (a project root, as the registry records it) inside one of `worktrees` (their tops)? The
+ * project may sit below the top of its repository (`repo/app/.novadev`), so equality is not enough.
+ */
+function inLiveWorktree(path: string, worktrees: string[] | null): boolean {
+  if (!existsSync(path)) return false;
+  if (worktrees === null) return true;
+  const here = real(path);
+  return worktrees.some((top) => here === top || here.startsWith(`${top}/`));
+}
+
+/** Is the project root `path` inside the worktree whose top is `top`? */
+export function insideWorktree(path: string, top: string): boolean {
+  const here = real(path);
+  const t = real(top);
+  return here === t || here.startsWith(`${t}/`);
 }
 
 /** A registry lock in another worktree, and whether that worktree still exists. */
@@ -151,7 +169,7 @@ export function locksElsewhere(root: string): ElsewhereLock[] {
   const worktrees = liveWorktrees(root);
   return registryLocks(root)
     .filter((lock) => !samePlace(lock.worktree, root))
-    .map((lock) => ({ ...lock, gone: !existsSync(lock.worktree) || (worktrees !== null && !worktrees.has(real(lock.worktree))) }));
+    .map((lock) => ({ ...lock, gone: !inLiveWorktree(lock.worktree, worktrees) }));
 }
 
 /** Remove the entries whose worktree is gone; returns their batches. */
@@ -177,14 +195,20 @@ export function batchesInWorkElsewhere(root: string): Set<string> {
  */
 export function normalizeClaim(root: string, raw: string): { ok: true; value: string } | { ok: false; error: string } {
   let text = raw.trim().replace(/\\/g, '/');
-  const prefixed = /^([A-Za-z0-9][\w.-]*):(.*)$/.exec(text);
-  if (prefixed && !/^[A-Za-z]:\//.test(text)) {
+  // `<sub-repo>:<path>` — a sub-repo is named by its folder, whatever characters that has; a Windows
+  // drive (`C:/…`) is not one, and is refused below as a path outside the project.
+  const prefixed = /^([^\s:/]+):(.*)$/.exec(text);
+  if (prefixed && !/^[A-Za-z]:(\/|$)/.test(text)) {
     const repo = listSubrepos(root).repos.find((r) => r.name === prefixed[1]);
     if (repo === undefined) return { ok: false, error: `claim "${raw}": "${prefixed[1]}" is not a sub-repo (see "subrepos" in novadev.json)` };
     text = `${repo.rel}/${prefixed[2]!.replace(/^\/+/, '')}`;
   }
-  const path = comparablePath(text);
-  if (path === '' || path === '.' || path.startsWith('/') || path.split('/').includes('..')) {
+  if (/^[A-Za-z]:/.test(text)) text = `/${text}`;
+  // One spelling per path: "src//auth/", "src/./auth" and "./src/auth" are all "src/auth".
+  const absolute = text.startsWith('/');
+  const parts = text.split('/').filter((part) => part !== '' && part !== '.');
+  const path = absolute ? '/' : comparablePath(parts.join('/'));
+  if (path === '' || path === '.' || path.startsWith('/') || parts.includes('..')) {
     return { ok: false, error: `claim "${raw}" must be a path inside the project, like src/auth/ or irrippr:ps/layouting/` };
   }
   return { ok: true, value: path };
@@ -272,7 +296,7 @@ export type ClaimHolder = { kind: 'batch' | 'worktree'; id: string; worktree: st
 export function claimHolders(root: string, exceptPlace: string | null): ClaimHolder[] {
   const out: ClaimHolder[] = [];
   const worktrees = liveWorktrees(root);
-  const exists = (path: string) => existsSync(path) && (worktrees === null || worktrees.has(real(path)));
+  const exists = (path: string) => inLiveWorktree(path, worktrees);
   for (const lock of registryLocks(root)) {
     if (!exists(lock.worktree) || (exceptPlace !== null && samePlace(lock.worktree, exceptPlace))) continue;
     out.push({ kind: 'batch', id: lock.batch, worktree: lock.worktree, branch: lock.branch, agent: lock.agent, claims: lock.claims });

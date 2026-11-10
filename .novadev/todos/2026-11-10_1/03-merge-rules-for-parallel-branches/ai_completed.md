@@ -52,3 +52,7 @@ merge=union; derived files merge=novadev-derived keeping ours) and the merge dri
   it after its merge.
 - Feature verdict: build FEAT-0017 (`features merge` found only deploy, `features gitattributes`
   nothing, `--touching src/deploy.ts` FEAT-0001, which it depends on).
+
+- **Independent review, 2026-11-10** (a fresh agent read the committed code; 11 findings, 10
+  reproduced; all fixed in the 0.16.0 release commit, one regression test each in
+  `tests/review016-findings.test.ts`, each failing on the code before): an orphaned `# novadev:begin` (end deleted) made the second deploy swallow the project's own `.gitattributes` lines (now the block is the last begin before the first end, orphans dropped alone); `sync --after-merge` repaired the log before the migrate-first stop (the version gate now comes first).

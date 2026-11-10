@@ -87,7 +87,9 @@ export function forgetSubrepos(): void {
 /** One commit a record names: `repo` is null for the project's own repository. `text` is how it was written. */
 export type CommitRef = { repo: string | null; hash: string; text: string };
 
-const COMMIT_REF = /(?<![\w.@-])(?:([A-Za-z0-9][\w.-]*)@)?([0-9a-f]{7,40})(?![\w@])/g;
+// A sub-repo is named by its folder, whatever characters that has (`_common`, `.dotfiles`, `my+lib`):
+// the name is everything up to the "@", back to a space, a comma, a quote mark or a bracket.
+const COMMIT_REF = /(?<![^\s,;`'"()[\]])(?:([^\s,;`'"()[\]@]+)@)?([0-9a-f]{7,40})(?![\w@])/g;
 
 /** The commits a `**Commits:**` value names, in order, each once: `abc1234` and `irrippr@abc1234`. */
 export function commitRefsIn(value: string): CommitRef[] {

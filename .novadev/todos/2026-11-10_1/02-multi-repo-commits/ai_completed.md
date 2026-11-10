@@ -46,3 +46,7 @@ resolves them against sub-repos configured in novadev.json (`"subrepos": ["repos
 - Feature verdict: build FEAT-0016 (searched `features repo`, `features commits`, `--touching
   src/links.ts`, `--touching src/placement.ts`: no feature covered nested repositories); it extends
   the link graph (FEAT-0005) and placement (FEAT-0012).
+
+- **Independent review, 2026-11-10** (a fresh agent read the committed code; 11 findings, 10
+  reproduced; all fixed in the 0.16.0 release commit, one regression test each in
+  `tests/review016-findings.test.ts`, each failing on the code before): `commitRefsIn` dropped or cut sub-repo names starting with `_` or `.`, or holding `+` (`_common@…` read as no commit, which let team mode treat an approved record as naming none); a name is now everything up to the `@`.
