@@ -15,6 +15,7 @@ The work that built [FEAT-0005 — Features registry and the link graph](feature
 
 ## Todos
 
+- `2026-11-10_1/02-multi-repo-commits` — completed · 2026-11-10
 - `2026-11-10_2/05-history-features-and-links` — completed · 2026-11-10 · archived
 
 ## Commits

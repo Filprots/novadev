@@ -217,7 +217,8 @@ function agentActions(root: string, nd: string, notes: string[]): string[] {
     if (note.includes('status "shipped"') || note.includes('status "planned"')) {
       out.push(`${note} (loop phase 7)`);
     }
-    if (note.includes('is not in this repository')) out.push(note);
+    if (/^commit \S+ \(/.test(note)) out.push(note);
+    if (note.includes('**Repos:** names') || note.startsWith('novadev.json: "subrepos"')) out.push(note);
   }
 
   const postponed = listFiles(join(nd, 'postponed')).filter(

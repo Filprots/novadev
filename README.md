@@ -393,6 +393,40 @@ HUMAN (you stopped it; you say when it goes on) and an abandoned one under NEXT 
 anyway, because releasing it is what you asked for. `doctor` also notes a lock whose last
 waypoint names a todo the batch does not have.
 
+## Parallel work — branches, worktrees and sub-repos
+
+novadev also works when several agents work at once, each on its own branch in its own git
+worktree, and when one project is a super-repo whose sub-repos are independent repositories
+nested inside it (`repos/*`, git-ignored by the super-repo). Every part of this is off until
+a project uses it.
+
+### Sub-repos: `repo@hash` and `**Repos:**`
+
+A todo that changes several repositories names each commit in the repository it belongs to.
+List the sub-repos in `.novadev/novadev.json`:
+
+```json
+"subrepos": ["repos/*", "vendor/engine"]
+```
+
+Each entry is a folder relative to the project root; one ending in `/*` stands for every folder
+in it that is a git repository of its own. A sub-repo is named by its folder (`repos/irrippr`
+→ `irrippr`). A record then writes:
+
+```markdown
+**Commits:** 4f2a9c1, irrippr@abc1234, irrisketch_locales@9e8d7c6
+**Repos:** irrippr, irrisketch_locales
+```
+
+A bare hash is a commit of the project's own repository, as always; `irrippr@abc1234` is
+asked of `repos/irrippr`. `novadev links` (and `sync`) say when a commit is not in the
+history of the repository it names, when a name is not a sub-repo, and when a bare hash
+really belongs to a sub-repo ("write it as irrippr@abc1234"). Each feature's `work.md` lists
+the commits as written and the repos a todo changed. The placement check asks the sub-repo
+which files its commit changed, so a hub inside it (`"hubs": ["repos/irrippr/src/big.js"]`)
+works like any other. Two sub-repos with one name are a problem: a record could not tell them
+apart.
+
 ## Knowledge — an Open Knowledge Format bundle
 
 Knowledge rots when nobody can tell a fresh fact from an old guess. novadev keeps the

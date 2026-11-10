@@ -12,8 +12,8 @@ sources:
   - resource: repo:src/debt-budget.ts
   - resource: repo:src/placement.ts
   - resource: repo:templates/skills/novadev-work.md
-generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:18:33+01:00 }
-stale_after: 2027-02-08T15:18:33+01:00
+generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:28:02+01:00 }
+stale_after: 2027-02-08T15:28:02+01:00
 ---
 
 # Glossary
@@ -105,6 +105,15 @@ wording for agents; this page maps each word to the code.
   `architecture.md`) between `novadev:budgets` markers.
 - **Placement** — a record's `## Placement` section: where new units went and why not on a
   hub; required (after `placementSince`) when the record's commits changed a hub file.
+
+## Parallel work (0.16.0)
+
+- **Default branch** — where work lands and the only branch that archives: `"defaultBranch"`
+  in `novadev.json`, else `origin/HEAD`, else `init.defaultBranch` / `main` / `master`
+  (`src/branch.ts`, `defaultBranch` in `src/git.ts`).
+- **Sub-repo** — an independent repository nested in the project, listed by `"subrepos"`
+  (`["repos/*"]`) and named by its folder; **`repo@hash`** — a record's way to name its commit
+  (`irrippr@abc1234`); **`**Repos:**`** — the sub-repos a todo changed (`src/subrepos.ts`).
 
 ## Bookkeeping words
 

@@ -9,6 +9,7 @@
 
 * [● FEAT-0005 — Features registry and the link graph](FEAT-0005-features-and-links/feature.md) - shipped · Register each capability as knowledge/features/FEAT-NNNN-<slug>/feature.md, search the registry before building (`novadev features`, `--touching <path>` for overlap, `--new <slug>` to scaffold), and get each feature's work.md and tests.md derived from the records and test rounds that name it (`novadev links [--fix]`).
 * [● FEAT-0013 — The knowledge bundle (OKF) and the knowledge log](FEAT-0013-knowledge-bundle/feature.md) - shipped · Keep a project's wiki, memories and features as one Open Knowledge Format 0.2 bundle in .novadev/knowledge/ — every concept stamped with who wrote and who checked it and when it is due, every change recorded by `novadev knowledge log`, derived index.md maps, and `novadev knowledge` to search it and list what is stale, drifted or unverified.
+* [● FEAT-0016 — Sub-repos: commits in nested repositories](FEAT-0016-sub-repos/feature.md) - shipped · A super-repo lists its nested repositories in "subrepos" (novadev.json); a record names a sub-repo's commit as `irrippr@abc1234` and the sub-repos it changed in `**Repos:**`, and links, work.md and the placement check resolve each commit in its own repository.
 
 # metrics
 

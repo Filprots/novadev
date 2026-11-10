@@ -20,6 +20,7 @@ The work that built [FEAT-0004 — Archive with a grace period](feature.md).
 
 ## Commits
 
+- `45b7350` — 2026-11-10_1/04-archive-only-on-default-branch
 - `bc17f04` — 2026-11-10_2/04-history-archive-grace-period
 - `72e0194` — 2026-11-10_2/04-history-archive-grace-period
 - `0910083` — 2026-11-10_2/04-history-archive-grace-period

@@ -524,11 +524,6 @@ export function featureIdsIn(value: string): string[] {
   return [...new Set((value.match(/FEAT-\d{4}/g) ?? []))];
 }
 
-/** Commit hashes mentioned in a string (7–40 hex chars). */
-export function commitHashesIn(value: string): string[] {
-  return [...new Set((value.match(/\b[0-9a-f]{7,40}\b/g) ?? []))];
-}
-
 /** Split a comma-separated frontmatter value; "none"/"-"/empty yield []. */
 export function csvList(value: string | undefined | null): string[] {
   if (!value) return [];

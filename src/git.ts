@@ -254,16 +254,18 @@ export function unchangedSinceHead(root: string, rel: string): Set<string> | nul
  * parent; a move counts both its old and its new path. A hash git does not know as a commit is left
  * out: another repository's commit, a typo, or a short hash two objects share. So is a commit whose
  * parent a shallow clone did not fetch: git would list every file of the project as changed by it.
- * Null when git cannot tell (no git, not a repository).
+ * Null when git cannot tell (no git, not a repository). `nested` asks the repository that holds `root`
+ * (a sub-repo), as `defaultBranch` does.
  */
-export function commitPaths(root: string, hashes: readonly string[]): Map<string, string[]> | null {
-  if (!inRepository(root)) return null;
+export function commitPaths(root: string, hashes: readonly string[], nested = false): Map<string, string[]> | null {
+  const env = nested ? discoveringEnv() : undefined;
+  if (git(root, ['rev-parse', '--is-inside-work-tree'], undefined, env)?.trim() !== 'true') return null;
   const given = [...new Set(hashes)].filter((hash) => /^[0-9a-f]{4,64}$/i.test(hash));
   const out = new Map<string, string[]>();
   if (given.length === 0) return out;
 
   // One call resolves every hash: "<full hash> commit <size>", or "<hash> missing" / "ambiguous".
-  const checked = git(root, ['cat-file', '--batch-check'], given.join('\n') + '\n');
+  const checked = git(root, ['cat-file', '--batch-check'], given.join('\n') + '\n', env);
   if (checked === null) return null;
   const full = new Map<string, string>();
   checked.split('\n').forEach((line, i) => {
@@ -274,7 +276,7 @@ export function commitPaths(root: string, hashes: readonly string[]): Map<string
 
   // One more call lists the files of all of them, with each commit's parents. -z keeps every file
   // name exactly as it is.
-  const shallow = git(root, ['rev-parse', '--is-shallow-repository'])?.trim() === 'true';
+  const shallow = git(root, ['rev-parse', '--is-shallow-repository'], undefined, env)?.trim() === 'true';
   const listed = git(
     root,
     [
@@ -283,6 +285,7 @@ export function commitPaths(root: string, hashes: readonly string[]): Map<string
       '--name-only', '--relative', '--no-renames', '-m', '--first-parent',
     ],
     [...new Set(full.values())].join('\n') + '\n',
+    env,
   );
   if (listed === null) return null;
   const files = new Map<string, Set<string>>();

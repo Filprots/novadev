@@ -2,6 +2,7 @@
 
 **Date:** 2026-11-10
 **Feature:** FEAT-0004
+**Commits:** 45b7350
 
 ## Prompt
 `novadev sync` archiving on a task branch moves folders that master moves too, and the two moves

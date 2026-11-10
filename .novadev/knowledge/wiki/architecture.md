@@ -12,8 +12,8 @@ sources:
   - resource: repo:src/knowledge.ts
   - resource: repo:src/links.ts
   - resource: repo:src/work.ts
-generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:24:08+01:00 }
-stale_after: 2027-02-08T15:24:08+01:00
+generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:28:02+01:00 }
+stale_after: 2027-02-08T15:28:02+01:00
 ---
 
 # Architecture
@@ -48,6 +48,7 @@ walking up from the cwd to the folder that contains `.novadev/` (`requireProject
 | `knowledge …` / `knowledge log` | `src/knowledge-cmd.ts` / `src/knowledge-log.ts` |
 | metrics hook, snapshot, deltas | `src/metrics.ts`; the debt budget in `src/debt-budget.ts`; file-only judgements + wiki budgets block in `src/metrics-audit.ts` |
 | hub paths / the `## Placement` check | `src/hubs.ts` / `src/placement.ts` |
+| sub-repos (`"subrepos"`, `repo@hash` commits, `**Repos:**`) | `src/subrepos.ts` — used by links and placement |
 | git (read-only questions) | `src/git.ts` — but see *The git boundary* |
 
 Dependency direction: command modules → audits/mechanics → `lib.ts` → `okf.ts`. `okf.ts`
@@ -88,7 +89,7 @@ the fixes and reports them as "stale" instead of writing.
 
 | State | Where | Written by |
 |---|---|---|
-| version + settings (`archiveGraceDays`, `defaultBranch`, `metrics`, `debtBudget`, `hubs`, `placementSince`, `knowledge`) | `.novadev/novadev.json` | `deploy`, `migrate-repo`, `sync` (budget raises); hand-edited settings |
+| version + settings (`archiveGraceDays`, `defaultBranch`, `subrepos`, `metrics`, `debtBudget`, `hubs`, `placementSince`, `knowledge`) | `.novadev/novadev.json` | `deploy`, `migrate-repo`, `sync` (budget raises); hand-edited settings |
 | briefs and records | `.novadev/todos/<batch>/<todo>/` | human / agent / `file-todo`, `todo` |
 | the batch lock + waypoint trail | `.novadev/todos/<batch>/working.md` | `work` only |
 | finished marker | `.novadev/todos/<batch>/completed.md` | `sync` only |

@@ -33,7 +33,6 @@ import {
   blockBegin,
   blockEnd,
   blockTrouble,
-  commitHashesIn,
   featureIdsIn,
   featuresDir,
   listAllTodos,
@@ -48,7 +47,9 @@ import {
   todoState,
   writeBlock,
 } from './lib.ts';
+import { hasCommit } from './git.ts';
 import { readFrontmatterText, splitFrontmatter, yamlFlowMap, yamlString } from './okf.ts';
+import { type CommitRef, commitRefsIn, listSubrepos, repoNamesIn } from './subrepos.ts';
 
 /** How a message names a feature's folder: by its place in `.novadev/`. */
 const FEATURES = `${KNOWLEDGE_DIR}/${FEATURES_DIR}`;
@@ -61,7 +62,11 @@ type TodoLinks = {
   state: string;
   date: string;
   featureIds: string[];
+  /** The commits the record names, as written: `abc1234`, or `irrippr@abc1234` for a sub-repo's. */
   commits: string[];
+  refs: CommitRef[];
+  /** The sub-repos a `**Repos:**` line names. */
+  repos: string[];
   hasFeatureField: boolean;
   hasRecord: boolean;
   /** The `**Test:**` ref inside ai_needstest.md / ai_confirmed.md, when present. */
@@ -239,11 +244,38 @@ export function auditLinks(root: string): Audit {
     }
   }
 
-  // --- commits referenced by records must exist in git history ---
-  const allCommits = [...new Set(todos.flatMap((t) => t.commits))];
-  for (const bad of unknownCommits(root, allCommits)) {
-    const owners = todos.filter((t) => t.commits.includes(bad)).map((t) => t.todo.ref);
-    notes.push(`commit ${bad} (${owners.join(', ')}) is not in this repository's history`);
+  // --- commits referenced by records must exist in the history of the repository they name ---
+  // A bare hash is the project's own repository's; `irrippr@abc1234` is the sub-repo irrippr's
+  // ("subrepos" in novadev.json, src/subrepos.ts).
+  const subrepos = listSubrepos(root);
+  problems.push(...subrepos.problems);
+  notes.push(...subrepos.notes);
+  const repoByName = new Map(subrepos.repos.map((repo) => [repo.name, repo]));
+  const owners = (text: string) => todos.filter((t) => t.commits.includes(text)).map((t) => t.todo.ref).join(', ');
+  const allRefs = [...new Map(todos.flatMap((t) => t.refs).map((ref) => [ref.text, ref])).values()];
+  const ownHashes = allRefs.filter((ref) => ref.repo === null).map((ref) => ref.hash);
+  for (const bad of unknownCommits(root, ownHashes)) {
+    const home = subrepos.repos.find((repo) => hasCommit(repo.path, bad, true) === true);
+    notes.push(
+      `commit ${bad} (${owners(bad)}) is not in this repository's history` +
+        (home ? ` — it is in ${home.name}: write it as ${home.name}@${bad}` : ''),
+    );
+  }
+  for (const ref of allRefs) {
+    if (ref.repo === null) continue;
+    const repo = repoByName.get(ref.repo);
+    if (repo === undefined) {
+      notes.push(`commit ${ref.text} (${owners(ref.text)}) names the repository "${ref.repo}", which is not a sub-repo — add its folder to "subrepos" in novadev.json, or correct the name`);
+    } else if (hasCommit(repo.path, ref.hash, true) === false) {
+      notes.push(`commit ${ref.text} (${owners(ref.text)}) is not in ${repo.name}'s history (${repo.rel})`);
+    }
+  }
+  for (const t of todos) {
+    for (const name of t.repos) {
+      if (!repoByName.has(name)) {
+        notes.push(`${t.todo.ref}: **Repos:** names "${name}", which is not a sub-repo — add its folder to "subrepos" in novadev.json, or correct the name`);
+      }
+    }
   }
 
   // --- derived content: each feature's work.md and tests.md ---
@@ -300,7 +332,8 @@ export function auditLinks(root: string): Audit {
 
 function readTodoLinks(todo: TodoRef): TodoLinks {
   const featureIds: string[] = [];
-  const commits: string[] = [];
+  const refs: CommitRef[] = [];
+  const repos: string[] = [];
   let hasFeatureField = false;
   let hasRecord = false;
   let date = '';
@@ -315,7 +348,9 @@ function readTodoLinks(todo: TodoRef): TodoLinks {
       featureIds.push(...featureIdsIn(feature));
     }
     const commitField = readField(text, 'Commits');
-    if (commitField !== null) commits.push(...commitHashesIn(commitField));
+    if (commitField !== null) refs.push(...commitRefsIn(commitField));
+    const repoField = readField(text, 'Repos');
+    if (repoField !== null) repos.push(...repoNamesIn(repoField));
     if (file === RECORD_NEEDSTEST || file === RECORD_CONFIRMED) {
       testRef = readField(text, 'Test') ?? testRef;
     }
@@ -330,7 +365,9 @@ function readTodoLinks(todo: TodoRef): TodoLinks {
     state: todoState(todo.dir),
     date,
     featureIds: [...new Set(featureIds)],
-    commits: [...new Set(commits)],
+    commits: [...new Set(refs.map((ref) => ref.text))],
+    refs: [...new Map(refs.map((ref) => [ref.text, ref])).values()],
+    repos: [...new Set(repos)],
     hasFeatureField,
     hasRecord,
     testRef: testRef.trim(),
@@ -408,7 +445,7 @@ function renderWork(linked: TodoLinks[], f: Feature): string {
   } else {
     lines.push('');
     for (const t of linked) {
-      const bits = [t.state, t.date, t.todo.archived ? 'archived' : ''].filter(Boolean);
+      const bits = [t.state, t.date, t.todo.archived ? 'archived' : '', t.repos.length > 0 ? `repos: ${t.repos.join(', ')}` : ''].filter(Boolean);
       lines.push(`- \`${t.todo.ref}\` — ${bits.join(' · ')}`);
     }
   }

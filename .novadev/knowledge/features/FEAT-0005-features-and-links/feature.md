@@ -18,8 +18,8 @@ sources:
   - resource: commit:72e0194
   - resource: commit:01411ee
   - resource: commit:185be32
-generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:18:33+01:00 }
-stale_after: 2027-11-10T15:18:33+01:00
+generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:28:02+01:00 }
+stale_after: 2027-11-10T15:28:02+01:00
 ---
 
 # FEAT-0005 — Features registry and the link graph
@@ -53,6 +53,7 @@ folders.
 - 2026-08-28 — 0.6.0 (commit 72e0194): a feature becomes a folder, with derived work.md and tests.md
 - 2026-08-30 — fix (commit 01411ee): only the latest test round's verdict counts for "shipped"
 - 2026-10-11 — 0.12.0 (commit 185be32): the registry moves into the knowledge bundle; `feature-status`, YAML lists
+- 2026-11-10 — a record's commits resolve in the repository they name (`irrippr@abc1234`, see [FEAT-0016](../FEAT-0016-sub-repos/feature.md)); work.md shows the repos (`2026-11-10_1/02-multi-repo-commits`)
 
 ## Open questions
 

@@ -345,7 +345,7 @@ trail stays in the file, newest first, until the round is over (phase 10).
 
 **Date:** <YYYY-MM-DD>
 **Feature:** <FEAT-NNNN, comma-separated if several — or `none — <why>`>
-**Commits:** <hashes, comma-separated — omit if nothing was committed>
+**Commits:** <hashes, comma-separated — a sub-repo's as `name@hash` — omit if nothing was committed>
 
 ## Prompt
 <quote or tightly summarize the brief>
@@ -422,6 +422,11 @@ and factual. Reference by ID, never by relative path. **Never claim verification
 did not run** — and when a human must check it, phase 5 is how you say so. The knowledge
 this todo changed is recorded in `knowledge/log.md` with the todo as its `ref` (phases
 7–9); the record need not repeat it.
+
+**Sub-repos.** In a project whose `novadev.json` lists `"subrepos"`, a commit in a sub-repo
+is written `name@hash` (`irrippr@abc1234`) — a bare hash is always the project's own — and the
+record adds a `**Repos:** irrippr, irrisketch_locales` line under `**Commits:**` naming the
+sub-repos the todo changed.
 
 The `**Feature:**` and `**Commits:**` lines are the *authored* half of the link graph;
 `novadev sync` regenerates the feature's `work.md` from them. Saying

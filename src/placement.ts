@@ -16,12 +16,11 @@
 //
 // The check reads only files and git history, never the working tree's changes, so a hook and CI
 // give the same answer for the same commit — given the history of the commits a record names.
-import { commitPaths } from './git.ts';
+import { commitChanges, commitRefsIn } from './subrepos.ts';
 import { type HubPath, hubLabel, hubPaths, inHub, missingHubPaths, parseHubsSetting } from './hubs.ts';
 import {
   type Parsed,
   type WorkRecord,
-  commitHashesIn,
   hasWords,
   markdownSections,
   novadevDir,
@@ -124,11 +123,14 @@ export function auditPlacement(root: string, snapshot?: SnapshotRead): Placement
       const date = recordDate(record.text);
       return since.value === null || date === null || date >= since.value;
     })
-    .map((record) => ({ record, commits: commitHashesIn(readField(record.text, 'Commits') ?? '') }))
+    .map((record) => ({ record, refs: commitRefsIn(readField(record.text, 'Commits') ?? '') }))
+    .map(({ record, refs }) => ({ record, refs, commits: refs.map((ref) => ref.text) }))
     .filter(({ commits }) => commits.length > 0);
   if (records.length === 0) return { problems, actions, notes };
 
-  const changed = commitPaths(root, records.flatMap(({ commits }) => commits));
+  // A sub-repo's commit (`irrippr@abc1234`) is asked of that repository; its paths come back with
+  // the sub-repo's folder in front, so a hub inside it matches.
+  const changed = commitChanges(root, records.flatMap(({ refs }) => refs));
   if (changed === null) {
     notes.push(
       `placement: ${records.length} record(s) name commits, but there is no git repository here to say which files they changed — the "## ${PLACEMENT_SECTION}" check cannot run`,
