@@ -16,8 +16,8 @@ conflicts-with: []
 sources:
   - resource: commit:fb0170f
   - resource: commit:772a96c
-generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:18:33+01:00 }
-stale_after: 2027-11-10T15:18:33+01:00
+generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:44:33+01:00 }
+stale_after: 2027-11-10T15:44:33+01:00
 ---
 
 # FEAT-0015 — novadev todo: one todo at a time, away from the repository
@@ -49,6 +49,7 @@ stale_after: 2027-11-10T15:18:33+01:00
 
 - 2026-10-25 — landed in 0.15.0 (commit fb0170f): `todo list/show/addendum/cancel`, with `status --json` and `totest --json`
 - 2026-11-04 — (commit 772a96c): attachments on `addendum`, and `todo edit` — no version bump yet
+- 2026-11-10 — `todo review` writes a reviewer's ai_review.md ([FEAT-0018](../FEAT-0018-review-and-team-mode/feature.md)); a todo waiting for its review or merge takes no addendum (`2026-11-10_1/06-review-record`)
 
 ---
 

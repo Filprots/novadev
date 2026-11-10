@@ -12,8 +12,8 @@ sources:
   - resource: repo:src/debt-budget.ts
   - resource: repo:src/placement.ts
   - resource: repo:templates/skills/novadev-work.md
-generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:38:47+01:00 }
-stale_after: 2027-02-08T15:38:47+01:00
+generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:44:33+01:00 }
+stale_after: 2027-02-08T15:44:33+01:00
 ---
 
 # Glossary
@@ -38,8 +38,9 @@ wording for agents; this page maps each word to the code.
 - **Gate** — `ai_needstest.md`: work landed but a person must test it. Outranks every
   other record (`todoState`) and is *not* terminal, so the batch cannot archive. Closed by
   `ai_confirmed.md` after review.
-- **Todo state** — `open · progress · completed · failed · needstest · confirmed`;
-  terminal = completed, failed, confirmed (`TERMINAL_STATES`).
+- **Todo state** — `open · progress · completed · failed · needstest · confirmed`, and the review
+  gate's `changes · review · unmerged` (`src/review.ts`); terminal = completed, failed, confirmed
+  (`TERMINAL_STATES`).
 - **`.filed-from-chat`** — marker in a batch `file-todo` created; only such a batch, still
   untouched, is reused by later filings (`planBatch`).
 - **Grace period** — a fully recorded batch gets `completed.md` and stays in `todos/` for
@@ -118,6 +119,9 @@ wording for agents; this page maps each word to the code.
   mirrors each lock (worktree, branch, holder, claims) so other worktrees see it (`src/registry.ts`).
 - **Claim** — a path a batch in work owns (its features' `touches:`, `--claim`, `work claim`;
   `irrippr:ps/` for a sub-repo). Overlapping claims across worktrees are refused: one owner per file.
+- **Review** — `ai_review.md`: a reviewer's APPROVE / CHANGES on a finished todo (`novadev todo
+  review`). **Team mode** — `"team": true`: completed = approved + merged (the record's commits on
+  the default branch).
 - **Merge rules** — novadev's block in `.gitattributes`: the log merges by `union`, derived files
   by the **`novadev-derived`** driver (keep ours; defined in the clone's git config by deploy).
   **After-merge** — `novadev sync --after-merge`: repair the log, sync, commit `.novadev/`.

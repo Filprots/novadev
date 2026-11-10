@@ -168,6 +168,16 @@ export function isAncestor(path: string, commit: string, ref: string, nested = f
   }
 }
 
+/**
+ * Does the tree of `ref` hold the file `rel` (relative to `root`)? Null outside a repository or when
+ * `ref` is unknown.
+ */
+export function fileOnBranch(root: string, ref: string, rel: string): boolean | null {
+  if (!inRepository(root)) return null;
+  if (git(root, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]) === null) return null;
+  return git(root, ['cat-file', '-e', `${ref}:./${rel.replace(/\\/g, '/')}`]) !== null;
+}
+
 /** True when `hash` names a commit of the repository at `path` (`nested` as in `defaultBranch`). */
 export function hasCommit(path: string, hash: string, nested = false): boolean | null {
   const env = nested ? discoveringEnv() : undefined;

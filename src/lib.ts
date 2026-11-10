@@ -2,6 +2,8 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { readFrontmatterText } from './okf.ts';
+// review.ts imports this module too: it is asked only from inside todoState, never at load time.
+import { reviewGate } from './review.ts';
 
 export const ROOT_DIR_NAME = '.novadev';
 export const NOVADEV_VERSION = '0.15.0';
@@ -840,6 +842,9 @@ function listEntries(path: string, kind: 'dir' | 'file'): string[] {
 
 export type TodoState =
   | 'needstest'
+  | 'changes'
+  | 'review'
+  | 'unmerged'
   | 'confirmed'
   | 'completed'
   | 'failed'
@@ -848,10 +853,16 @@ export type TodoState =
 
 /**
  * `needstest` outranks everything: the gate coexists with the work record it gates,
- * and while it is open the todo is waiting on a person, not on an agent.
+ * and while it is open the todo is waiting on a person, not on an agent. Then the review gate
+ * (review.ts): a completed todo whose `ai_review.md` asks for CHANGES is `changes`; in team mode
+ * one not yet approved is `review`, and one approved but not on the default branch `unmerged`.
  */
 export function todoState(todoDir: string): TodoState {
   if (existsSync(join(todoDir, RECORD_NEEDSTEST))) return 'needstest';
+  if (existsSync(join(todoDir, RECORD_COMPLETED))) {
+    const gate = reviewGate(todoDir);
+    if (gate !== null) return gate;
+  }
   if (existsSync(join(todoDir, RECORD_CONFIRMED))) return 'confirmed';
   if (existsSync(join(todoDir, RECORD_COMPLETED))) return 'completed';
   if (existsSync(join(todoDir, RECORD_FAILED))) return 'failed';

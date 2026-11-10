@@ -29,7 +29,8 @@ usage:
                             brief + records), "addendum <ref> <payload.json>" ({text, attachments}: a Chat
                             addendum to an open todo's brief, files copied into its folder), "edit <ref>
                             <payload.json>" ({title, request, context, reason}: the brief changed, the old one
-                            kept in .brief-history/), "cancel <ref> <payload.json>" ({reason}: a *cancelled* ai_failed)
+                            kept in .brief-history/), "cancel <ref> <payload.json>" ({reason}: a *cancelled* ai_failed),
+                            "review <ref> <payload.json>" ({verdict: APPROVE|CHANGES, by, checks, findings?}: ai_review.md)
   novadev work …            the lock of a batch in work (todos/<batch>/working.md): "start <batch>"
                             takes or resumes it, "waypoint <batch> <payload.json>" records where the
                             work is, "pause <batch> <payload.json>" writes exactly where it stopped

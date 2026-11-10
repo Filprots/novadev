@@ -7,13 +7,15 @@
 //   novadev todo edit <ref> <payload.json>                   {title, request, context, reason}: the brief rewritten where
 //                                                            asked, the previous one kept in .brief-history/
 //   novadev todo cancel <ref> <payload.json>                 {reason}: an ai_failed.md that says *cancelled*
+//   novadev todo review <ref> <payload.json>                 {verdict, by, checks, findings?, notes?}: ai_review.md, a
+//                                                            reviewer's APPROVE or CHANGES on a finished todo (review.ts)
 //
 // A <ref> is how people name a todo: `2026-10-16_2/02-router-…`, `2026-10-16_2/02`, or a word of its slug that only one
 // open todo has. The two writes follow the playbook's intake rules: a todo with a terminal record, or one waiting on a
 // human test, gets a NEW todo rather than an addendum; a batch an agent holds right now is not written behind its back.
 // Answers are JSON on stdout; errors are `{ "error": … }` with a non-zero exit (as `test-result` and `file-todo`).
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { isAbsolute, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import {
   RECORD_COMPLETED,
   RECORD_CONFIRMED,
@@ -27,11 +29,14 @@ import {
   requireProjectRoot,
   todoState,
 } from './lib.ts';
+import { humanActor } from './knowledge-log.ts';
+import { ACTOR_FORMAT, actorKind } from './okf.ts';
+import { RECORD_REVIEW, REVIEW_HISTORY_DIR, parseReviewPayload, renderReview } from './review.ts';
 import { liveElsewhere, lockLiveness, readWorkLock } from './work.ts';
 import { copyAttachments } from './todo-filing.ts';
 
 const PROMPT = 'prompt.md';
-const RECORDS = [RECORD_NEEDSTEST, RECORD_CONFIRMED, RECORD_COMPLETED, RECORD_FAILED, RECORD_PROGRESS] as const;
+const RECORDS = [RECORD_NEEDSTEST, RECORD_CONFIRMED, RECORD_REVIEW, RECORD_COMPLETED, RECORD_FAILED, RECORD_PROGRESS] as const;
 const MAX_RECORD_CHARS = 12000;
 const MAX_TEXT_BYTES = 20000;
 const USAGE =
@@ -39,7 +44,8 @@ const USAGE =
   '       novadev todo show <ref>\n' +
   '       novadev todo addendum <ref> <payload.json>   ({ "text": …, "attachments": [paths] })\n' +
   '       novadev todo edit <ref> <payload.json>       ({ "title"?, "request"?, "context"?, "reason"? })\n' +
-  '       novadev todo cancel <ref> <payload.json>     ({ "reason": … })';
+  '       novadev todo cancel <ref> <payload.json>     ({ "reason": … })\n' +
+  '       novadev todo review <ref> <payload.json>     ({ "verdict": "APPROVE"|"CHANGES", "by", "checks": […], "findings"?, "notes"? })';
 
 export type TodoItem = { ref: string; batch: string; todo: string; title: string; state: TodoState };
 
@@ -110,6 +116,7 @@ function listFilesIn(dir: string): string[] {
 function writable(nd: string, t: TodoItem, what: string, now: Date): void {
   if (t.state === 'needstest') throw new Error(`${t.ref} is waiting on a human test: ${what} would be new work — file a NEW todo (novadev file-todo) and cross-link it.`);
   if ((TERMINAL_STATES as readonly string[]).includes(t.state)) throw new Error(`${t.ref} already has a terminal record (${t.state}): file a NEW todo for this (novadev file-todo).`);
+  if (t.state === 'review' || t.state === 'unmerged') throw new Error(`${t.ref} is finished and waiting for its ${t.state === 'review' ? 'review' : 'merge'}: file a NEW todo for this (novadev file-todo).`);
   const lock = readWorkLock(nd, t.batch);
   if (lock !== null && lock.state === 'ok' && lock.lock.state === 'working' && lockLiveness(lock.lock, now).live) {
     throw new Error(`${t.batch} is in work right now (${lock.lock.agent}): tell that session, or try again when it pauses or stops.`);
@@ -260,6 +267,43 @@ export function cancelTodo(nd: string, ref: string, payload: Record<string, unkn
   return { ref: t.ref, written: `todos/${t.ref}/${RECORD_FAILED}`, state: 'failed' };
 }
 
+/**
+ * A reviewer's verdict on a finished todo: ai_review.md beside its ai_completed.md. The review before
+ * it, if any, moves to the todo's .review-history/. Not refused behind a lock: reviewing is part of
+ * the loop, often done while the builder still holds the batch.
+ */
+export function reviewTodo(nd: string, ref: string, payload: Record<string, unknown>, now: Date = new Date()): Record<string, unknown> {
+  const t = resolveTodo(nd, ref);
+  const dir = join(nd, 'todos', t.batch, t.todo);
+  if (!existsSync(join(dir, RECORD_COMPLETED))) {
+    throw new Error(`${t.ref} has no ${RECORD_COMPLETED} — there is nothing finished to review yet (its state is ${t.state}).`);
+  }
+  const review = parseReviewPayload(payload);
+  if (review.by === 'human') {
+    const human = humanActor(dirname(nd));
+    if (human === null) throw new Error('"by": "human" needs git\'s user.name — set it, or write human:<id>.');
+    review.by = human;
+  } else if (actorKind(review.by) === null) {
+    throw new Error(`'by' must be an actor — ${ACTOR_FORMAT}.`);
+  }
+  const path = join(dir, RECORD_REVIEW);
+  let previous: string | null = null;
+  if (existsSync(path)) {
+    const history = join(dir, REVIEW_HISTORY_DIR);
+    mkdirSync(history, { recursive: true });
+    previous = `${now.toISOString().replace(/[:.]/g, '-')}.md`;
+    writeFileSync(join(history, previous), readFileSync(path, 'utf8'));
+  }
+  writeFileSync(path, renderReview(t.todo, today(now), review));
+  return {
+    ref: t.ref,
+    written: `todos/${t.ref}/${RECORD_REVIEW}`,
+    verdict: review.verdict,
+    state: todoState(dir),
+    ...(previous === null ? {} : { previous: `todos/${t.ref}/${REVIEW_HISTORY_DIR}/${previous}` }),
+  };
+}
+
 function readPayload(argument: string | undefined): Record<string, unknown> {
   if (argument === undefined) throw new Error(USAGE);
   const path = isAbsolute(argument) ? argument : resolve(process.cwd(), argument);
@@ -291,6 +335,7 @@ export function todoCommand(args: string[]): void {
     if (command === 'addendum') return void console.log(JSON.stringify(addAddendum(nd, ref, readPayload(argument)), null, 2));
     if (command === 'edit') return void console.log(JSON.stringify(editTodo(nd, ref, readPayload(argument)), null, 2));
     if (command === 'cancel') return void console.log(JSON.stringify(cancelTodo(nd, ref, readPayload(argument)), null, 2));
+    if (command === 'review') return void console.log(JSON.stringify(reviewTodo(nd, ref, readPayload(argument)), null, 2));
     throw new Error(USAGE);
   } catch (error) {
     console.log(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }, null, 2));

@@ -15,7 +15,7 @@ okf_version: "0.2"
 
 # Features
 
-* [Features](features/index.md) - 17 capabilities (17 shipped) — what the software does; search it before building anything new
+* [Features](features/index.md) - 18 capabilities (18 shipped) — what the software does; search it before building anything new
 
 # History
 

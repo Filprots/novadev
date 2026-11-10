@@ -2,6 +2,7 @@
 
 **Date:** 2026-11-10
 **Feature:** FEAT-0014, FEAT-0002
+**Commits:** 069d79e
 
 ## Prompt
 A lock taken with `novadev work start` lives in todos/<batch>/working.md on the current branch, so

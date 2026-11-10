@@ -21,6 +21,8 @@ The work that built [FEAT-0014 — The work lock: waypoints, pause and resume](f
 
 ## Commits
 
+- `069d79e` — 2026-11-10_1/01-worktree-visible-locks
+- `069d79e` — 2026-11-10_1/05-batch-path-ownership
 - `6655fee` — 2026-11-10_2/14-history-work-lock
 
 _Linked by `**Feature:** FEAT-0014` in each todo's record._

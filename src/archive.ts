@@ -130,6 +130,9 @@ function completedMarker(batch: string, batchDir: string, completedOn: string, g
     completed: '✓',
     failed: '✗',
     needstest: '⧗',
+  changes: '↺',
+  review: '◇',
+  unmerged: '⇢',
     progress: '…',
     open: '·',
   };

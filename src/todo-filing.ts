@@ -17,6 +17,7 @@ const RECORDS = [
   'ai_progress.md',
   'ai_needstest.md',
   'ai_confirmed.md',
+  'ai_review.md',
 ];
 /** Names a todo folder owns: novadev's records plus the brief. An attachment may never take one. */
 export const RESERVED_NAMES = new Set([...RECORDS, 'prompt.md']);

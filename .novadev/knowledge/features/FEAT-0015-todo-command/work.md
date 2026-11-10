@@ -15,6 +15,7 @@ The work that built [FEAT-0015 — novadev todo: one todo at a time, away from t
 
 ## Todos
 
+- `2026-11-10_1/06-review-record` — completed · 2026-11-10
 - `2026-11-10_2/15-history-todo-command` — completed · 2026-11-10 · archived
 
 ## Commits

@@ -497,6 +497,35 @@ normal sync and **commits what that changed in `.novadev/`** ("novadev sync afte
 file(s) …"). It commits nothing else, whatever else the index holds. This is the only commit
 novadev makes on its own, and the person merging asked for it.
 
+### Review, and team mode
+
+A reviewer (another agent, the lead, a person) re-runs the checks of a finished todo and
+writes a verdict beside its record:
+
+```sh
+novadev todo review 2026-11-10_1/02 review.json
+# { "verdict": "APPROVE", "by": "claude-code/claude-opus-5-5",
+#   "checks": [ { "check": "bun test", "result": "547 pass, 0 fail" } ], "findings": "…", "notes": "…" }
+```
+
+It writes `ai_review.md` (**Date**, **Verdict**, **Reviewer**, `## Checks`, `## Findings`). A
+second review keeps the first in the todo's `.review-history/`. A verdict needs its checks,
+and a CHANGES verdict needs its findings. **A CHANGES verdict reopens a completed todo in any
+project:** its state is `changes`, sync makes it a NEXT ACTION, and its batch is not complete
+until a later review approves.
+
+With `"team": true` in `.novadev/novadev.json`, a finished todo counts as completed only when
+it is **approved and merged**:
+
+| State | Means | Listed under |
+|---|---|---|
+| `review` | `ai_completed.md`, no APPROVE yet | WAITING ON REVIEW OR MERGE |
+| `unmerged` | approved, but a commit on its `**Commits:**` line is not on the default branch yet (a sub-repo's `repo@hash` is checked against that repository's default branch); a record that names no commit must itself be committed there | WAITING ON REVIEW OR MERGE |
+| `completed` | approved and merged | — |
+
+Neither waiting state is the builder's to clear, so sync does not count them as NEXT
+ACTIONS. A todo in either state takes no addendum: new work gets a new todo.
+
 ## Knowledge — an Open Knowledge Format bundle
 
 Knowledge rots when nobody can tell a fresh fact from an old guess. novadev keeps the

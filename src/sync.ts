@@ -41,6 +41,7 @@ import { displayCommand, refreshMetrics } from './metrics.ts';
 import { auditMetrics } from './metrics-audit.ts';
 import { auditPlacement } from './placement.ts';
 import { afterMergeRefusal, commitAfterMerge, MERGE_DRIVER, hasMergeRules, mergeDriverConfigured, repairLogFile } from './merge-rules.ts';
+import { merged } from './review.ts';
 import { auditWork } from './work.ts';
 
 export async function sync(args: string[]): Promise<void> {
@@ -163,6 +164,7 @@ export async function sync(args: string[]): Promise<void> {
   // the human — they stopped it, they say when it goes on.
   const agent = [...inWork.actions, ...knowledge.actions, ...agentActions(root, nd, audit.notes), ...metrics.actions, ...placement.actions];
   const human = [...inWork.waiting, ...humanActions(nd)];
+  const gated = reviewWaiting(root, nd);
 
   if (agent.length > 0) {
     console.log(`\nNEXT ACTIONS — you (${agent.length}):`);
@@ -171,6 +173,10 @@ export async function sync(args: string[]): Promise<void> {
   if (human.length > 0) {
     console.log(`\nWAITING ON THE HUMAN (${human.length}):`);
     for (const h of human) console.log(`  ⧗ ${h}`);
+  }
+  if (gated.length > 0) {
+    console.log(`\nWAITING ON REVIEW OR MERGE (${gated.length}):`);
+    for (const g of gated) console.log(`  ◇ ${g}`);
   }
 
   if (agent.length === 0 && problems.length === 0) {
@@ -248,6 +254,7 @@ function agentActions(root: string, nd: string, notes: string[]): string[] {
     const state = todoState(todo.dir);
     if (state === 'open') out.push(`${todo.ref} has no record yet — do the work, then record it`);
     if (state === 'progress') out.push(`${todo.ref} is mid-flight — finish it or update ai_progress.md`);
+    if (state === 'changes') out.push(`${todo.ref}: its review asked for CHANGES (ai_review.md) — make them, update ai_completed.md, then ask for a new review`);
   }
 
   // Anything the link audit found that a person has to decide.
@@ -272,6 +279,21 @@ function agentActions(root: string, nd: string, notes: string[]): string[] {
     }
   }
 
+  return out;
+}
+
+/**
+ * Finished todos that team mode holds (review.ts): no APPROVE yet — the reviewer's turn — or approved
+ * but not merged — the lead's. Neither is the builder's to do, so they are not NEXT ACTIONS.
+ */
+function reviewWaiting(root: string, nd: string): string[] {
+  const out: string[] = [];
+  for (const todo of listAllTodos(nd)) {
+    if (todo.archived) continue;
+    const state = todoState(todo.dir);
+    if (state === 'review') out.push(`${todo.ref} — finished; waiting for a review (\`novadev todo review\` writes the verdict)`);
+    if (state === 'unmerged') out.push(`${todo.ref} — approved; waiting for the merge (${merged(root, todo.dir).why ?? 'not on the default branch yet'})`);
+  }
   return out;
 }
 

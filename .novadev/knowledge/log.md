@@ -38,3 +38,7 @@
 * **Update**: [Batches and the stock-take: novadev new and novadev status](features/FEAT-0002-batches-and-status/feature.md) — status lists the worktrees with their branches and batches in work. (claude-code/claude-opus-5-5 · 2026-11-10_1/01-worktree-visible-locks)
 * **Update**: [Architecture](wiki/architecture.md) — The lock registry in the common git dir: the one piece of state that is not committed; src/registry.ts in the module map. (claude-code/claude-opus-5-5 · 2026-11-10_1/01-worktree-visible-locks)
 * **Update**: [Glossary](wiki/glossary.md) — Registry and claim. (claude-code/claude-opus-5-5 · 2026-11-10_1/05-batch-path-ownership)
+* **Creation**: [The review record (ai_review.md) and team mode](features/FEAT-0018-review-and-team-mode/feature.md) — New capability: the review record (ai_review.md, novadev todo review) and team mode (completed = approved + merged). (claude-code/claude-opus-5-5 · 2026-11-10_1/06-review-record)
+* **Update**: [novadev todo: one todo at a time, away from the repository](features/FEAT-0015-todo-command/feature.md) — todo review; no addendum to a todo waiting for its review or merge. (claude-code/claude-opus-5-5 · 2026-11-10_1/06-review-record)
+* **Update**: [Architecture](wiki/architecture.md) — src/review.ts (the review gate todoState asks) and the team setting. (claude-code/claude-opus-5-5 · 2026-11-10_1/06-review-record)
+* **Update**: [Glossary](wiki/glossary.md) — The review states (changes, review, unmerged), review and team mode. (claude-code/claude-opus-5-5 · 2026-11-10_1/06-review-record)
