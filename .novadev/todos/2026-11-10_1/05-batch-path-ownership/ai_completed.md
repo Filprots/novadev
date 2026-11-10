@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-10
 **Feature:** FEAT-0014
-**Commits:** 069d79e
+**Commits:** 069d79e, 89e9399
 
 ## Prompt
 One owner per file: a batch declares the paths it will touch (from its features' `touches:`), and

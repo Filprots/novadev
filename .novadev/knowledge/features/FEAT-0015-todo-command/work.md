@@ -21,6 +21,7 @@ The work that built [FEAT-0015 — novadev todo: one todo at a time, away from t
 ## Commits
 
 - `76f52b5` — 2026-11-10_1/06-review-record
+- `89e9399` — 2026-11-10_1/06-review-record
 - `fb0170f` — 2026-11-10_2/15-history-todo-command
 - `772a96c` — 2026-11-10_2/15-history-todo-command
 

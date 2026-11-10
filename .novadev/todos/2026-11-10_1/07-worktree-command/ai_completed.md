@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-10
 **Feature:** FEAT-0019, FEAT-0014
-**Commits:** c0df0d2
+**Commits:** c0df0d2, 89e9399
 
 ## Prompt
 Generalise ~/_work/paperclip/scripts/irris-worktree into `novadev worktree

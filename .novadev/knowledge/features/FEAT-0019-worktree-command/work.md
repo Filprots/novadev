@@ -20,6 +20,7 @@ The work that built [FEAT-0019 — novadev worktree: one worktree per task acros
 ## Commits
 
 - `c0df0d2` — 2026-11-10_1/07-worktree-command
+- `89e9399` — 2026-11-10_1/07-worktree-command
 
 _Linked by `**Feature:** FEAT-0019` in each todo's record._
 <!-- novadev:work:end -->

@@ -20,6 +20,7 @@ The work that built [FEAT-0018 — The review record (ai_review.md) and team mod
 ## Commits
 
 - `76f52b5` — 2026-11-10_1/06-review-record
+- `89e9399` — 2026-11-10_1/06-review-record
 
 _Linked by `**Feature:** FEAT-0018` in each todo's record._
 <!-- novadev:work:end -->
