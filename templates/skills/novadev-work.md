@@ -753,6 +753,11 @@ So a batch in `todos/` carrying `completed.md` is **finished, not pending** — 
 the marker before assuming there is work in it. If you need one gone early,
 `novadev archive <batch>` overrides the grace.
 
+**Archiving happens on the default branch only.** On a task branch, sync moves nothing
+and lists what the default branch will archive after the merge ("not archived here"); that
+line is information, not a NEXT ACTION. Never archive by hand on a task branch: the same
+move made on both sides conflicts at the merge.
+
 **Act on your NEXT ACTIONS, then run `novadev sync` again — at most three passes.**
 That loop is the mechanism that stops work from silently rotting. If it is still not
 clean after the third pass, **STOP and report** what is left and why: a list that will

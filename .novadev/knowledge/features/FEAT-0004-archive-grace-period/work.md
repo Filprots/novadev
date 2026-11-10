@@ -15,6 +15,7 @@ The work that built [FEAT-0004 — Archive with a grace period](feature.md).
 
 ## Todos
 
+- `2026-11-10_1/04-archive-only-on-default-branch` — completed · 2026-11-10
 - `2026-11-10_2/04-history-archive-grace-period` — completed · 2026-11-10 · archived
 
 ## Commits

@@ -12,8 +12,8 @@ sources:
   - resource: repo:src/knowledge.ts
   - resource: repo:src/links.ts
   - resource: repo:src/work.ts
-generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:18:33+01:00 }
-stale_after: 2027-02-08T15:18:33+01:00
+generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:24:08+01:00 }
+stale_after: 2027-02-08T15:24:08+01:00
 ---
 
 # Architecture
@@ -35,7 +35,7 @@ walking up from the cwd to the folder that contains `.novadev/` (`requireProject
 | `status [--json]` | `src/status.ts` |
 | `sync [--check]` | `src/sync.ts` — orchestration only; the logic lives in the audits below |
 | `doctor` | `src/doctor.ts` — folder-shape checks + the same audits as sync |
-| `archive` (+ the sweep sync runs) | `src/archive.ts` (`sweepDone`, `sweepBatches`) |
+| `archive` (+ the sweep sync runs) | `src/archive.ts` (`sweepDone`, `sweepBatches`); where it may move things: `src/branch.ts` |
 | `work …` (the batch lock) | `src/work.ts` (also `auditWork`) |
 | `file-todo …` | `src/file-todo.ts` (CLI) → `src/todo-filing.ts` (mechanics) |
 | `todo …` | `src/todo.ts` (reuses `todo-filing.ts` and the lock from `work.ts`) |
@@ -75,7 +75,8 @@ the fixes and reports them as "stale" instead of writing.
    `index.md`, each feature's OKF `status`) are written (or, with `--check`, listed).
 4. **Archive** — `sweepDone`: reviewed test rounds move to `archive/<year>/totest/…`;
    finished batches get `completed.md` and move to `archive/<year>/todos/` once the grace
-   period passes. Skipped under `--check`.
+   period passes — on the default branch only (`archivePlace`, `src/branch.ts`); on any
+   other branch the moves are listed as "not archived here". Skipped under `--check`.
 5. **Validate** — links and knowledge are audited again on the moved tree; `auditWork`
    reads the locks. Prints PROBLEMS, *in work*, batches held for grace.
 6. **Lists** — NEXT ACTIONS (locks, knowledge, todos without records, review of walked
@@ -87,7 +88,7 @@ the fixes and reports them as "stale" instead of writing.
 
 | State | Where | Written by |
 |---|---|---|
-| version + settings (`archiveGraceDays`, `metrics`, `debtBudget`, `hubs`, `placementSince`, `knowledge`) | `.novadev/novadev.json` | `deploy`, `migrate-repo`, `sync` (budget raises); hand-edited settings |
+| version + settings (`archiveGraceDays`, `defaultBranch`, `metrics`, `debtBudget`, `hubs`, `placementSince`, `knowledge`) | `.novadev/novadev.json` | `deploy`, `migrate-repo`, `sync` (budget raises); hand-edited settings |
 | briefs and records | `.novadev/todos/<batch>/<todo>/` | human / agent / `file-todo`, `todo` |
 | the batch lock + waypoint trail | `.novadev/todos/<batch>/working.md` | `work` only |
 | finished marker | `.novadev/todos/<batch>/completed.md` | `sync` only |

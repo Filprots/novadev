@@ -29,7 +29,8 @@ usage:
                             takes or resumes it, "waypoint <batch> <payload.json>" records where the
                             work is, "pause <batch> <payload.json>" writes exactly where it stopped
                             (the command half of /novadev-pause), "stop <batch>" releases it
-  novadev archive <batch>…  move fully-recorded batch(es) to archive/<year>/   (or: --done for all)
+  novadev archive <batch>…  move fully-recorded batch(es) to archive/<year>/   (or: --done for all);
+                            on the default branch only — a task branch leaves the moves to it
   novadev knowledge [words] the knowledge bundle (.novadev/knowledge/, Open Knowledge Format 0.2):
                             what it holds, or search it; --type/--tag/--tier filter, --stale lists
                             what is due for a re-check, --drifted what cites code (repo: sources)

@@ -95,12 +95,17 @@ export async function sync(args: string[]): Promise<void> {
     for (const fix of fixes) console.log(`  ✗ ${fix.label}`);
   }
 
-  // 2. Archive whatever is finished.
+  // 2. Archive whatever is finished — on the default branch only (src/branch.ts). On a task branch
+  // the default branch does the moves after the merge; here they are only listed.
   if (!check) {
-    const moved = sweepDone(root);
+    const { moved, held, place } = sweepDone(root);
     if (moved.length > 0) {
       console.log(`archived: ${moved.length} item(s)`);
       for (const m of moved) console.log(`  ${m}`);
+    }
+    if (held.length > 0) {
+      console.log(`not archived here — ${place.why}; ${place.defaultBranch} archives ${held.length} item(s) after the merge:`);
+      for (const m of held) console.log(`  ${m}`);
     }
   }
 

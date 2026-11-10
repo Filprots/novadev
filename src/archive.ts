@@ -1,6 +1,10 @@
 // `novadev archive <batch>… | --done` — move fully-recorded batches into archive/<year>/.
+//
+// Only on the project's default branch (src/branch.ts): on a task branch the sweep moves nothing and
+// says what the default branch will archive, so two branches never move the same folder.
 import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { archivePlace, type ArchivePlace } from './branch.ts';
 import { auditLinks } from './links.ts';
 import {
   BATCH_COMPLETE_FILE,
@@ -32,15 +36,21 @@ function regenerateDerived(root: string, quiet = false): void {
   if (fixes.length > 0 && !quiet) console.log(`regenerated ${fixes.length} derived file(s).`);
 }
 
+/** What one sweep did: what moved, what would have moved on the default branch, and where it ran. */
+export type Sweep = { moved: string[]; held: string[]; place: ArchivePlace };
+
 /**
  * The whole `--done` sweep as a callable unit: reviewed test rounds, then every
  * fully-recorded batch, then the derived-content regeneration the moves invalidate.
- * `novadev sync` drives this; the CLI command is a thin wrapper that prints.
+ * `novadev sync` drives this; the CLI command is a thin wrapper that prints. Off the default
+ * branch nothing moves: `held` lists what the default branch will archive (the batches still get
+ * their completed.md, which every branch derives alike).
  */
-export function sweepDone(root: string): string[] {
+export function sweepDone(root: string, place: ArchivePlace = archivePlace(root)): Sweep {
   const nd = novadevDir(root);
   const moved: string[] = [];
-  const log = (line: string) => moved.push(line);
+  const held: string[] = [];
+  const log = (line: string) => (place.allowed ? moved : held).push(line);
 
   for (const task of listTestTasks(nd)) {
     if (task.status !== 'reviewed') continue;
@@ -48,15 +58,17 @@ export function sweepDone(root: string): string[] {
     const year = date.slice(0, 4);
     const round = `rev${task.revision || 1}-${date}`;
     const dest = join(nd, 'archive', year, 'totest', task.id, round);
-    if (existsSync(dest)) fail(`archive already contains ${year}/totest/${task.id}/${round}`);
-    mkdirSync(join(dest, '..'), { recursive: true });
-    renameSync(task.dir, dest);
+    if (place.allowed) {
+      if (existsSync(dest)) fail(`archive already contains ${year}/totest/${task.id}/${round}`);
+      mkdirSync(join(dest, '..'), { recursive: true });
+      renameSync(task.dir, dest);
+    }
     log(`totest/${task.id} → archive/${year}/totest/${task.id}/${round}`);
   }
 
-  for (const line of sweepBatches(nd)) log(line);
+  for (const line of sweepBatches(nd, place.allowed)) log(line);
   if (moved.length > 0) regenerateDerived(root, true);
-  return moved;
+  return { moved, held, place };
 }
 
 /**
@@ -65,7 +77,7 @@ export function sweepDone(root: string): string[] {
  * next same-day batch number is visible rather than hidden in the archive. Only once
  * a batch is older than the grace does it actually move.
  */
-export function sweepBatches(nd: string): string[] {
+export function sweepBatches(nd: string, move = true): string[] {
   const moved: string[] = [];
   const todosDir = join(nd, 'todos');
   const grace = archiveGraceDays(nd);
@@ -88,6 +100,10 @@ export function sweepBatches(nd: string): string[] {
 
     const m = batch.match(BATCH_RE);
     if (!m) continue;
+    if (!move) {
+      moved.push(`todos/${batch} → archive/${m[1]}/todos/${batch}`);
+      continue;
+    }
     const destDir = join(nd, 'archive', m[1], 'todos');
     mkdirSync(destDir, { recursive: true });
     const dest = join(destDir, batch);
@@ -146,8 +162,18 @@ export function archive(args: string[]): void {
   const todosDir = join(nd, 'todos');
   const explicit = args.filter((a) => !a.startsWith('--'));
 
+  // Archiving moves folders; on a task branch the default branch would move them too, and the two
+  // moves would conflict when the branches merge.
+  const place = archivePlace(root);
+  if (!place.allowed) {
+    fail(
+      `archiving happens on the default branch only — ${place.why}. Run it there (after the merge), ` +
+        'or set "defaultBranch" in .novadev/novadev.json if this branch is where the work lands.',
+    );
+  }
+
   if (args.includes('--done')) {
-    const moved = sweepDone(root);
+    const { moved } = sweepDone(root, place);
     if (moved.length === 0) {
       const waiting = listDirs(todosDir).filter(
         (b) => batchIsDone(join(todosDir, b)) && batchCompletedOn(join(todosDir, b)),

@@ -103,6 +103,114 @@ export function headSummary(root: string): { branch: string | null; head: string
 }
 
 /**
+ * Whether a folder is the top of a git work tree of its own: a repository nested in the project (an
+ * independent clone, or a worktree of one), not just a folder of the project's repository. Asked
+ * without the variables a hook exports, so the folder's own repository answers.
+ */
+export function isRepositoryTop(path: string): boolean {
+  let real: string;
+  try {
+    real = realpathSync(path);
+  } catch {
+    return false;
+  }
+  const top = git(real, ['rev-parse', '--show-toplevel'], undefined, discoveringEnv())?.trim();
+  if (!top) return false;
+  try {
+    return realpathSync(top) === real;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The branch work lands on in the repository at `path`: `configured` when the project names one,
+ * else the remote's default (`origin/HEAD`), else the first that exists of `init.defaultBranch`,
+ * `main` and `master`. Null when git cannot tell — not a repository, or none of those branches
+ * exists (a repository whose only branch has another name). `nested` asks the repository that holds
+ * `path` rather than the project's own (a sub-repo), as `lastCommitDate` does.
+ */
+export function defaultBranch(path: string, configured: string | null = null, nested = false): string | null {
+  const env = nested ? discoveringEnv() : undefined;
+  if (git(path, ['rev-parse', '--is-inside-work-tree'], undefined, env)?.trim() !== 'true') return null;
+  if (configured !== null && configured.trim() !== '') return configured.trim();
+  const remote = git(path, ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'], undefined, env)?.trim();
+  if (remote) return remote.replace(/^origin\//, '');
+  const named = git(path, ['config', '--get', 'init.defaultBranch'], undefined, env)?.trim();
+  for (const name of [named, 'main', 'master']) {
+    if (!name) continue;
+    if (git(path, ['rev-parse', '--verify', '--quiet', `refs/heads/${name}^{commit}`], undefined, env) !== null) return name;
+  }
+  return null;
+}
+
+/**
+ * Is `commit` (any name git resolves: a hash, a short hash) in the history of `ref`? Null when git
+ * cannot tell: not a repository, or either name unknown to it. `nested` as in `defaultBranch`.
+ */
+export function isAncestor(path: string, commit: string, ref: string, nested = false): boolean | null {
+  const env = nested ? discoveringEnv() : undefined;
+  if (git(path, ['rev-parse', '--verify', '--quiet', `${commit}^{commit}`], undefined, env) === null) return null;
+  if (git(path, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], undefined, env) === null) return null;
+  try {
+    const run = spawnSync('git', ['merge-base', '--is-ancestor', commit, ref], {
+      cwd: path,
+      env: env ?? process.env,
+      stdio: 'ignore',
+      timeout: 30_000,
+      windowsHide: true,
+    });
+    if (run.status === 0) return true;
+    if (run.status === 1) return false;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** True when `hash` names a commit of the repository at `path` (`nested` as in `defaultBranch`). */
+export function hasCommit(path: string, hash: string, nested = false): boolean | null {
+  const env = nested ? discoveringEnv() : undefined;
+  if (git(path, ['rev-parse', '--is-inside-work-tree'], undefined, env)?.trim() !== 'true') return null;
+  const out = git(path, ['cat-file', '--batch-check'], `${hash}\n`, env);
+  if (out === null) return null;
+  return / commit \d+$/.test(out.trim());
+}
+
+/**
+ * The repository's common git folder, absolute: the one every worktree of it shares (`.git` of the
+ * main checkout). Null outside a repository.
+ */
+export function commonGitDir(root: string): string | null {
+  return git(root, ['rev-parse', '--path-format=absolute', '--git-common-dir'])?.trim() || null;
+}
+
+/** One worktree of a repository, as `git worktree list --porcelain` describes it. */
+export type Worktree = { path: string; head: string | null; branch: string | null; bare: boolean; main: boolean };
+
+/** Every worktree of the repository at `root`, the main checkout first. Null outside a repository. */
+export function worktreeList(root: string): Worktree[] | null {
+  const out = git(root, ['worktree', 'list', '--porcelain']);
+  if (out === null) return null;
+  const list: Worktree[] = [];
+  for (const block of out.split(/\n\n+/)) {
+    const lines = block.split('\n').filter(Boolean);
+    const path = lines.find((line) => line.startsWith('worktree '))?.slice('worktree '.length);
+    if (!path) continue;
+    const head = lines.find((line) => line.startsWith('HEAD '))?.slice(5) ?? null;
+    const ref = lines.find((line) => line.startsWith('branch '))?.slice(7) ?? null;
+    list.push({
+      path,
+      head,
+      branch: ref === null ? null : ref.replace(/^refs\/heads\//, ''),
+      bare: lines.includes('bare'),
+      main: list.length === 0,
+    });
+  }
+  return list;
+}
+
+/**
  * What is not committed, as `git status --porcelain` prints it — two status letters, a space, the
  * path — one line per entry, untracked files included, folders of untracked files collapsed.
  * Empty when the tree is clean; null when git cannot tell.

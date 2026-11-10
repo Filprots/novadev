@@ -143,6 +143,14 @@ visible — you never hand-create a `2026-09-01_1` whose name the archive alread
 claimed. `novadev doctor` catches that collision anyway, and tells you the next free
 number.
 
+**Archiving happens on the default branch only.** A move of `todos/<batch>` made on a task
+branch conflicts with the same move made on the default branch when the two merge. So
+`novadev sync` on any other branch (or a detached HEAD) moves nothing and lists what the
+default branch will archive after the merge, and `novadev archive` refuses there. The
+default branch is `"defaultBranch"` in `.novadev/novadev.json` when you set it, else the
+remote's default (`origin/HEAD`), else the first of `init.defaultBranch`, `main` and
+`master` that exists. Outside git, or when none of those exists, archiving works anywhere.
+
 **Records.** When an agent concludes a todo it writes `ai_completed.md`
 (what/verification/date) or `ai_failed.md` (deferred/cancelled/merged/blocked +
 why) into the todo folder; long-running work carries `ai_progress.md`. One record
