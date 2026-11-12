@@ -19,6 +19,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import {
   RECORD_COMPLETED,
   RECORD_CONFIRMED,
+  RECORD_TESTSKIPPED,
   RECORD_FAILED,
   RECORD_NEEDSTEST,
   RECORD_PROGRESS,
@@ -36,7 +37,7 @@ import { liveElsewhere, lockLiveness, readWorkLock } from './work.ts';
 import { copyAttachments } from './todo-filing.ts';
 
 const PROMPT = 'prompt.md';
-const RECORDS = [RECORD_NEEDSTEST, RECORD_CONFIRMED, RECORD_REVIEW, RECORD_COMPLETED, RECORD_FAILED, RECORD_PROGRESS] as const;
+const RECORDS = [RECORD_NEEDSTEST, RECORD_CONFIRMED, RECORD_TESTSKIPPED, RECORD_REVIEW, RECORD_COMPLETED, RECORD_FAILED, RECORD_PROGRESS] as const;
 const MAX_RECORD_CHARS = 12000;
 const MAX_TEXT_BYTES = 20000;
 const USAGE =
@@ -118,10 +119,11 @@ function writable(nd: string, t: TodoItem, what: string, now: Date): void {
   if ((TERMINAL_STATES as readonly string[]).includes(t.state)) throw new Error(`${t.ref} already has a terminal record (${t.state}): file a NEW todo for this (novadev file-todo).`);
   if (t.state === 'review' || t.state === 'unmerged') throw new Error(`${t.ref} is finished and waiting for its ${t.state === 'review' ? 'review' : 'merge'}: file a NEW todo for this (novadev file-todo).`);
   const lock = readWorkLock(nd, t.batch);
-  if (lock !== null && lock.state === 'ok' && lock.lock.state === 'working' && lockLiveness(lock.lock, now).live) {
+  // A lock on part of the batch (`work start --todo`) holds only the todos it covers.
+  if (lock !== null && lock.state === 'ok' && (lock.lock.covers === null || lock.lock.covers.includes(t.todo)) && lock.lock.state === 'working' && lockLiveness(lock.lock, now).live) {
     throw new Error(`${t.batch} is in work right now (${lock.lock.agent}): tell that session, or try again when it pauses or stops.`);
   }
-  const there = liveElsewhere(nd, t.batch, now);
+  const there = liveElsewhere(nd, t.batch, now, t.todo);
   if (there !== null) {
     throw new Error(`${t.batch} is in work right now in another worktree (${there.worktree}, ${there.agent}): tell that session, or try again when it pauses or stops.`);
   }

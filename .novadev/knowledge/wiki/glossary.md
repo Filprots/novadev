@@ -12,8 +12,8 @@ sources:
   - resource: repo:src/debt-budget.ts
   - resource: repo:src/placement.ts
   - resource: repo:templates/skills/novadev-work.md
-generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:50:53+01:00 }
-stale_after: 2027-02-08T15:50:53+01:00
+generated: { by: claude-code/claude-opus-5-5, at: 2026-11-12T08:15:26+01:00 }
+stale_after: 2027-02-10T08:15:26+01:00
 ---
 
 # Glossary
@@ -37,7 +37,8 @@ wording for agents; this page maps each word to the code.
   `**Date:**` lines are the authored links (`readField`).
 - **Gate** — `ai_needstest.md`: work landed but a person must test it. Outranks every
   other record (`todoState`) and is *not* terminal, so the batch cannot archive. Closed by
-  `ai_confirmed.md` after review.
+  `ai_confirmed.md` after review — or by `ai_testskipped.md` (`RECORD_TESTSKIPPED`) when the owner
+  skipped the round (`novadev test-result skip`): not human-tested, the todo stays `completed`.
 - **Todo state** — `open · progress · completed · failed · needstest · confirmed`, and the review
   gate's `changes · review · unmerged` (`src/review.ts`); terminal = completed, failed, confirmed
   (`TERMINAL_STATES`).
@@ -116,9 +117,15 @@ wording for agents; this page maps each word to the code.
   (`["repos/*"]`) and named by its folder; **`repo@hash`** — a record's way to name its commit
   (`irrippr@abc1234`); **`**Repos:**`** — the sub-repos a todo changed (`src/subrepos.ts`).
 - **Registry** — `<git common dir>/novadev/`, shared by every worktree of a clone: `locks/<batch>.json`
-  mirrors each lock (worktree, branch, holder, claims) so other worktrees see it (`src/registry.ts`).
+  mirrors each lock (worktree, branch, holder, claims) so other worktrees see it (`src/registry.ts`);
+  a lock on part of a batch is `locks/<batch>@<worktree hash>.json`.
+- **Covers** — the todos a lock on part of a batch holds (`work start --todo`; `covers:` in
+  working.md); null/absent = the whole batch. Two locks of one batch collide when either covers
+  the whole batch or they share a todo.
 - **Claim** — a path a batch in work owns (its features' `touches:`, `--claim`, `work claim`;
   `irrippr:ps/` for a sub-repo). Overlapping claims across worktrees are refused: one owner per file.
+  Inside a worktree novadev made, a batch claims the worktree's claims plus `--claim`, never its
+  features' folders; `novadev worktree claim` adds to a worktree's claims; the gate reads both.
 - **Review** — `ai_review.md`: a reviewer's APPROVE / CHANGES on a finished todo (`novadev todo
   review`). **Team mode** — `"team": true`: completed = approved + merged (the record's commits on
   the default branch).

@@ -109,7 +109,13 @@ for it.
 - If they name a feature instead of a number ("let's test the connect thing"), pass it to
   `novadev test-result tasks <query>` — it matches on the id, the feature number, the
   scope and the scenario titles — then confirm which one you picked.
-- If nothing is `awaiting-test`, say plainly that the queue is empty and stop.
+- If nothing is `awaiting-test`, say plainly that the queue is empty and stop. A task whose
+  `status` is `reviewed` is closed (reviewed, or skipped by the owner) — never offer it.
+- A scenario marked **skipped** (in `test-results/skipped.md`) is not waiting on them — do not
+  offer it. If they say a scenario or the rest of a round is not worth testing ("skip it",
+  "close the rest"), that is the owner's decision to record, not a verdict: tell them an agent
+  records it with `novadev test-result skip` (their words as the reason), and that the round
+  then closes WITHOUT a confirmation. Never write "skipped" into a result file for them.
 - The command reports `missingAttachments` for a path that was not there — tell them which
   screenshot did not travel rather than pretending it landed.
 - If a command answers with `{ "error": … }`, tell them what it said in plain words. Do

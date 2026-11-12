@@ -4,7 +4,7 @@ import { describe, expect, test } from 'bun:test';
 import { existsSync, lstatSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseWorktreeSettings } from '../src/worktree.ts';
-import { git, project, read, run, setManifest, tempDir, todo, write } from './helpers.ts';
+import { feature, git, project, read, run, setManifest, tempDir, todo, write } from './helpers.ts';
 
 function quiet(repo: string): void {
   git(repo, 'config', 'user.name', 'novadev tests');
@@ -135,6 +135,87 @@ describe('gate and mr', () => {
   });
 });
 
+describe('claims added after create (batch 2026-11-12_1, todos 01 and 04)', () => {
+  test('the gate accepts a file `work claim` added to the batch locked there (a lock written by 0.16.0 too); a file under neither still fails', () => {
+    const { main, wts } = superRepo();
+    run(main, 'worktree', 'create', 'irr-1', '--claim', 'src/a.ts');
+    const wt = join(wts, 'irr-1');
+    expect(run(wt, 'work', 'start', '2026-11-10_1', '--agent', 'claude-code/test').code).toBe(0);
+    expect(run(wt, 'work', 'claim', '2026-11-10_1', 'lib/b.ts').code).toBe(0);
+    // The worktree took the claim too, so the gate still accepts it once the lock is released.
+    expect(JSON.parse(run(main, 'worktree', 'list', '--json').stdout).worktrees[0].claims).toEqual(['src/a.ts', 'lib/b.ts']);
+    // As 0.16.0 left it: the claim in the batch's registry entry only, the worktree's entry untouched.
+    const registry = join(main, '.git', 'novadev');
+    const patch = (rel: string, claims: string[]) => write(registry, rel, JSON.stringify({ ...JSON.parse(read(registry, rel)), claims }));
+    patch('worktrees/irr-1.json', ['src/a.ts']);
+    patch('locks/2026-11-10_1.json', ['lib/b.ts']);
+
+    write(wt, 'src/a.ts', 'a\n');
+    write(wt, 'lib/b.ts', 'b\n');
+    commit(wt, 'a and b');
+    expect(run(main, 'worktree', 'gate', 'irr-1').stdout).not.toContain('changed outside the claims');
+    expect(run(main, 'worktree', 'mr', 'irr-1').stdout).toContain('Claims: src/a.ts, lib/b.ts');
+
+    write(wt, 'docs/c.md', 'c\n');
+    commit(wt, 'c');
+    const failed = run(main, 'worktree', 'gate', 'irr-1');
+    expect(failed.code).toBe(1);
+    expect(failed.stdout).toContain('project: changed outside the claims (src/a.ts, lib/b.ts): docs/c.md');
+  });
+
+  test('`work start` in a worktree claims the worktree\'s files, not its features\' folders; `worktree claim` adds a file with the overlap check, and the gate sees it', () => {
+    const { main, wts } = superRepo();
+    feature(main, 'FEAT-0001', 'layout', { touches: 'src/' });
+    write(main, '.novadev/todos/2026-11-10_1/01-layout/prompt.md', '# prompt\n\n**Feature:** FEAT-0001\n\nLayout.\n');
+    commit(main, 'feature');
+    // W2 holds the file F (src/f.ts) inside the folder D (src/) that W1's batch's feature touches.
+    run(main, 'worktree', 'create', 'w2', '--claim', 'src/f.ts');
+    run(main, 'worktree', 'create', 'w1', '--claim', 'src/g.ts');
+    const w1 = join(wts, 'w1');
+    const started = JSON.parse(run(w1, 'work', 'start', '2026-11-10_1', '--agent', 'claude-code/test').stdout);
+    expect(started.claims).toEqual(['src/g.ts']);
+    expect(started.claimsFrom).toEqual({ given: [], features: {}, worktree: ['src/g.ts'] });
+    // Outside a worktree, the same batch still claims its features' folders (and is refused here).
+    expect(JSON.parse(run(main, 'work', 'start', '2026-11-10_1', '--agent', 'claude-code/test', '--take').stdout).error).toContain('src overlaps src/f.ts — claimed by worktree w2');
+
+    const refused = run(main, 'worktree', 'claim', 'w1', 'src/f.ts');
+    expect(refused.code).toBe(1);
+    expect(refused.stderr).toContain('src/f.ts overlaps src/f.ts — claimed by worktree w2 in');
+    expect(refused.stderr).toContain('--allow-overlap when they decided the two may share');
+    const allowed = run(main, 'worktree', 'claim', 'w1', 'src/f.ts', '--allow-overlap');
+    expect(allowed.code).toBe(0);
+    expect(allowed.stdout).toContain('✓ worktree w1 claims src/f.ts');
+    expect(allowed.stdout).toContain('  overlaps (allowed): src/f.ts overlaps src/f.ts — claimed by worktree w2');
+    expect(allowed.stdout).toContain('  claims: src/g.ts, src/f.ts');
+    expect(run(main, 'worktree', 'claim', 'w1', './src/f.ts').stdout).toContain('· worktree w1 holds src/f.ts already');
+    expect(run(main, 'worktree', 'claim', 'w1', 'irrippr:x.js').stderr).toContain('Claimed in a sub-repo this worktree does not have: repos/irrippr/x.js');
+    expect(run(main, 'worktree', 'claim', 'w1', 'x', '--claim', 'y').stderr).toContain('unknown option --claim');
+
+    write(w1, 'src/f.ts', 'f\n');
+    commit(w1, 'f');
+    const gate = run(main, 'worktree', 'gate', 'w1').stdout;
+    expect(gate).toContain('ran:');
+    expect(gate).not.toContain('changed outside the claims');
+  });
+
+  test('`work claim` on a paused lock and `work start` agree: a claim accepted once is not judged again on resume', () => {
+    const { main, wts } = superRepo();
+    run(main, 'worktree', 'create', 'w2', '--claim', 'src/f.ts');
+    run(main, 'worktree', 'create', 'w1', '--claim', 'src/g.ts');
+    const w1 = join(wts, 'w1');
+    run(w1, 'work', 'start', '2026-11-10_1', '--agent', 'claude-code/test');
+    write(w1, 'pause.json', JSON.stringify({ stopped: 'Half way.', next: ['Go on.'] }));
+    run(w1, 'work', 'pause', '2026-11-10_1', 'pause.json');
+    expect(JSON.parse(run(w1, 'work', 'claim', '2026-11-10_1', 'src/f.ts').stdout).error).toContain('src/f.ts overlaps src/f.ts');
+    expect(JSON.parse(run(w1, 'work', 'claim', '2026-11-10_1', 'src/f.ts', '--allow-overlap').stdout).added).toEqual(['src/f.ts']);
+    const resumed = JSON.parse(run(w1, 'work', 'start', '2026-11-10_1', '--agent', 'claude-code/test').stdout);
+    expect(resumed.resumed).toBe(true);
+    expect(resumed.claims).toEqual(['src/g.ts', 'src/f.ts']);
+    // A NEW claim on start is still judged.
+    expect(JSON.parse(run(w1, 'work', 'start', '2026-11-10_1', '--agent', 'claude-code/test', '--claim', 'src').stdout).error).toContain('src overlaps src/f.ts — claimed by worktree w2');
+  });
+});
+
 describe('sync, merge and remove', () => {
   test('merge: a dry run first, then sub-repos and the project, novadev sync --after-merge; remove cleans up', () => {
     const { main, wts } = superRepo();
@@ -227,7 +308,7 @@ describe('the docs', () => {
 
   test('the CLI help names the new commands and flags', () => {
     const help = run(tempDir(), 'help').stdout;
-    for (const words of ['novadev worktree', '--after-merge', '"claim <batch> <path>…"', '"review <ref> <payload.json>"', 'on the default branch only']) {
+    for (const words of ['novadev worktree', '--after-merge', '"claim <batch> <path>…"', '"review <ref> <payload.json>"', 'on the default branch only', '"claim <name>', '--todo <nn|slug>']) {
       expect(help).toContain(words);
     }
   });

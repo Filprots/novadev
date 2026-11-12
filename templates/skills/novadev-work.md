@@ -324,12 +324,27 @@ first (phase 1), then its batch is locked.
 - **In work in another worktree** → refused, with where. A paused one resumes in ITS worktree,
   where its pause record is; never `--take` it from here unless the human says so.
 
+**Part of a batch.** When you were given only some todos of a batch (the others are someone
+else's, or wait), lock just those: `novadev work start <batch> --todo 03 [--todo …]` (a todo's
+number, slug or folder). The lock COVERS those todos (`covers:` in `working.md`, `covers` in the
+answer); another worktree may lock a different todo of the same batch at the same time, and a
+lock that shares a todo with yours — or covers the whole batch — is refused. Work and record
+only the todos your lock covers; the batch stays in work (never complete, never archived) until
+every part is stopped. `work stop` lists as unfinished only your todos. Starting again with
+`--todo` adds todos to your lock; a whole-batch lock is never narrowed — stop it first.
+
 **Claims — one owner per file.** In a repository with several worktrees, a batch owns the
-paths it will change: the `touches:` of the features its todos name, plus what you add with
-`--claim <path>` on `work start` or `novadev work claim <batch> <path>…` once the plan says
-which files the work needs (`irrippr:ps/layouting/` for a sub-repo's path). An overlap with a
-batch in work in another worktree is refused. Narrow your plan, or ask the human. Pass
-`--allow-overlap` only when the human or the lead decided the two may share.
+paths it will change: the `touches:` of the features its todos name (only the todos the lock
+covers), plus what you add with `--claim <path>` on `work start` or
+`novadev work claim <batch> <path>…` once the plan says which files the work needs
+(`irrippr:ps/layouting/` for a sub-repo's path). **In a worktree `novadev worktree create`
+made**, the batch claims that worktree's paths plus `--claim`, never the features' folders,
+and what you add with `--claim` or `work claim` becomes the worktree's too, so
+`novadev worktree gate` accepts the files under it (`novadev worktree claim <name> <path>…`
+adds to a worktree's claims directly). An overlap with a batch in work in another worktree,
+or with another worktree's claims, is refused. Narrow your plan, or ask the human. Pass
+`--allow-overlap` only when the human or the lead decided the two may share. A claim is
+judged once, when it is added: resuming a lock never re-judges the claims it holds.
 
 **Writing waypoints.** Whenever the work moves — each todo you pick up, each phase you
 enter, each commit, each decision, and before anything long — write a waypoint, so the
@@ -589,6 +604,26 @@ keep it in the next round, or `postponed/` it with the trigger that makes it tes
 Finally set `status: reviewed`, `verdict: <…>`, `last-tested: <date>` in the plan's
 frontmatter, clear `todos:`, and add a line to `## Revisions`. Phase 10 archives the
 round and links it into the feature's `tests.md`.
+
+**Skipped — the owner decided a person will not test it.** When the human says a round (or
+some scenarios) is not worth testing, never close it with `ai_confirmed.md`: nobody verified
+anything. Record their decision with the command, `by` naming THEM and `reason` quoting them:
+
+```sh
+cat > "$payload" <<'JSON'
+{ "taskId": "FEAT-0001-planner", "scenarios": "rest", "by": "human:<id>",
+  "reason": "Board on IRR-184: close the round, the result is not important." }
+JSON
+novadev test-result skip "$payload"
+```
+
+`scenarios` is a list of numbers or `"rest"` (every scenario without a verdict). A verdict a
+person recorded is kept — never list it. When nothing is left open the command closes the round
+itself (plan `reviewed`, verdict `skipped` or `partly-skipped`, a `## Revisions` line) and gives
+every gated todo `ai_testskipped.md` — **not tested by a human**: the todo is `completed`, never
+`confirmed`. Results a person did record still get this phase's review: a failure among them
+becomes a follow-up todo (the answer's `next` says so). Never skip on your own judgement, and
+never mark a scenario skipped by writing the file by hand. Then phase 10 archives the round.
 
 Then read the feature's `feature.md` against what the round showed. Where the human saw
 behaviour the document describes differently, the document is wrong: fix it and record an

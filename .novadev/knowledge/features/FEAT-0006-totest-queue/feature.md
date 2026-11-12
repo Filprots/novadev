@@ -18,8 +18,8 @@ sources:
   - resource: commit:c6b3335
   - resource: commit:72e0194
   - resource: commit:fb0170f
-generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:18:33+01:00 }
-stale_after: 2027-11-10T15:18:33+01:00
+generated: { by: claude-code/claude-opus-5-5, at: 2026-11-12T08:15:26+01:00 }
+stale_after: 2027-11-12T08:15:26+01:00
 ---
 
 # FEAT-0006 — The human-testing queue (totest)
@@ -32,6 +32,11 @@ stale_after: 2027-11-10T15:18:33+01:00
 - The todo is gated with `ai_needstest.md` (not terminal: the batch stays out of the
   archive). When results land, `sync` puts the review on the agent's list; the agent writes
   `ai_confirmed.md`, marks the round `reviewed`, and sync archives it as `rev<N>-<date>`.
+- **Skipped by the owner** (FEAT-0010's `test-result skip`): a round closed without a full
+  human test is `reviewed` with verdict `skipped` / `partly-skipped` and `skipped:` /
+  `skipped-by:` in its plan; its todos carry `ai_testskipped.md` (not human-tested — never
+  `ai_confirmed.md`); the feature's `tests.md` lists the round as skipped by the owner, and
+  `novadev totest` shows a closed round as CLOSED until sync archives it.
 - `novadev totest` lists what is waiting on the person and what is ready for review;
   `--all` adds the archived rounds; `--json` gives it as data; `--new <slug>` scaffolds a
   task (refusing a second one for the same feature), `--round <task>` revives a task from
@@ -49,6 +54,7 @@ stale_after: 2027-11-10T15:18:33+01:00
 - 2026-08-27 — 0.5.0 (commit c6b3335): one living task per feature, revised in place
 - 2026-08-28 — 0.6.0 (commit 72e0194): reviewed rounds archive to `archive/<year>/totest/`
 - 2026-10-25 — 0.15.0 (commit fb0170f): `totest --json`
+- 2026-11-12 — rounds skipped by the owner (`2026-11-12_1/02-totest-skip-scenarios-and-close-round`)
 
 ## Open questions
 

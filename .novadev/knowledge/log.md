@@ -1,5 +1,18 @@
 # Knowledge log
 
+## 2026-11-12
+
+* **Update**: [The work lock: waypoints, pause and resume](features/FEAT-0014-work-lock/feature.md) — Part of a batch (work start --todo, covers), worktree-only claims inside a novadev worktree, claims judged once. (claude-code/claude-opus-5-5 · 2026-11-12_1/03-work-start-one-todo-claims)
+* **Update**: [novadev worktree: one worktree per task across repositories](features/FEAT-0019-worktree-command/feature.md) — The gate reads the claims of the batches locked in the worktree; new `worktree claim`. (claude-code/claude-opus-5-5 · 2026-11-12_1/04-worktree-batch-claims-files-only)
+* **Update**: [The human-testing queue (totest)](features/FEAT-0006-totest-queue/feature.md) — Rounds skipped by the owner: verdict skipped/partly-skipped, ai_testskipped.md, tests.md line, CLOSED in totest. (claude-code/claude-opus-5-5 · 2026-11-12_1/02-totest-skip-scenarios-and-close-round)
+* **Update**: [Recording a person's test results](features/FEAT-0010-test-result-recording/feature.md) — New `test-result skip`; the first tests of src/test-results.ts. (claude-code/claude-opus-5-5 · 2026-11-12_1/02-totest-skip-scenarios-and-close-round)
+* **Update**: [Glossary](wiki/glossary.md) — Covers, partial registry entries, worktree claims, ai_testskipped.md. (claude-code/claude-opus-5-5 · 2026-11-12_1/03-work-start-one-todo-claims)
+* **Update**: [Architecture](wiki/architecture.md) — The registry's partial-lock file name. (claude-code/claude-opus-5-5 · 2026-11-12_1/03-work-start-one-todo-claims)
+* **Update**: [Workflows](wiki/workflows.md) — The suite is now 589 tests in 31 files (~45 s). (claude-code/claude-opus-5-5 · 2026-11-12_1/02-totest-skip-scenarios-and-close-round)
+* **Verification**: [Conventions](wiki/conventions.md) — Re-checked after the batch: the new `test-result skip` and `worktree claim` follow the payload/JSON and fail() conventions it describes. (claude-code/claude-opus-5-5 · 2026-11-12_1/02-totest-skip-scenarios-and-close-round)
+* **Verification**: [Overview](wiki/overview.md) — Re-checked: README changes of the batch add commands, nothing that changes the overview. (claude-code/claude-opus-5-5 · 2026-11-12_1/03-work-start-one-todo-claims)
+* **Verification**: [Stack](wiki/stack.md) — Re-checked: still zero dependencies (node:crypto is built in), no tsconfig/linter. (claude-code/claude-opus-5-5 · 2026-11-12_1/03-work-start-one-todo-claims)
+
 ## 2026-11-10
 
 * **Initialization**: novadev 0.15.0 started this knowledge bundle — an Open Knowledge Format (OKF 0.2) bundle for the project's wiki, memories and features.

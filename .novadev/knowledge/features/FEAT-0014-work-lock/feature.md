@@ -7,7 +7,7 @@ feature-status: shipped
 status: stable
 area: work
 created: 2026-11-10
-tags: [work, lock, working-md, waypoint, pause, resume, abandoned, heartbeat, session, novadev-pause, worktree, registry, claims, overlap, one-owner-per-file]
+tags: [work, lock, covers, partial-lock, todo-lock, working-md, waypoint, pause, resume, abandoned, heartbeat, session, novadev-pause, worktree, registry, claims, overlap, one-owner-per-file]
 touches: [src/work.ts, src/registry.ts, tests/work.test.ts, tests/worktree-locks.test.ts, templates/skills/novadev-pause.md]
 depends-on: []
 supersedes: []
@@ -15,8 +15,8 @@ superseded-by: []
 conflicts-with: []
 sources:
   - resource: commit:6655fee
-generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T16:13:07+01:00 }
-stale_after: 2027-11-10T16:13:07+01:00
+generated: { by: claude-code/claude-opus-5-5, at: 2026-11-12T08:15:26+01:00 }
+stale_after: 2027-11-12T08:15:26+01:00
 ---
 
 # FEAT-0014 — The work lock: waypoints, pause and resume
@@ -48,6 +48,17 @@ stale_after: 2027-11-10T16:13:07+01:00
 - **Claims**: the paths a batch owns — its features' `touches:` plus `--claim` / `novadev work
   claim` (`irrippr:ps/` for a sub-repo) — kept in the lock's `claims:` line and the registry;
   an overlap with a batch in work in another worktree is refused unless `--allow-overlap`.
+  A claim is judged once, when it is added: resuming a lock does not re-judge the claims it
+  holds, so `work claim` on a paused lock and `work start` agree.
+- **Part of a batch**: `work start <batch> --todo <nn|slug>` (repeatable) locks only those todos
+  (`covers:` in working.md, `covers` in the registry entry `locks/<batch>@<worktree hash>.json`);
+  claims come from those todos' features only; another worktree may lock other todos of the same
+  batch; two locks collide when either covers the whole batch or they share a todo. sync/status
+  show each part, `stop` lists as unfinished only its todos, `todo addendum/edit/cancel` wait
+  only for a lock covering the todo.
+- **In a worktree `novadev worktree create` made**: the batch claims the worktree's claims plus
+  `--claim`, never the features' folders, and `--claim` / `work claim` there add to the worktree's
+  claims too (FEAT-0019's gate then accepts them).
 
 ## How it works
 
@@ -63,6 +74,7 @@ and the claims (`normalizeClaim`, `claimOverlaps`); `writeLock` in work.ts mirro
 - 2026-10-25 — landed in 0.14.0 (commit 6655fee): `working.md`, `novadev work`, `/novadev-pause`, "in work" in status and sync
 - 2026-11-10 — locks every worktree sees, and claims between batches (`2026-11-10_1/01-worktree-visible-locks`, `2026-11-10_1/05-batch-path-ownership`)
 - 2026-11-10 — fixes from the independent review of batch 2026-11-10_1, before the 0.16.0 release (`2026-11-10_1/07-worktree-command`)
+- 2026-11-12 — part of a batch (`work start --todo`), worktree-only claims inside a novadev worktree, claims judged once (`2026-11-12_1/03-work-start-one-todo-claims`, `2026-11-12_1/04-worktree-batch-claims-files-only`)
 
 ---
 

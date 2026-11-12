@@ -201,6 +201,19 @@ against its written expectation, writes `ai_confirmed.md` with the verdict on ev
 todo the round gated, and files follow-up todos for whatever failed. An agent never
 reviews a task with an empty results folder — silence is never read as a pass.
 
+**Skipping a test.** Sometimes a round is not worth a person's time: the result matters
+little, or the backlog of scenarios is too long. Only you decide that. Say so, and the agent
+runs `novadev test-result skip payload.json` (`{ "taskId": …, "scenarios": [3, 4] | "rest",
+"by": "human:<id>" | "human", "reason": "…" }`): the scenarios are recorded as **skipped**, with
+who decided and why, in the round's `test-results/skipped.md`; a verdict you already recorded
+is kept (it is never skipped). Once no scenario is left without a verdict, the round is closed
+like a review — the plan `reviewed`, verdict `skipped` (or `partly-skipped` when some were
+really tested), `skipped:` and `skipped-by:` in its frontmatter, a line under `## Revisions` —
+and every todo it gated gets `ai_testskipped.md` in place of `ai_needstest.md`: **not tested by
+a human**, never `ai_confirmed.md`, so the todo is `completed`, not `confirmed`. `novadev sync`
+archives the round, and the feature's `tests.md` lists it as skipped by the owner. `by` must be a
+person: an agent relays the owner's decision, it never makes it.
+
 **Chat-initiated work.** When the human asks an agent in chat to
 implement/fix/change something that no open todo already covers, the agent must
 file it as a todo itself, before starting (a matching postponed item or spark
@@ -464,16 +477,39 @@ it was: its trail and its pause record travel with the branch.
 - A batch in work elsewhere is not complete here: it is not archived, `file-todo` does not
   file into it, and `todo addendum/edit/cancel` wait while a live session holds it.
 
+**Part of a batch.** A batch often mixes unrelated todos, and several people work it in
+parallel. `novadev work start <batch> --todo <nn|slug>` (repeatable; a todo's number, its slug
+or its folder) locks only the named todos: the lock's frontmatter says which
+(`covers: 03-dark-mode`), the batch claims only the `touches:` of THOSE todos' features plus
+`--claim`, and another worktree may start a different todo of the same batch. Two locks of one
+batch collide when either covers the whole batch or they share a todo; the refusal names the
+todos the other lock covers. The registry keeps a whole-batch lock at `locks/<batch>.json`, as
+before, and a partial one at `locks/<batch>@<worktree hash>.json`. `novadev sync` and
+`novadev status` show each part with its todos (`● 2026-11-10_3 (todos 01-a) — WORKING …`); the
+batch is in work, never complete, while any part is locked. `work stop` releases only that
+worktree's part and lists as unfinished only its todos; `todo addendum/edit/cancel` wait only
+for a live lock that covers the todo. Starting again with `--todo` adds todos to the lock; a
+lock on the whole batch is never narrowed (stop it first).
+
 **Claims.** A batch in work claims the paths it will change: the `touches:` of every feature
-a `**Feature:**` line in its files names, plus the paths given with
-`novadev work start <batch> --claim <path>` (repeatable) or later with
+a `**Feature:**` line in its files names (in the todos the lock covers), plus the paths given
+with `novadev work start <batch> --claim <path>` (repeatable) or later with
 `novadev work claim <batch> <path>…`. A claim may name a sub-repo's path as
 `irrippr:ps/layouting/`. `work start` and `work claim` refuse a claim that overlaps (the same
 path, or one inside the other) a claim of a batch in work in another worktree, and they name
 that batch, its worktree and its branch. `--allow-overlap` is for when the lead decided the
 two may share. The lock's frontmatter keeps the claims (`claims: src/auth, docs`), and the
 answer says where each came from. A batch that claims nothing is told that no overlap was
-checked.
+checked. A claim is judged once, when it is added: resuming a lock (`work start` on a paused
+or abandoned one) does not judge again the claims it already holds, so `work claim` and
+`work start` never disagree about them.
+
+Inside a worktree `novadev worktree create` made, a batch claims **that worktree's claims**
+plus `--claim`, never the folders of its features' `touches:` (`claimsFrom.worktree` in the
+answer): the worktree's claims were checked when they were given, and a feature's folder would
+collide with every neighbour working another file in it. The paths `--claim` and `work claim`
+add there are added to the worktree's claims too, so `novadev worktree gate` accepts the files
+under them even after the lock is released.
 
 ### Merging parallel branches: `.gitattributes` and `sync --after-merge`
 
@@ -569,12 +605,16 @@ repository's `info/exclude`. `--claim` paths belong to the worktree: one that ov
 claim of another worktree, or of a batch in work elsewhere, is refused (`--allow-overlap`
 when the lead decided). The worktree is recorded in the registry,
 `<git common dir>/novadev/worktrees/<name>.json`.
+`novadev worktree claim <name> <path>… [--allow-overlap]` adds paths to an existing worktree's
+claims, with the same check (a batch locked in that worktree is its own work and never blocks
+it), and refuses a path in a sub-repo the worktree has no worktree of.
 
 `gate` fails on any of these, per repository:
 
 - uncommitted changes;
 - whitespace errors (`git diff --check`);
-- a changed file outside the worktree's claims (`.novadev/` aside);
+- a changed file outside the worktree's claims and the claims of the batches locked in it
+  (`.novadev/` aside) — checked when the worktree has claims at all;
 - `novadev sync --check` failing in the worktree;
 - a failing command from the project's `gate` setting.
 
@@ -1063,6 +1103,7 @@ novadev file-todo file payload.json     # write the folders, the briefs, and the
 novadev test-result tasks [query]       # resolve "16" / "the selection one" against the real queue
 novadev test-result write payload.json  # one scenario's verdict → scenario-<N>.txt   (APPENDS)
 novadev test-result review payload.json # a whole round → review.md                   (APPENDS)
+novadev test-result skip payload.json   # the owner skips scenarios / the rest → skipped.md; closes the round (ai_testskipped.md)
 
 novadev work pause <batch> payload.json # the pause record, newest entry of the batch's lock
 
