@@ -46,8 +46,13 @@ usage:
                             on one branch: "create <name> [<sub-repo>…] [--claim <path>]… [--todo <ref>]…", "claim <name>
                             <path>…" (more claims, same check), "list", "status",
                             "gate" (the checks before a merge request), "mr" (its text), "sync" (merge the
-                            default branches in), "merge <name> [--yes]" (the lead: all or nothing, then
-                            sync --after-merge), "remove <name> [--force]"
+                            default branches in), "merge <name> [--yes]" (the lead: all or nothing, the
+                            gate on the merged result first, then sync --after-merge),
+                            "queue add <name> | list | run | remove <name>" (the merge queue: each
+                            branch onto the newest default branch, checked there, then landed; a
+                            failure lands nothing and the queue goes on), "remove <name> [--force]";
+                            "claims": "notice" in novadev.json makes an overlapping claim a notice,
+                            "protectedPaths" names where it stays a lock"
   novadev archive <batch>…  move fully-recorded batch(es) to archive/<year>/   (or: --done for all);
                             on the default branch only — a task branch leaves the moves to it
   novadev knowledge [words] the knowledge bundle (.novadev/knowledge/, Open Knowledge Format 0.2):

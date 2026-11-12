@@ -48,6 +48,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmdirSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { projectDefaultBranch } from './branch.ts';
+import { type ClaimPolicy, claimPolicy, judgeOverlaps, protectedBy, refusalHint, sharedClaims } from './claim-policy.ts';
 import { commonGitDir, defaultBranch, worktreeList } from './git.ts';
 import { type Parsed, ROOT_DIR_NAME, WORK_LOCK_FILE, isPlainObject, novadevDir, packageDir, pathWithin, readManifest, refuse, requireProjectRoot, todoState } from './lib.ts';
 import {
@@ -66,6 +67,7 @@ import {
   samePlace,
   writeRegistryWorktree,
 } from './registry.ts';
+import { type QueueEntry, queueLockHolder, queueOrder, readQueue, withQueueLock, writeQueue } from './queue.ts';
 import { forgetSubrepos, listSubrepos } from './subrepos.ts';
 import { briefTitle, resolveTodo } from './todo.ts';
 
@@ -236,8 +238,9 @@ export function createWorktree(root: string, name: string, repoNames: readonly s
   if (git(main, 'rev-parse', '--verify', '--quiet', `refs/heads/${branch}`).ok) throw new Error(`Branch ${branch} exists already in the project's repository.`);
 
   const claims = worktreeClaims(main, rawClaims, chosen.map((r) => r.name), 'name the sub-repo on create');
-  const overlaps = claimOverlaps(main, claims, undefined, claimHolders(main, null));
-  if (overlaps.length > 0 && !allowOverlap) throw new Error(takenText(overlaps));
+  const policy = claimPolicy(main);
+  const { hard: overlaps, soft: shares } = judgeOverlaps(policy, claimOverlaps(main, claims, undefined, claimHolders(main, null)));
+  if (overlaps.length > 0 && !allowOverlap) throw new Error(takenText(overlaps, policy));
   // The todos it is made for, as the main checkout's `todos/` names them (a typo is refused here).
   const todos = todoRefs.map((ref) => resolveTodo(novadevDir(main), ref).ref).filter((ref, i, all) => all.indexOf(ref) === i);
   // One todo, one owner: who else is on it is said, not refused — the todo's lock is the gate
@@ -313,6 +316,7 @@ export function createWorktree(root: string, name: string, repoNames: readonly s
   lines.push(`  branch ${branch} in: project${chosen.map((r) => `, ${r.name}`).join('')} (from ${Object.entries(base).map(([k, b]) => `${k === '.' ? 'project' : k} ${b.branch}`).join(', ')})`);
   if (claims.length > 0) lines.push(`  claims: ${claims.join(', ')}`);
   if (overlaps.length > 0) lines.push(`  overlaps (allowed): ${overlaps.map(overlapText).join('; ')}`);
+  if (shares.length > 0) lines.push(`  shared (a notice, not a lock): ${shares.map(overlapText).join('; ')}`);
   if (todos.length > 0) lines.push(`  for: ${todos.join(', ')} — take its lock there first: novadev work start ${todos[0]}`);
   for (const note of shared) lines.push(`  note: ${note}`);
   if (links.length > 0) lines.push(`  linked from the main checkout: ${links.map((l) => relative(path, l)).join(', ')}`);
@@ -334,8 +338,8 @@ function worktreeClaims(main: string, rawClaims: readonly string[], repoNames: r
   return claims;
 }
 
-function takenText(overlaps: Overlap[]): string {
-  return `One owner per file — these claims are taken:\n${overlaps.map((o) => `  ${overlapText(o)}`).join('\n')}\nAsk the lead; --allow-overlap when they decided the two may share.`;
+function takenText(overlaps: Overlap[], policy: ClaimPolicy): string {
+  return `One owner per file — these claims are taken:\n${overlaps.map((o) => `  ${overlapText(o)}`).join('\n')}\n${refusalHint(policy)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -354,11 +358,13 @@ export function claimWorktree(root: string, name: string, rawClaims: readonly st
   forgetSubrepos();
   const claims = worktreeClaims(main, rawClaims, entry.repos.map((r) => r.name), 'make a new worktree that has that sub-repo');
   const fresh = claims.filter((c) => !entry.claims.includes(c));
-  const overlaps = claimOverlaps(main, fresh, undefined, claimHolders(main, entry.path));
-  if (overlaps.length > 0 && !allowOverlap) throw new Error(takenText(overlaps));
+  const policy = claimPolicy(main);
+  const { hard: overlaps, soft: shares } = judgeOverlaps(policy, claimOverlaps(main, fresh, undefined, claimHolders(main, entry.path)));
+  if (overlaps.length > 0 && !allowOverlap) throw new Error(takenText(overlaps, policy));
   addWorktreeClaims(main, entry, fresh);
   const lines = [fresh.length > 0 ? `✓ worktree ${name} claims ${fresh.join(', ')}` : `· worktree ${name} holds ${claims.join(', ')} already`];
   if (overlaps.length > 0) lines.push(`  overlaps (allowed): ${overlaps.map(overlapText).join('; ')}`);
+  if (shares.length > 0) lines.push(`  shared (a notice, not a lock): ${shares.map(overlapText).join('; ')}`);
   lines.push(`  claims: ${[...entry.claims, ...fresh].join(', ')}`);
   return lines;
 }
@@ -370,6 +376,9 @@ export function claimWorktree(root: string, name: string, rawClaims: readonly st
 export function listData(root: string): Record<string, unknown>[] {
   const main = mainCheckout(root);
   const locks = registryLocks(main);
+  const shared = sharedClaims(main);
+  const queue = readQueue(main);
+  const order = queueOrder(queue);
   return registryWorktrees(main).map((w) => ({
     name: w.name,
     branch: w.branch,
@@ -377,6 +386,10 @@ export function listData(root: string): Record<string, unknown>[] {
     exists: existsSync(w.path),
     repos: w.repos.map((r) => r.name),
     claims: w.claims,
+    // The paths it claims that another worktree claims too: `path` and who the other is.
+    shares: shared.flatMap((s) => (samePlace(s.worktrees[0], w.path) ? [{ path: s.path, with: s.between[1] }] : samePlace(s.worktrees[1], w.path) ? [{ path: s.path, with: s.between[0] }] : [])),
+    // Its place in the merge queue, when it is there: `position` counts from 1; a failed one has its reason.
+    ...queueInfo(w.name, queue, order),
     // The todos it is for (create --todo, and every todo locked in it), `<batch>/<todo>`.
     todos: w.todos,
     // The locks held in it now: a batch's as before; a todo's names its `todo`; a 0.17.0 part its `covers`.
@@ -384,6 +397,13 @@ export function listData(root: string): Record<string, unknown>[] {
       .filter((l) => samePlace(l.worktree, w.path))
       .map((l) => ({ batch: l.batch, state: l.state, agent: l.agent, ...(l.unit === 'todo' ? { todo: l.covers![0], ref: lockRef(l) } : l.covers !== null ? { covers: l.covers } : {}) })),
   }));
+}
+
+function queueInfo(name: string, queue: readonly QueueEntry[], order: readonly QueueEntry[]): { queue?: { state: QueueEntry['state']; position: number | null; express: boolean; reason: string | null } } {
+  const entry = queue.find((e) => e.name === name);
+  if (entry === undefined) return {};
+  const at = order.findIndex((e) => e.name === name);
+  return { queue: { state: entry.state, position: at === -1 ? null : at + 1, express: entry.express, reason: entry.reason ?? null } };
 }
 
 export function statusLines(root: string, name: string): string[] {
@@ -431,8 +451,10 @@ export function gateWorktree(root: string, name: string): { passed: boolean; lin
   const entry = find(mainCheckout(root), name);
   const settings = settingsOf(entry.main);
   const claims = gateClaims(entry);
+  const policy = claimPolicy(entry.main);
   const fails: string[] = [];
   const ran: string[] = [];
+  const allChanged: string[] = [];
   for (const repo of reposOf(entry)) {
     if (!existsSync(repo.path)) {
       fails.push(`${label(repo)}: the worktree is missing (${repo.path})`);
@@ -442,7 +464,14 @@ export function gateWorktree(root: string, name: string): { passed: boolean; lin
     if (changes.length > 0) fails.push(`${label(repo)}: ${changes.length} uncommitted change(s) — commit or drop them first`);
     if (!git(repo.path, 'diff', '--check', `${repo.base}...${entry.branch}`).ok) fails.push(`${label(repo)}: whitespace errors (git diff --check ${repo.base}...${entry.branch})`);
     const changed = changedFiles(repo, entry.branch);
-    if (entry.claims.length > 0) {
+    allChanged.push(...changed);
+    if (policy.mode === 'notice') {
+      // Claims are notices: only a protected path is a lock, and a file under one must be held here.
+      const unheld = changed.filter((f) => !f.startsWith(`${ROOT_DIR_NAME}/`) && protectedBy(policy, f) !== null && !claims.some((c) => pathWithin(f, c)));
+      if (unheld.length > 0) {
+        fails.push(`${label(repo)}: changed under a protected path this worktree does not hold: ${unheld.slice(0, 10).map((f) => `${f} (${protectedBy(policy, f)})`).join(', ')}${unheld.length > 10 ? ` … +${unheld.length - 10}` : ''} — claim it first (\`novadev worktree claim ${entry.name} <path>\`)`);
+      }
+    } else if (entry.claims.length > 0) {
       const outside = changed.filter((f) => !f.startsWith(`${ROOT_DIR_NAME}/`) && !claims.some((c) => pathWithin(f, c)));
       if (outside.length > 0) fails.push(`${label(repo)}: changed outside the claims (${claims.join(', ')}): ${outside.slice(0, 10).join(', ')}${outside.length > 10 ? ` … +${outside.length - 10}` : ''}`);
     }
@@ -466,8 +495,35 @@ export function gateWorktree(root: string, name: string): { passed: boolean; lin
   }
   const lines = fails.length > 0 ? [`✗ gate FAILED for ${entry.name}`, ...fails.map((f) => `  - ${f}`)] : [`✓ gate passed for ${entry.name}`];
   if (ran.length > 0) lines.push('  ran:', ...ran.map((r) => `    ${r}`));
+  const shared = policy.mode === 'notice' ? sharedFiles(entry, allChanged) : [];
+  if (shared.length > 0) lines.push('  shared with other open worktrees (a notice — the merge checks the combination):', ...shared.slice(0, 15).map((s) => `    ${s}`), ...(shared.length > 15 ? [`    … +${shared.length - 15}`] : []));
   if (fails.length === 0) lines.push('  The merge request still names the targeted checks you ran, with their results (novadev worktree mr).');
   return { passed: fails.length === 0, lines };
+}
+
+/**
+ * The files this worktree's branch changed that another open worktree is in too: its branch changed
+ * the same file, or it (or a lock held in it) claims a path the file lies under. One line per file.
+ */
+function sharedFiles(entry: RegistryWorktree, changed: readonly string[]): string[] {
+  const mine = changed.filter((f) => !f.startsWith(`${ROOT_DIR_NAME}/`));
+  if (mine.length === 0) return [];
+  const who = new Map<string, string[]>();
+  const add = (file: string, what: string) => {
+    const list = who.get(file) ?? [];
+    if (!list.includes(what)) list.push(what);
+    who.set(file, list);
+  };
+  for (const other of registryWorktrees(entry.main)) {
+    if (other.name === entry.name || !existsSync(other.path)) continue;
+    const theirs = new Set(reposOf(other).flatMap((repo) => (existsSync(repo.path) ? changedFiles(repo, other.branch) : [])));
+    const claims = gateClaims(other);
+    for (const file of mine) {
+      if (theirs.has(file)) add(file, `also changed in worktree ${other.name}`);
+      else if (claims.some((c) => pathWithin(file, c))) add(file, `claimed by worktree ${other.name}`);
+    }
+  }
+  return mine.filter((f) => who.has(f)).map((f) => `${f} — ${who.get(f)!.join('; ')}`);
 }
 
 /**
@@ -516,9 +572,11 @@ export function mrText(root: string, name: string): string {
   const held = registryLocks(entry.main).filter((l) => samePlace(l.worktree, entry.path));
   const batches = held.filter((l) => l.unit === 'batch').map((l) => l.batch);
   const locked = held.filter((l) => l.unit === 'todo').map(lockRef);
+  const shared = claimPolicy(entry.main).mode === 'notice' ? sharedFiles(entry, reposOf(entry).flatMap((repo) => (existsSync(repo.path) ? changedFiles(repo, entry.branch) : []))) : [];
   lines.push(
     '',
     `Claims: ${gateClaims(entry).join(', ') || 'none'}`,
+    ...(shared.length > 0 ? ['Shared with other open worktrees (the merge checks the combination):', ...shared.slice(0, 15).map((s) => `- ${s}`), ...(shared.length > 15 ? [`- … +${shared.length - 15}`] : [])] : []),
     ...(locked.length > 0 ? [`Todos in work there: ${locked.join(', ')} — stop (or pause) them before the merge`] : []),
     ...(batches.length > 0 ? [`Batches in work there: ${batches.join(', ')} — stop (or pause) them before the merge`] : []),
     `Gate: run \`novadev worktree gate ${entry.name}\` and paste its result.`,
@@ -559,7 +617,182 @@ function afterMerge(path: string): string[] {
   return [run.status === 0 ? `  novadev sync --after-merge: ${said?.replace(/^after merge: /, '') ?? 'ok'}` : `  novadev sync --after-merge: PROBLEMS — run \`novadev sync\` in ${path}: ${`${run.stderr ?? ''}${said ?? ''}`.trim().split('\n')[0]}`];
 }
 
+/**
+ * `worktree merge`: without --yes the dry run; with it, THE merge of this clone (one at a time) —
+ * the branch is brought onto the newest default branches, checked there, and only then landed.
+ */
 export function mergeWorktree(root: string, name: string, yes: boolean): { ok: boolean; lines: string[] } {
+  if (!yes) {
+    const dry = tryMerge(root, name, false);
+    return dry.ok && dry.lines[0]?.startsWith('Dry run') ? { ok: true, lines: [...dry.lines, '  Before anything lands, the gate runs on the merged result (the branch on top of the newest default branches).'] } : dry;
+  }
+  const main = mainCheckout(root);
+  find(main, name);
+  return withQueueLock(main, `worktree merge ${name}`, () => {
+    const landed = landWorktree(root, name);
+    // Landed directly: it no longer waits in the queue.
+    if (landed.ok) writeQueue(main, readQueue(main).filter((e) => e.name !== name));
+    return landed;
+  });
+}
+
+function repoHeads(repos: readonly Repo[]): string {
+  return repos.map((repo) => git(repo.main, 'rev-parse', repo.base).out).join(' ');
+}
+
+/**
+ * Land one worktree, as the queue and `worktree merge --yes` both do it (the caller holds the queue
+ * lock): every merge is tried first (all or nothing); the default branches are merged INTO the
+ * branch, in the worktree, so its tree is the merged result; the gate — and the project's gate
+ * commands — run there; and only when they pass is the branch merged into the default branches.
+ * Nothing lands on a failure. The merges into the branch stay: they are what `worktree sync` makes,
+ * and the builder fixes on top of them.
+ */
+function landWorktree(root: string, name: string): { ok: boolean; lines: string[]; reason?: string } {
+  const entry = find(mainCheckout(root), name);
+  const repos = reposOf(entry);
+  const lines: string[] = [];
+  const stop = (result: { lines: string[] }, extra: string[] = []) => {
+    const all = [...lines, ...result.lines, ...extra];
+    return { ok: false, lines: all, reason: (result.lines.find((l) => l.startsWith('✗')) ?? result.lines[0] ?? 'failed').replace(/^✗\s*/, '') };
+  };
+  for (let round = 1; ; round++) {
+    const heads = repoHeads(repos);
+    const dry = tryMerge(root, name, false);
+    if (!dry.ok) return stop(dry);
+    if (!dry.lines[0]?.startsWith('Dry run')) return { ok: true, lines: [...lines, ...dry.lines] };
+    if (repos.some((repo) => aheadBehind(repo.path, repo.base, entry.branch).behind > 0)) {
+      const synced = syncWorktree(root, name);
+      if (!synced.ok) {
+        for (const repo of repos) git(repo.path, 'merge', '--abort');
+        return stop(synced);
+      }
+      lines.push(...synced.lines.map((l) => l.replace(/^✓ /, '✓ on the newest default branch — ')));
+    }
+    const gate = gateWorktree(root, name);
+    if (!gate.passed) {
+      return {
+        ok: false,
+        lines: [...lines, ...gate.lines, '✗ the checks failed on the merged result — nothing merged. Back to the builder: fix it in the worktree, then queue it again.'],
+        reason: `the checks failed on the merged result: ${gate.lines.filter((l) => l.startsWith('  - ')).map((l) => l.slice(4).split('\n')[0]).join('; ') || 'see the gate'}`,
+      };
+    }
+    lines.push('✓ the gate passed on the merged result');
+    // Someone committed to a default branch while the checks ran: what was checked is no longer
+    // what would land. Again, on the newer one.
+    if (repoHeads(repos) !== heads) {
+      if (round >= 3) return stop({ lines: ['✗ the default branches keep moving under the merge (three tries) — nothing merged. Nobody commits there while a merge runs; try again.'] });
+      lines.push('· a default branch moved while the checks ran — again, on the newest');
+      continue;
+    }
+    const merged = tryMerge(root, name, true);
+    return merged.ok ? { ok: true, lines: [...lines, ...merged.lines] } : stop(merged);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The merge queue
+// ---------------------------------------------------------------------------
+
+export function queueAdd(root: string, name: string, opts: { by: string | null; express: boolean }, now: Date = new Date()): string[] {
+  const main = mainCheckout(root);
+  const entry = find(main, name);
+  if (!existsSync(entry.path)) throw new Error(`Worktree ${name} is missing (${entry.path}).`);
+  const queue = readQueue(main);
+  const was = queue.find((e) => e.name === name);
+  if (was?.state === 'queued' && was.express === opts.express) {
+    return [`· ${name} is in the merge queue already (place ${queueOrder(queue).findIndex((e) => e.name === name) + 1})`];
+  }
+  const next: QueueEntry[] = [...queue.filter((e) => e.name !== name), { name, state: 'queued', added: now.toISOString(), by: opts.by, express: opts.express }];
+  writeQueue(main, next);
+  const place = queueOrder(next).findIndex((e) => e.name === name) + 1;
+  const lines = [`✓ ${name} queued for merge — place ${place} of ${queueOrder(next).length}${opts.express ? ' (express lane)' : ''}${was?.state === 'failed' ? ' (again, after its failure)' : ''}`];
+  const dry = tryMerge(root, name, false);
+  if (!dry.ok) lines.push(`  note: as it stands it would not merge — ${(dry.lines.find((l) => l.startsWith('✗')) ?? dry.lines[0] ?? '').replace(/^✗\s*/, '')}`);
+  lines.push('  The lead runs the queue: novadev worktree queue run');
+  return lines;
+}
+
+export function queueRemove(root: string, name: string): string[] {
+  const main = mainCheckout(root);
+  const queue = readQueue(main);
+  if (!queue.some((e) => e.name === name)) throw new Error(`${name} is not in the merge queue (novadev worktree queue list).`);
+  writeQueue(main, queue.filter((e) => e.name !== name));
+  return [`✓ ${name} taken out of the merge queue`];
+}
+
+/** The queue for `queue list` and `status`: what runs next first, then the failed ones; and the merge running now. */
+export function queueData(root: string): { running: { what: string; since: string; pid: number; host: string } | null; entries: (QueueEntry & { position: number | null })[] } {
+  const main = mainCheckout(root);
+  const queue = readQueue(main);
+  const order = queueOrder(queue);
+  const lock = queueLockHolder(main);
+  return {
+    running: lock === null ? null : { what: lock.what, since: lock.at, pid: lock.pid, host: lock.host },
+    entries: [...order.map((e, i) => ({ ...e, position: i + 1 })), ...queue.filter((e) => e.state === 'failed').map((e) => ({ ...e, position: null }))],
+  };
+}
+
+export function queueLines(root: string): string[] {
+  const data = queueData(root);
+  if (data.entries.length === 0 && data.running === null) return ['the merge queue is empty (novadev worktree queue add <name>)'];
+  const lines: string[] = [];
+  if (data.running !== null) lines.push(`running: ${data.running.what} (pid ${data.running.pid} on ${data.running.host}, since ${data.running.since})`);
+  for (const e of data.entries) {
+    lines.push(
+      e.state === 'queued'
+        ? `${String(e.position).padStart(2)}. ${e.name}${e.express ? '  [express]' : ''}  queued ${e.added}${e.by ? ` by ${e.by}` : ''}`
+        : ` ✗ ${e.name}  FAILED ${e.failedAt ?? ''} — ${e.reason ?? 'no reason recorded'} (fix in the worktree, then: novadev worktree queue add ${e.name})`,
+    );
+  }
+  return lines;
+}
+
+/**
+ * Run the queue: take the head, land it (`landWorktree`), go on to the next — until none waits, or
+ * after one with `one`. A failure lands nothing, marks the entry failed with its reason, and the
+ * queue goes on. One run at a time in the whole clone.
+ */
+export function queueRun(root: string, one: boolean, now: () => Date = () => new Date()): { ok: boolean; lines: string[] } {
+  const main = mainCheckout(root);
+  if (queueOrder(readQueue(main)).length === 0) return { ok: true, lines: ['nothing waits in the merge queue'] };
+  return withQueueLock(main, 'worktree queue run', () => {
+    const lines: string[] = [];
+    let failed = 0;
+    let landed = 0;
+    const tried = new Set<string>();
+    for (;;) {
+      // Read again each time: an entry may have been added or removed while a merge ran.
+      const head = queueOrder(readQueue(main)).find((e) => !tried.has(e.name));
+      if (head === undefined) break;
+      tried.add(head.name);
+      lines.push(`— ${head.name}${head.express ? ' (express lane)' : ''}`);
+      let result: { ok: boolean; lines: string[]; reason?: string };
+      try {
+        result = landWorktree(root, head.name);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        result = { ok: false, lines: [`✗ ${message}`], reason: message };
+      }
+      lines.push(...result.lines.map((l) => `  ${l}`));
+      const queue = readQueue(main);
+      if (result.ok) {
+        landed++;
+        writeQueue(main, queue.filter((e) => e.name !== head.name));
+      } else {
+        failed++;
+        writeQueue(main, queue.map((e) => (e.name === head.name ? { ...e, state: 'failed' as const, reason: (result.reason ?? 'failed').slice(0, 600), failedAt: now().toISOString() } : e)));
+        lines.push(`  ✗ ${head.name} failed — nothing of it merged; the queue goes on`);
+      }
+      if (one) break;
+    }
+    lines.push(`merge queue: ${landed} landed, ${failed} failed, ${queueOrder(readQueue(main)).length} still waiting`);
+    return { ok: failed === 0, lines };
+  });
+}
+
+/** The merge itself, with every refusal that needs no check to be run: dry (`yes` false) or for real. */
+function tryMerge(root: string, name: string, yes: boolean): { ok: boolean; lines: string[] } {
   const entry = find(mainCheckout(root), name);
   const repos = reposOf(entry);
   const lines: string[] = [];
@@ -664,6 +897,7 @@ export function removeWorktree(root: string, name: string, force: boolean): stri
   }
   for (const lock of itsLocks) removeRegistryEntry(main, lock);
   removeRegistryWorktree(main, entry.name);
+  if (readQueue(main).some((e) => e.name === entry.name)) writeQueue(main, readQueue(main).filter((e) => e.name !== entry.name));
   try {
     if (existsSync(entry.path) && readdirSync(entry.path).length === 0) rmdirSync(entry.path);
   } catch {
@@ -684,6 +918,7 @@ const USAGE = `usage: novadev worktree create <name> [<sub-repo>…] [--claim <p
        novadev worktree mr <name>
        novadev worktree sync <name>
        novadev worktree merge <name> [--yes]
+       novadev worktree queue add <name> [--express] [--agent <actor>] | list [--json] | run [--one] | remove <name>
        novadev worktree remove <name> [--force]`;
 
 export function worktree(args: string[]): void {
@@ -693,15 +928,17 @@ export function worktree(args: string[]): void {
   const positional: string[] = [];
   const claims: string[] = [];
   const todos: string[] = [];
+  let agent: string | null = null;
   for (let i = 0; i < rest.length; i++) {
-    if (rest[i] === '--claim' || rest[i] === '--todo') {
+    if (rest[i] === '--claim' || rest[i] === '--todo' || rest[i] === '--agent') {
       const value = rest[i + 1];
-      if (value === undefined || value.startsWith('--')) return void fail(rest[i] === '--claim' ? '--claim needs a path' : '--todo needs a todo (<batch>/<todo>)');
-      (rest[i] === '--claim' ? claims : todos).push(value);
+      if (value === undefined || value.startsWith('--')) return void fail(rest[i] === '--claim' ? '--claim needs a path' : rest[i] === '--agent' ? '--agent needs an actor' : '--todo needs a todo (<batch>/<todo>)');
+      if (rest[i] === '--agent') agent = value;
+      else (rest[i] === '--claim' ? claims : todos).push(value);
       i++;
     } else if (!rest[i]!.startsWith('--')) positional.push(rest[i]!);
   }
-  const known: Record<string, string[]> = { create: ['--claim', '--todo', '--allow-overlap'], claim: ['--allow-overlap'], list: ['--json'], status: [], gate: [], mr: [], sync: [], merge: ['--yes'], remove: ['--force'] };
+  const known: Record<string, string[]> = { create: ['--claim', '--todo', '--allow-overlap'], claim: ['--allow-overlap'], list: ['--json'], status: [], gate: [], mr: [], sync: [], merge: ['--yes'], remove: ['--force'], queue: ['--json', '--one', '--express', '--agent'] };
   if (command === undefined || !(command in known)) return void fail(USAGE, 2);
   const unknown = flags.filter((f) => !known[command]!.includes(f));
   if (unknown.length > 0) return void fail(`unknown option ${unknown.join(', ')}\n${USAGE}`, 2);
@@ -744,6 +981,22 @@ export function worktree(args: string[]): void {
         const result = command === 'sync' ? syncWorktree(root, positional[0]!) : mergeWorktree(root, positional[0]!, flags.includes('--yes'));
         console.log(result.lines.join('\n'));
         if (!result.ok) process.exit(1);
+        return;
+      }
+      case 'queue': {
+        const [action, target] = positional;
+        if (action === 'list' || action === undefined) {
+          if (flags.includes('--json')) return void console.log(JSON.stringify(queueData(root), null, 2));
+          return void console.log(queueLines(root).join('\n'));
+        }
+        if (action === 'run') {
+          const result = queueRun(root, flags.includes('--one'));
+          console.log(result.lines.join('\n'));
+          if (!result.ok) process.exit(1);
+          return;
+        }
+        if ((action !== 'add' && action !== 'remove') || target === undefined) return void fail(USAGE, 2);
+        console.log((action === 'add' ? queueAdd(root, target, { by: agent, express: flags.includes('--express') }) : queueRemove(root, target)).join('\n'));
         return;
       }
       case 'remove':

@@ -16,7 +16,9 @@ import {
   requireProjectRoot,
   todoState,
 } from './lib.ts';
+import { sharedClaims } from './claim-policy.ts';
 import { worktreeList } from './git.ts';
+import { queueLockHolder, queueOrder, readQueue } from './queue.ts';
 import { metricsStatusLine } from './metrics-audit.ts';
 import { batchesInWorkElsewhere, insideWorktree, lockRef, registryLocks } from './registry.ts';
 import { listTodos } from './todo.ts';
@@ -44,6 +46,19 @@ const STATE_MARK = {
  * a todo's (`unit: "todo"`, `ref` names it) or a batch's — from the registry (registry.ts); this
  * worktree's own from its files. Null outside git.
  */
+/** The merge queue as `status` shows it: in running order, then the failed ones. */
+export function mergeQueueData(nd: string): { running: string | null; entries: { name: string; state: 'queued' | 'failed'; position: number | null; express: boolean; reason: string | null }[] } {
+  const root = dirname(nd);
+  const queue = readQueue(root);
+  return {
+    running: queueLockHolder(root)?.what ?? null,
+    entries: [
+      ...queueOrder(queue).map((e, i) => ({ name: e.name, state: e.state, position: i + 1, express: e.express, reason: null })),
+      ...queue.filter((e) => e.state === 'failed').map((e) => ({ name: e.name, state: e.state, position: null, express: e.express, reason: e.reason ?? null })),
+    ],
+  };
+}
+
 export function worktreesData(nd: string): { path: string; branch: string | null; current: boolean; main: boolean; batches: { batch: string; unit: 'batch' | 'todo'; ref: string; state: string; agent: string; claims: string[]; covers: string[] | null }[] }[] | null {
   const root = dirname(nd);
   const list = worktreeList(root);
@@ -105,7 +120,7 @@ export function statusData(nd: string, now: Date = new Date()): Record<string, u
   let archived = 0;
   for (const year of listDirs(join(nd, 'archive'))) archived += listDirs(join(nd, 'archive', year)).length;
   return {
-    inWork, worktrees: worktreesData(nd), batches, todoCounts: counts, totest: tasks, postponed,
+    inWork, worktrees: worktreesData(nd), mergeQueue: mergeQueueData(nd), sharedClaims: sharedClaims(dirname(nd)).map((s) => ({ path: s.path, between: s.between })), batches, todoCounts: counts, totest: tasks, postponed,
     sparks: listFiles(join(nd, 'sparks')).filter((f) => f !== 'README.md').length,
     features, archivedBatches: archived,
   };
@@ -163,6 +178,21 @@ export function status(args: string[] = []): void {
       const batches = w.batches.map((b) => `${b.ref}${b.unit === 'todo' || b.covers === null ? '' : ` (todos ${b.covers.join(', ')})`} ${b.state === 'paused' ? 'PAUSED' : 'in work'} (${b.agent})${b.claims.length > 0 ? `, claims ${b.claims.join(', ')}` : ''}`);
       console.log(`  ${w.current ? '*' : ' '} ${w.path}  ${w.branch ?? '(detached)'}${w.main ? '  [main checkout]' : ''}${batches.length > 0 ? ` — ${batches.join('; ')}` : ''}`);
     }
+  }
+
+  // Paths two worktrees both claim (a notice under "claims": "notice", an allowed overlap otherwise).
+  const shared = sharedClaims(dirname(nd));
+  if (shared.length > 0) {
+    console.log(`\nshared claims — ${shared.length} (two worktrees in one path; the merge checks the combination)`);
+    for (const s of shared.slice(0, 20)) console.log(`  ${s.path} — ${s.between[0]} and ${s.between[1]}`);
+    if (shared.length > 20) console.log(`  … +${shared.length - 20}`);
+  }
+
+  // The merge queue: what lands next, and what went back to its builder.
+  const queue = mergeQueueData(nd);
+  if (queue.entries.length > 0 || queue.running !== null) {
+    console.log(`\nmerge queue — ${queue.entries.filter((e) => e.state === 'queued').length} waiting, ${queue.entries.filter((e) => e.state === 'failed').length} failed${queue.running !== null ? ` — running now: ${queue.running}` : ''}`);
+    for (const e of queue.entries) console.log(e.state === 'queued' ? `  ${e.position}. ${e.name}${e.express ? ' [express]' : ''}` : `  ✗ ${e.name} — ${e.reason ?? 'failed'}`);
   }
 
   // Open batches.

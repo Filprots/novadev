@@ -371,6 +371,13 @@ or with another worktree's claims, is refused. Narrow your plan, or ask the huma
 `--allow-overlap` only when the human or the lead decided the two may share. A claim is
 judged once, when it is added: resuming a lock never re-judges the claims it holds.
 
+**When the project set `"claims": "notice"`**, an overlap is not refused: the command goes
+on and its answer names who else is in that path (`shared`). Read it, and tell the other
+builder or the lead when you will change the same lines — the merge checks the combination,
+it does not resolve it for you. Only the project's `protectedPaths` stay one-owner locks:
+there an overlap is refused as before, and the gate fails on a changed file under one that
+your worktree does not hold. Never work around a protected path; ask the lead.
+
 **Writing waypoints.** Whenever the work moves — each phase you enter, each commit, each
 decision, and before anything long — write a waypoint, so the lock always says where the
 work on the todo is:
@@ -886,7 +893,12 @@ unless the human asks for that exact thing. `novadev worktree create` makes bran
 merges"). Run `merge` only as the lead they named, or when they ask for that merge. A
 worktree is made for a todo (`novadev worktree create <name> … --todo <batch>/<todo>`): take
 that todo's lock inside it, work and commit there only, and close the task with
-`novadev worktree gate` and `novadev worktree mr` — the merge request names the todo. A
+`novadev worktree gate` and `novadev worktree mr` — the merge request names the todo. The
+lead lands approved work through the merge queue (`novadev worktree queue add <name>`, then
+`novadev worktree queue run`): each branch is brought onto the newest default branches and
+the gate runs on that merged result before anything lands. If yours comes back **failed**
+(`novadev worktree queue list` has the reason), run `novadev worktree sync <name>`, fix it in
+the worktree, commit, and tell the lead it can be queued again. A
 branch whose todo is still `working` is not merged: stop it (recorded) or pause it first; a
 paused lock travels with the branch into its todo's folder. If the working tree is on the repository's
 **default branch** (`main` / `master`), **ask before committing** and say what you are

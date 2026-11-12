@@ -576,6 +576,41 @@ collide with every neighbour working another file in it. The paths `--claim` and
 add there are added to the worktree's claims too, so `novadev worktree gate` accepts the files
 under them even after the lock is released.
 
+### Claims as notices, and protected paths
+
+A claim is a lock taken in advance: it stops two people before either has written a line.
+A project that would rather catch conflicts where they happen — at the merge, with its
+checks — sets, in the main checkout's `novadev.json`:
+
+```json
+"claims": "notice",
+"protectedPaths": ["src/format/", "irrippr:ps/hydraulics/**"]
+```
+
+| Key | Default | Means |
+|---|---|---|
+| `claims` | `"lock"` | `"lock"`: one owner per file, an overlap is refused (every version before 0.18.0). `"notice"`: an overlap is said, not refused |
+| `protectedPaths` | `[]` | with `"notice"`: paths or globs (`**` crosses folders; `<sub-repo>:<path>` for a sub-repo) where a claim stays a one-owner lock |
+
+With `"claims": "notice"`:
+
+- `work start`, `work claim`, `worktree create` and `worktree claim` go on when a claim
+  overlaps someone else's, and say who (`shared` in the answer; a `shared (a notice, not a
+  lock)` line). Both sides and the lead see it: `worktree list` (`shares`), `status` (*shared
+  claims*) and `status --json` (`sharedClaims`) name every path two worktrees both claim.
+- Under a protected path nothing changes: the overlap is refused, and `--allow-overlap`, on
+  the lead's decision, still passes. Two claims on a folder ABOVE a protected path share that
+  path too, and are refused.
+- The gate no longer fails on a file changed outside the claims. It fails on a changed file
+  under a protected path that the worktree does not hold (claim it first), and it LISTS the
+  files shared with other open worktrees — changed there too, or under their claims — as a
+  notice. The merge request carries the same list.
+
+Both settings are read from the main checkout, so a task branch cannot loosen the rule for
+itself. Without `"claims": "notice"` nothing changes by upgrading, whatever `protectedPaths`
+says. Turn it on together with the merge queue below: the checks on the merged result are
+what replaces the lock.
+
 ### Merging parallel branches: `.gitattributes` and `sync --after-merge`
 
 Two branches that both record knowledge, or both regenerate a derived file, would conflict on
@@ -688,7 +723,9 @@ whose record the branch wrote, also after the locks are released.
 - uncommitted changes;
 - whitespace errors (`git diff --check`);
 - a changed file outside the worktree's claims and the claims of the locks held in it
-  (`.novadev/` aside) — checked when the worktree has claims at all;
+  (`.novadev/` aside) — checked when the worktree has claims at all; with
+  `"claims": "notice"` instead: a changed file under a protected path the worktree does not
+  hold (*Claims as notices, and protected paths*);
 - `novadev sync --check` failing in the worktree;
 - a failing command from the project's `gate` setting.
 
@@ -707,10 +744,39 @@ branch with no uncommitted change. It also refuses:
   file): stop that part, commit, then merge.
 
 It tries every merge with `git merge-tree` (git 2.38 or newer) and merges nothing unless all
-of them would go through. Then it merges the sub-repos first and the project last, `--no-ff`,
-so records never land without their code. If a merge still fails late (a hook refuses it),
-the merges this run made are undone, so nothing is merged. Then it runs
-`novadev sync --after-merge`. `sync` always ends with `--after-merge` in the worktree, so a
+of them would go through. Then — with `--yes` — it **checks the merged result before anything
+lands**: the default branches are merged into the branch, in the worktree (what
+`worktree sync` does), and the gate with the project's gate commands runs there, on exactly
+the tree that would land. A failure lands nothing and goes back to the builder. Only then it
+merges the sub-repos first and the project last, `--no-ff`, so records never land without
+their code. If a merge still fails late (a hook refuses it), the merges this run made are
+undone, so nothing is merged. Then it runs `novadev sync --after-merge`. One merge runs at a
+time in a clone (a lock in the common git dir, which every worktree sees); a second one is
+told to wait.
+
+**The merge queue.** Two branches can each pass their gate and still break together. So
+approved merge requests line up, and each is checked on top of what landed before it:
+
+```sh
+novadev worktree queue add <name> [--express] [--agent <actor>]   # the lead, after approval
+novadev worktree queue list [--json]
+novadev worktree queue run [--one]
+novadev worktree queue remove <name>
+```
+
+`run` takes the head of the queue and lands it exactly as `merge --yes` does — every merge
+tried, the branch brought onto the newest default branches, the gate on the merged result,
+then the merges, all or nothing — and goes on to the next (`--one`: only the head). A
+conflict or a failed check lands nothing: the entry is marked **failed** with its reason and
+the queue goes on. The failed one goes back to its builder: `novadev worktree sync <name>`,
+fix, commit, and `queue add` again (it goes to the end). The order is first in, first out;
+`--express` puts an entry ahead of every normal one. The queue lives in the common git dir
+(`novadev/queue.json`), is never committed, and is shown by `status` (*merge queue*),
+`status --json` (`mergeQueue`) and `worktree list --json` (`queue`). `worktree remove` takes
+its worktree out of the queue. `worktree merge` stays as the direct form for one branch, with
+the same checks and the same one-at-a-time lock.
+
+`sync` always ends with `--after-merge` in the worktree, so a
 run that stopped at a conflict regenerates on the next one. novadev never pushes.
 
 ```json

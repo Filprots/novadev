@@ -76,6 +76,7 @@ import { hostname } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { dirtyPaths, headSummary } from './git.ts';
 import { humanActor } from './knowledge-log.ts';
+import { claimPolicy, judgeOverlaps, refusalHint } from './claim-policy.ts';
 import {
   type ElsewhereLock,
   type RegistryWorktree,
@@ -1103,12 +1104,16 @@ function planStart(ctx: StartContext, target: StartTarget): () => { lock: WorkLo
   const already = new Set([...(kept?.claims ?? []), ...(wt?.claims ?? [])]);
   // The locks being taken over are no obstacle; another todo of the batch is (one owner per file).
   const holders = claimHolders(root, root).filter((h) => !(h.kind !== 'worktree' && conflicting.some((c) => c.file === h.file)));
-  const overlaps = claimOverlaps(root, claimed.claims.filter((claim) => !already.has(claim)), undefined, holders);
+  // Under "claims": "notice" an overlap is said, not refused — except under a protected path.
+  const policy = claimPolicy(root);
+  const { hard: overlaps, soft: shares } = judgeOverlaps(policy, claimOverlaps(root, claimed.claims.filter((claim) => !already.has(claim)), undefined, holders));
   if (overlaps.length > 0 && !opts.allowOverlap) {
     throw new Error(
       `${what} claims paths another worktree's batch owns — one owner per file:\n` +
         overlaps.map((o) => `  ${overlapText(o)}`).join('\n') +
-        `\nNarrow the claims (fewer --claim paths, ${covers === null ? '--todo for only the todos you work on, ' : ''}or features that do not touch them), wait for that batch, or pass --allow-overlap when the lead decided they may share.`,
+        (policy.mode === 'notice'
+          ? `\n${refusalHint(policy)}`
+          : `\nNarrow the claims (fewer --claim paths, ${covers === null ? '--todo for only the todos you work on, ' : ''}or features that do not touch them), wait for that batch, or pass --allow-overlap when the lead decided they may share.`),
     );
   }
   // Once the lock is taken: an abandoned lock elsewhere is ours now, and the paths named here belong
@@ -1124,6 +1129,7 @@ function planStart(ctx: StartContext, target: StartTarget): () => { lock: WorkLo
     ...(covers !== null ? { covers } : {}),
     ...(claimed.claims.length === 0 ? { claimNote: `this ${unit} claims no path, so no overlap with other worktrees is checked — add some with --claim or \`novadev work claim\`` } : {}),
     ...(overlaps.length > 0 ? { overlaps: overlaps.map(overlapText) } : {}),
+    ...(shares.length > 0 ? { shared: shares.map(overlapText), sharedNote: 'a notice, not a lock: someone else works in these paths too — the merge checks the combination' } : {}),
     ...(takenFrom !== null ? { takenFromWorktree: { worktree: takenFrom.worktree, branch: takenFrom.branch, agent: takenFrom.agent, state: takenFrom.state, updated: takenFrom.updated } } : {}),
   };
 
@@ -1232,11 +1238,12 @@ export function claimWork(nd: string, target: WorkTarget, paths: readonly string
   }
   // requireLock refused a lock elsewhere that collides with this one; another todo of the batch is
   // a neighbour like any other.
-  const overlaps = claimOverlaps(root, added);
+  const policy = claimPolicy(root);
+  const { hard: overlaps, soft: shares } = judgeOverlaps(policy, claimOverlaps(root, added));
   if (overlaps.length > 0 && !allowOverlap) {
     throw new Error(
       `Claiming them would overlap another worktree's batch — one owner per file:\n${overlaps.map((o) => `  ${overlapText(o)}`).join('\n')}\n` +
-        'Pass --allow-overlap when the lead decided they may share.',
+        (policy.mode === 'notice' ? refusalHint(policy) : 'Pass --allow-overlap when the lead decided they may share.'),
     );
   }
   lock.claims = [...lock.claims, ...added];
@@ -1245,7 +1252,7 @@ export function claimWork(nd: string, target: WorkTarget, paths: readonly string
   // the lock is released.
   const wt = worktreeAt(root);
   if (wt !== null) addWorktreeClaims(root, wt, added);
-  return { batch: lock.batch, ...refOf(lock), path: relPath(lock.path), state: lock.state, added, claims: lock.claims, ...(overlaps.length > 0 ? { overlaps: overlaps.map(overlapText) } : {}) };
+  return { batch: lock.batch, ...refOf(lock), path: relPath(lock.path), state: lock.state, added, claims: lock.claims, ...(overlaps.length > 0 ? { overlaps: overlaps.map(overlapText) } : {}), ...(shares.length > 0 ? { shared: shares.map(overlapText) } : {}) };
 }
 
 /** `ref` for an answer about a todo's lock; a batch's lock is named by `batch` alone, as before. */
