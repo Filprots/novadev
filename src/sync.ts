@@ -42,6 +42,7 @@ import { auditMetrics } from './metrics-audit.ts';
 import { auditPlacement } from './placement.ts';
 import { afterMergeRefusal, commitAfterMerge, MERGE_DRIVER, hasMergeRules, mergeDriverConfigured, repairLogFile } from './merge-rules.ts';
 import { merged } from './review.ts';
+import { auditTodoMeta, orderByPriority, priorityLabel, todoPriority } from './todo-meta.ts';
 import { auditWork } from './work.ts';
 
 export async function sync(args: string[]): Promise<void> {
@@ -133,7 +134,9 @@ export async function sync(args: string[]): Promise<void> {
   const knowledge = check ? knowledgeBefore : auditKnowledge(root, nd, { sourceDays });
   // The batches in work: who holds each lock, and whether they are still there.
   const inWork = auditWork(nd);
-  const problems = [...inWork.problems, ...audit.problems, ...metricsAudit.problems, ...placement.problems, ...knowledge.problems];
+  // The todos' own settings (todo.json: priority, "do after" links): a file novadev cannot read.
+  const todoMeta = auditTodoMeta(nd);
+  const problems = [...inWork.problems, ...audit.problems, ...todoMeta.problems, ...metricsAudit.problems, ...placement.problems, ...knowledge.problems];
   if (problems.length > 0) {
     console.log(`\nPROBLEMS (${problems.length}):`);
     for (const p of problems) console.log(`  ✗ ${p}`);
@@ -249,12 +252,15 @@ function agentActions(root: string, nd: string, notes: string[]): string[] {
     }
   }
 
-  for (const todo of listAllTodos(nd)) {
-    if (todo.archived) continue;
+  // The open todos, the highest priority first (todo-meta.ts), then in filing order; a priority other
+  // than normal is named, so the list says what to take first.
+  const open = orderByPriority(listAllTodos(nd).filter((todo) => !todo.archived), (todo) => todoPriority(todo.dir));
+  for (const todo of open) {
     const state = todoState(todo.dir);
-    if (state === 'open') out.push(`${todo.ref} has no record yet — do the work, then record it`);
-    if (state === 'progress') out.push(`${todo.ref} is mid-flight — finish it or update ai_progress.md`);
-    if (state === 'changes') out.push(`${todo.ref}: its review asked for CHANGES (ai_review.md) — make them, update ai_completed.md, then ask for a new review`);
+    const name = `${todo.ref}${priorityLabel(todoPriority(todo.dir))}`;
+    if (state === 'open') out.push(`${name} has no record yet — do the work, then record it`);
+    if (state === 'progress') out.push(`${name} is mid-flight — finish it or update ai_progress.md`);
+    if (state === 'changes') out.push(`${name}: its review asked for CHANGES (ai_review.md) — make them, update ai_completed.md, then ask for a new review`);
   }
 
   // Anything the link audit found that a person has to decide.

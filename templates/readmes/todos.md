@@ -16,6 +16,11 @@ Inside a todo folder:
   still in flight. Every record says where its new code went, in a `## Placement`
   section.
 
+- **`todo.json`** — only when the todo has a priority other than normal: `urgent`,
+  `high`, `normal` or `later`, and who changed it, when and why. Written by
+  `novadev file-todo` and `novadev todo priority` (a person's decision); never edit it by
+  hand. A todo without the file is `normal`. Every list orders by it.
+
 What a todo teaches is not kept here: the agent records it in `../knowledge/` (a memory, a
 wiki page, a feature), citing the todo as its source, so it outlives the archive move.
 

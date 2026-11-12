@@ -28,6 +28,7 @@ import { auditKnowledge } from './knowledge.ts';
 import { auditLinks } from './links.ts';
 import { auditMetrics } from './metrics-audit.ts';
 import { auditPlacement } from './placement.ts';
+import { auditTodoMeta } from './todo-meta.ts';
 import { auditWork } from './work.ts';
 
 export function doctor(): void {
@@ -112,6 +113,9 @@ export function doctor(): void {
       }
     }
   }
+
+  // --- todos: their own settings (todo.json — priority, "do after" links) ---
+  problems.push(...auditTodoMeta(nd).problems);
 
   // --- archive: year grouping + naming ---
   const archiveDir = join(nd, 'archive');

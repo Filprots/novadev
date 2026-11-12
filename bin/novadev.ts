@@ -23,14 +23,17 @@ usage:
   novadev new [slug…]       scaffold today's next batch (todos/YYYY-MM-DD_N/), optional todo folders
   novadev status [--json]   is a work cycle on? the batches in work (who, since when, where, paused
                             or abandoned), the worktrees and their batches, then open todos + record
-                            states, postponed, knowledge;
+                            states (by priority: urgent first), postponed, knowledge;
                             --json: the same as data (for a tool or a chat bot)
   novadev todo …            one todo, away from the repo: "list [--state s,…] [--json]", "show <ref>" (JSON:
                             brief + records), "addendum <ref> <payload.json>" ({text, attachments}: a Chat
                             addendum to an open todo's brief, files copied into its folder), "edit <ref>
                             <payload.json>" ({title, request, context, reason}: the brief changed, the old one
                             kept in .brief-history/), "cancel <ref> <payload.json>" ({reason}: a *cancelled* ai_failed),
-                            "review <ref> <payload.json>" ({verdict: APPROVE|CHANGES, by, checks, findings?}: ai_review.md)
+                            "review <ref> <payload.json>" ({verdict: APPROVE|CHANGES, by, checks, findings?}: ai_review.md),
+                            "priority <ref> <urgent|high|normal|later> [<payload.json>] [--by <actor>]" (a person's
+                            decision: {by, reason} — who and when are kept in the todo's todo.json; every list
+                            orders by priority, then by filing order)
   novadev work …            the lock of a batch in work (todos/<batch>/working.md): "start <batch>"
                             takes or resumes it, "waypoint <batch> <payload.json>" records where the
                             work is, "pause <batch> <payload.json>" writes exactly where it stopped
@@ -61,6 +64,7 @@ usage:
                             for review (--json: as data); --new <slug> scaffolds a test task
   novadev file-todo …       the command half of /novadev-file-a-todo: "plan" says which batch
                             a chat request lands in, "file <payload.json>" writes the folders
+                            (a part may carry "priority": urgent|high|normal|later)
   novadev test-result …     the command half of /novadev-what-to-test and /novadev-test-review:
                             "tasks [query]" resolves the queue, "write" records one scenario,
                             "review" records a whole round of a human's testing, "skip" marks

@@ -8,6 +8,7 @@ import { copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { BATCH_RE, WORK_LOCK_FILE, listDirs, todayStamp } from './lib.ts';
 import { batchesInWorkElsewhere } from './registry.ts';
+import { DEFAULT_PRIORITY, PRIORITIES, type Priority, parsePriority, writeFiledMeta } from './todo-meta.ts';
 
 const SLUG = /^[a-z0-9][a-z0-9-]*$/;
 /** novadev's own record names — their presence is what makes a batch "touched". */
@@ -35,13 +36,20 @@ export type TodoPart = {
   readonly request: string;
   readonly context?: string;
   readonly attachments?: readonly string[];
+  /** urgent | high | normal | later — absent means normal (todo-meta.ts). */
+  readonly priority?: Priority;
 };
 
 export type FiledTodo = {
   readonly ref: string;
   readonly path: string;
   readonly attachments: readonly string[];
+  /** Named only when the part set one other than normal. */
+  readonly priority?: Priority;
 };
+
+/** Who asked for the filing (`by` in the payload): recorded in each todo.json the filing writes. */
+export type FilingOptions = { readonly by?: string | null };
 
 export type BatchPlan = { readonly batch: string; readonly reused: boolean; readonly nextNumber: number };
 
@@ -70,8 +78,8 @@ export function planBatch(nd: string, today = todayStamp()): BatchPlan {
   return { batch: nextBatchName(nd, today), reused: false, nextNumber: 1 };
 }
 
-/** Create the folders, write the briefs, copy the attachments in. */
-export function fileTodos(nd: string, parts: readonly TodoPart[]): readonly FiledTodo[] {
+/** Create the folders, write the briefs, copy the attachments in; a part's priority goes into its todo.json. */
+export function fileTodos(nd: string, parts: readonly TodoPart[], opts: FilingOptions = {}): readonly FiledTodo[] {
   if (parts.length === 0) throw new Error('Nothing to file.');
   if (parts.length > MAX_PARTS) throw new Error(`At most ${MAX_PARTS} todos in one filing.`);
   // Validate EVERY slug before touching the disk: a refusal must leave no half-made batch behind
@@ -94,10 +102,13 @@ export function fileTodos(nd: string, parts: readonly TodoPart[]): readonly File
     // The brief is written LAST: it owns the name `prompt.md`, and an attachment that wanted that
     // name has already been moved out of its way.
     writeFileSync(join(dir, 'prompt.md'), renderBrief(slugs[index]!, part, attachments));
+    const priority = part.priority ?? DEFAULT_PRIORITY;
+    writeFiledMeta(dir, { priority, after: [] }, opts.by ?? null);
     filed.push({
       ref: `${target.batch}/${folder}`,
       path: `.novadev/todos/${target.batch}/${folder}`,
       attachments,
+      ...(priority !== DEFAULT_PRIORITY ? { priority } : {}),
     });
     number += 1;
   }
@@ -230,12 +241,17 @@ export function parseParts(raw: unknown): readonly TodoPart[] {
     const files = Array.isArray(rawFiles)
       ? rawFiles.filter((id): id is string => typeof id === 'string')
       : undefined;
+    // A priority is named only when the person signalled one; a word that is none of the four is refused
+    // rather than filed as normal — the person would believe it was urgent.
+    const priority = record['priority'] === undefined || record['priority'] === null ? undefined : parsePriority(record['priority']);
+    if (priority === null) throw new Error(`A part's 'priority' must be one of ${PRIORITIES.join(', ')} — not "${String(record['priority'])}".`);
     return {
       slug,
       title,
       request,
       ...(context !== undefined ? { context } : {}),
       ...(files !== undefined ? { attachments: files } : {}),
+      ...(priority !== undefined ? { priority } : {}),
     };
   });
 }

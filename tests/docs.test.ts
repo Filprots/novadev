@@ -11,6 +11,8 @@ import { WIKI_PAGES, auditKnowledge, parseKnowledgeSettings } from '../src/knowl
 import { parseEvents } from '../src/knowledge-log.ts';
 import { readFrontmatterText } from '../src/okf.ts';
 import { placementState } from '../src/placement.ts';
+import { priorityTodo } from '../src/todo.ts';
+import { PRIORITIES, readTodoMeta } from '../src/todo-meta.ts';
 import {
   REPO,
   STAMP,
@@ -36,6 +38,7 @@ const playbook = readFileSync(join(REPO, 'templates/skills/novadev-work.md'), 'u
 const folderReadme = readFileSync(join(REPO, 'templates/readmes/metrics.md'), 'utf8');
 const rootReadme = readFileSync(join(REPO, 'templates/readmes/root.md'), 'utf8');
 const todosReadme = readFileSync(join(REPO, 'templates/readmes/todos.md'), 'utf8');
+const filingPlaybook = readFileSync(join(REPO, 'templates/skills/novadev-file-a-todo.md'), 'utf8');
 
 /** The bodies of the fenced blocks in a markdown text whose info string is `lang` ('' = none). */
 function fences(text: string, lang: string): string[] {
@@ -470,5 +473,50 @@ describe('the knowledge settings and source drift in the docs (0.13.0)', () => {
     const root = project();
     setManifest(root, { knowledge: knowledgeExamples(playbook)[0] });
     expect(auditKnowledge(root, join(root, '.novadev')).problems.filter((p) => p.startsWith('novadev.json'))).toEqual([]);
+  });
+});
+
+describe('priority in the docs', () => {
+  const section = readme.split('## Priority and order — what to take first')[1]!.split('\n## ')[0]!;
+
+  test('the README names the four levels, the command, who may decide, and its todo.json example is one novadev reads', () => {
+    for (const level of PRIORITIES) expect(section).toContain(`\`${level}\``);
+    for (const text of ['novadev todo priority <ref> <urgent|high|normal|later>', '`--by human:<id>`', 'An agent as `by` is refused', 'A todo without the file is `normal`', '`history`']) {
+      expect(section).toContain(text);
+    }
+    const example = fences(section, 'json').find((body) => body.includes('"priority"'))!;
+    const root = project();
+    todo(root, '2026-10-01_1/01-login');
+    write(root, '.novadev/todos/2026-10-01_1/01-login/todo.json', example);
+    expect(readTodoMeta(join(root, '.novadev/todos/2026-10-01_1/01-login'))).toMatchObject({ priority: 'urgent', error: null, history: [{ by: 'human:filipp', from: 'normal', to: 'urgent' }] });
+  });
+
+  test('its sample list is what `novadev todo list` prints, line for line', () => {
+    const sample = fences(section, '').find((body) => body.includes('$ novadev todo list'))!;
+    const root = project();
+    const brief = (title: string) => `# prompt — x\n\n## ${title}\nThe words.\n`;
+    todo(root, '2026-10-01_1/01-dark-mode', { 'prompt.md': brief('Dark mode') });
+    todo(root, '2026-10-01_1/02-export', { 'prompt.md': brief('PDF export') });
+    todo(root, '2026-10-02_1/01-login', { 'prompt.md': brief('Magic link') });
+    priorityTodo(join(root, '.novadev'), 'login', 'urgent', { by: 'human:filipp' });
+    priorityTodo(join(root, '.novadev'), 'dark', 'later', { by: 'human:filipp' });
+    expect(run(root, 'todo', 'list').stdout).toBe(sample.split('\n').slice(1).join('\n'));
+  });
+
+  test('the playbooks teach it: only a signalled priority is filed, a change is the person\'s, the lists are ordered', () => {
+    expect(filingPlaybook).toContain('a `priority` — **only when they signalled one**');
+    expect(filingPlaybook).toContain('"priority": "high"');
+    expect(filingPlaybook).toContain('novadev todo priority <ref> <level> <payload.json>');
+    // The filing playbook's payload example is one the command files.
+    const example = JSON.parse(fences(filingPlaybook, 'sh').find((body) => body.includes('"parts"'))!.split("<<'JSON'\n")[1]!.split('\nJSON')[0]!);
+    expect(example.parts[0].priority).toBe('high');
+    expect(playbook.split('## Vocabulary')[1]!.split('\n---')[0]!).toContain('**Priority**');
+    expect(playbook).toContain('**Take the highest priority first.**');
+    expect(playbook).toContain('novadev todo priority 2026-10-24_1/02 urgent "$payload"');
+    expect(todosReadme).toContain('**`todo.json`**');
+  });
+
+  test('the CLI help names the command', () => {
+    expect(run(tempDir(), 'help').stdout).toContain('"priority <ref> <urgent|high|normal|later> [<payload.json>] [--by <actor>]"');
   });
 });

@@ -51,10 +51,17 @@ actually described; never invent work they did not ask for. Give each part:
 
 - a short kebab-case `slug` (`green-highlight-too-thin`) — no numbers, the command numbers them;
 - a one-line `title` in their own vocabulary;
-- which attachment paths belong to it (a screenshot usually belongs to the part it shows).
+- which attachment paths belong to it (a screenshot usually belongs to the part it shows);
+- a `priority` — **only when they signalled one**. "Urgent", "right now", "production is
+  down", "before anything else" → `urgent`; "important", "soon", "this week" → `high`;
+  "whenever", "no hurry", "someday" → `later`. Said nothing about when → leave it out (it is
+  `normal`), and do not ask. Signalled urgency but you cannot tell how much → ask them one
+  short question ("urgent, or high?"). The priority decides what is worked first, so it is
+  theirs to give, never yours to guess.
 
 **4. Show the plan and WAIT.** Answer with the batch name and a numbered list: for each
-part, its title, one line of what it will say, and which files go in it. Then ask plainly
+part, its title, one line of what it will say, which files go in it, and its priority when
+it is not normal. Then ask plainly
 whether to file it. **Do not run the `file` command until they say yes.** If they change
 the split, redo this step. "Just file it" or "go ahead" is the yes.
 
@@ -63,12 +70,14 @@ how it gets mangled — then run the command:
 
 ```sh
 cat > /tmp/todo-payload.json <<'JSON'
-{ "parts": [
+{ "by": "human",
+  "parts": [
   { "slug": "green-highlight-too-thin",
     "title": "The selection highlight is too thin to see",
     "request": "…their words…",
     "context": "…what you know that their words do not say…",
-    "attachments": ["/abs/path/photo.jpg"] }
+    "attachments": ["/abs/path/photo.jpg"],
+    "priority": "high" }
 ] }
 JSON
 novadev file-todo file /tmp/todo-payload.json
@@ -84,6 +93,11 @@ For each part write:
   earlier in this conversation, and anything you noticed that makes the request concrete
   (an identifier, a setting, a number they mentioned). This is the part that saves them
   typing later — make it factual, never speculative.
+- `priority` — `urgent`, `high`, `normal` or `later`; leave it out unless they signalled one
+  (step 3). The payload's `by` is the person who asked: `"human"` (the command takes their
+  id from git) or `human:<id>`. It is recorded with the priority, in the todo's `todo.json`.
+  To change the priority of a todo that already exists, when they ask for that:
+  `novadev todo priority <ref> <level> <payload.json>` with `{ "by", "reason" }`.
 - **A standing rule is knowledge, not only a todo.** When they state something that must
   hold beyond this one change — "never…", "always…", "from now on…", "we decided…" — keep
   their exact words in `request` and add one line to `context`: *Standing rule — record it
@@ -92,7 +106,7 @@ For each part write:
   write the memory yourself.
 
 **6. Confirm.** Report the refs it created (`2026-09-08_4/01-green-highlight-too-thin`),
-which files landed in each, and stop. **Do not start working on the todo.** Do not run
+which files landed in each, the priority of each that has one, and stop. **Do not start working on the todo.** Do not run
 `novadev sync` either; a brand-new brief with no record is exactly what the tree expects.
 
 ## Rules
@@ -103,7 +117,8 @@ which files landed in each, and stop. **Do not start working on the todo.** Do n
   INSIDE the context you write, and file the todo anyway.
 - **Never file without a yes.** The folders land in their repository.
 - **Never invent a `**Feature:**` line, a feature id, or a priority.** The brief is a
-  request, not a plan. If a feature is obviously involved, mention it in prose inside the
+  request, not a plan. A priority goes in the payload's `priority` only when they signalled
+  one (step 3) — never as a line in the brief. If a feature is obviously involved, mention it in prose inside the
   context — and name it only after looking it up (`novadev features <word>`, or the map in
   `.novadev/knowledge/features/index.md`); a guessed id sends the next agent to the wrong
   place. (If they quote an old record at you, the command defangs the field form for you —

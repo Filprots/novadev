@@ -104,6 +104,11 @@ Phase 1 below routes to the first; phases 5 and 6 sit either side of the next tw
 - **Waypoint** — one entry of that trail, `novadev work waypoint`: which todo, which
   phase, what is done and what is next, in a few lines. The pause record `/novadev-pause`
   writes is the last waypoint, in full: exactly where things stopped.
+- **Priority** — `urgent`, `high`, `normal` (the default) or `later`, per todo, kept in the
+  todo folder's `todo.json` by `novadev file-todo` and `novadev todo priority`. Every list
+  (`novadev todo list`, `novadev status`, sync's NEXT ACTIONS) is ordered by it, then by
+  filing order. A todo without the file is `normal`. It is a PERSON's decision: never set
+  or change one on your own, and never edit `todo.json` by hand.
 - **Feature** — one capability, `knowledge/features/FEAT-NNNN-<slug>/`: you write
   `feature.md`; `work.md` and `tests.md` beside it are generated.
 - **Concept** — one file of the knowledge bundle: a wiki page, a memory, a feature. It opens
@@ -225,12 +230,26 @@ continues normally.
 ```sh
 novadev file-todo plan                 # which batch, and the next number
 payload=$(mktemp -t novadev-todo.XXXXXX.json)   # or your session's own scratch dir
-novadev file-todo file "$payload"      # { "parts": [ { slug, title, request, context?, attachments? } ] }
+novadev file-todo file "$payload"      # { "parts": [ { slug, title, request, context?, attachments?, priority? } ], "by"? }
 ```
 
    It reuses the batch a conversation opened earlier while nobody has started work in
    it — no record in it, and no lock on it — and never touches a human-authored batch.
    `novadev new <slug>` is still the way to open a batch you are about to fill yourself.
+   A part carries `"priority"` (`urgent`, `high`, `later`) only when the human signalled
+   one, with the payload's `"by"` naming them (`"human"`, or `human:<id>`); otherwise leave
+   it out. When they change their mind about an existing todo ("do the export first", "that
+   can wait"), record their decision — `by` is THEM, `reason` quotes them:
+
+```sh
+cat > "$payload" <<'JSON'
+{ "by": "human", "reason": "Do the export first: the customer demo is on Friday." }
+JSON
+novadev todo priority 2026-10-24_1/02 urgent "$payload"   # urgent | high | normal | later
+```
+
+   A brief a person wrote by hand that says how urgent it is ("URGENT", "no hurry") is such
+   a decision too: record it the same way before you plan.
 3. **What goes in the brief.** `request` is THEIR words — verbatim where short, tightly
    faithful where long. `context` is what you know that their words do not say:
    constraints, clarifications and decisions stated in chat. The command renders:
@@ -255,9 +274,15 @@ novadev file-todo file "$payload"      # { "parts": [ { slug, title, request, co
 
 ## 2 · PLAN — before you write code
 
+**Take the highest priority first.** `novadev todo list` (and the todo lines of sync's NEXT
+ACTIONS) are ordered: `urgent`, then `high`, `normal`, `later`, and inside one level the
+filing order. Work in that order unless the human names a todo. An `urgent` todo goes before
+everything else you have not started; it skips no check.
+
 **Multi-todo batches**: read EVERY brief first, then group the todos into waves (quick
 fixes ship while the big ones are still being designed), spot cross-todo overlaps (two
-briefs on one seam get ONE design), and order by dependency, not folder order. Settle
+briefs on one seam get ONE design), and order by priority, then by dependency, not folder
+order. Settle
 open decisions with the human in **one batched round** of concrete options (recommend
 one each) — never mid-implementation stalls. Record the answers in the batch's
 `ai_progress.md`; they govern the whole batch. Do the recon (read the real modules)

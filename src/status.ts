@@ -19,7 +19,8 @@ import {
 import { worktreeList } from './git.ts';
 import { metricsStatusLine } from './metrics-audit.ts';
 import { insideWorktree, registryLocks } from './registry.ts';
-import { listTodos } from './todo.ts';
+import { todosInOrder } from './todo.ts';
+import { batchesByPriority, priorityTag, todoPriority, todosByPriority } from './todo-meta.ts';
 import { auditWork, latestLine, listWorkLocks, lockLiveness, phaseLabel, readWorkLock } from './work.ts';
 
 const STATE_MARK = {
@@ -76,14 +77,15 @@ export function statusData(nd: string, now: Date = new Date()): Record<string, u
       latest: latestLine(lock), entries: lock.entries.length,
     };
   });
-  const todos = listTodos(nd);
-  const batches = listDirs(join(nd, 'todos')).map((batch) => {
+  // By priority (todo-meta.ts): urgent first, then the filing order — the todos, and the batches by their best open todo.
+  const todos = todosInOrder(nd);
+  const batches = batchesByPriority(join(nd, 'todos'), todoState).map((batch) => {
     const lock = readWorkLock(nd, batch);
     return {
       batch,
       readyToArchive: batchIsDone(join(nd, 'todos', batch)),
       inWork: lock === null ? null : lock.state === 'invalid' ? 'unreadable' : lock.lock.state,
-      todos: todos.filter((t) => t.batch === batch).map(({ todo, title, state }) => ({ todo, title, state })),
+      todos: todos.filter((t) => t.batch === batch).map(({ todo, title, state, priority }) => ({ todo, title, state, priority })),
     };
   });
   const counts: Record<string, number> = {};
@@ -137,8 +139,8 @@ export function status(args: string[] = []): void {
     }
   }
 
-  // Open batches.
-  const batches = listDirs(join(nd, 'todos'));
+  // Open batches — by priority (todo-meta.ts): a batch with an urgent todo to do first, and in a batch the urgent todo first.
+  const batches = batchesByPriority(join(nd, 'todos'), todoState);
   console.log(`\ntodos — ${batches.length} open batch(es)`);
   for (const batch of batches) {
     const batchDir = join(nd, 'todos', batch);
@@ -147,9 +149,9 @@ export function status(args: string[] = []): void {
       lock === null ? '' : lock.state === 'invalid' ? '  [lock unreadable]' : lock.lock.state === 'paused' ? '  [paused]' : '  [in work]';
     const done = batchIsDone(batchDir) ? '  [ready to archive]' : mark;
     console.log(`  ${batch}${done}`);
-    for (const todo of listDirs(batchDir)) {
+    for (const todo of todosByPriority(batchDir)) {
       const state = todoState(join(batchDir, todo));
-      console.log(`    ${STATE_MARK[state]} ${todo}  (${state})`);
+      console.log(`    ${STATE_MARK[state]} ${todo}  (${state}${priorityTag(todoPriority(join(batchDir, todo)))})`);
     }
   }
   if (batches.length === 0) console.log('  (none)');

@@ -9,6 +9,11 @@
 //   novadev todo cancel <ref> <payload.json>                 {reason}: an ai_failed.md that says *cancelled*
 //   novadev todo review <ref> <payload.json>                 {verdict, by, checks, findings?, notes?}: ai_review.md, a
 //                                                            reviewer's APPROVE or CHANGES on a finished todo (review.ts)
+//   novadev todo priority <ref> <level> [<payload.json>] [--by <actor>]
+//                                                            urgent|high|normal|later, on a person's decision: {by, reason}
+//                                                            — who and when go into the todo's todo.json (todo-meta.ts)
+//
+// `list` and the JSON views order the todos by priority (urgent first), then by filing order.
 //
 // A <ref> is how people name a todo: `2026-10-16_2/02-router-…`, `2026-10-16_2/02`, or a word of its slug that only one
 // open todo has. The two writes follow the playbook's intake rules: a todo with a terminal record, or one waiting on a
@@ -35,6 +40,7 @@ import { ACTOR_FORMAT, actorKind } from './okf.ts';
 import { RECORD_REVIEW, REVIEW_HISTORY_DIR, parseReviewPayload, renderReview } from './review.ts';
 import { liveElsewhere, lockLiveness, readWorkLock } from './work.ts';
 import { copyAttachments } from './todo-filing.ts';
+import { PRIORITIES, type Priority, changePriority, orderByPriority, priorityTag, readTodoMeta, reasonText, resolveActor } from './todo-meta.ts';
 
 const PROMPT = 'prompt.md';
 const RECORDS = [RECORD_NEEDSTEST, RECORD_CONFIRMED, RECORD_TESTSKIPPED, RECORD_REVIEW, RECORD_COMPLETED, RECORD_FAILED, RECORD_PROGRESS] as const;
@@ -46,9 +52,10 @@ const USAGE =
   '       novadev todo addendum <ref> <payload.json>   ({ "text": …, "attachments": [paths] })\n' +
   '       novadev todo edit <ref> <payload.json>       ({ "title"?, "request"?, "context"?, "reason"? })\n' +
   '       novadev todo cancel <ref> <payload.json>     ({ "reason": … })\n' +
-  '       novadev todo review <ref> <payload.json>     ({ "verdict": "APPROVE"|"CHANGES", "by", "checks": […], "findings"?, "notes"? })';
+  '       novadev todo review <ref> <payload.json>     ({ "verdict": "APPROVE"|"CHANGES", "by", "checks": […], "findings"?, "notes"? })\n' +
+  `       novadev todo priority <ref> <${PRIORITIES.join('|')}> [<payload.json>] [--by <actor>]   ({ "by": "human:<id>", "reason"? })`;
 
-export type TodoItem = { ref: string; batch: string; todo: string; title: string; state: TodoState };
+export type TodoItem = { ref: string; batch: string; todo: string; title: string; state: TodoState; priority: Priority };
 
 /** The brief's title: its first `## ` heading (the filed form), else the first line that says something. */
 export function briefTitle(text: string): string {
@@ -68,10 +75,20 @@ export function listTodos(nd: string): TodoItem[] {
     for (const todo of listDirs(join(nd, 'todos', batch))) {
       const dir = join(nd, 'todos', batch, todo);
       const prompt = join(dir, PROMPT);
-      out.push({ ref: `${batch}/${todo}`, batch, todo, title: existsSync(prompt) ? briefTitle(readFileSync(prompt, 'utf8')) : '', state: todoState(dir) });
+      out.push({ ref: `${batch}/${todo}`, batch, todo, title: existsSync(prompt) ? briefTitle(readFileSync(prompt, 'utf8')) : '', state: todoState(dir), priority: readTodoMeta(dir).priority });
     }
   }
   return out;
+}
+
+/** The todos as every queue shows them: the highest priority first, then the filing order (batch, then todo). */
+export function todosInOrder(nd: string): TodoItem[] {
+  return orderByPriority(listTodos(nd), (t) => t.priority);
+}
+
+/** One line of `novadev todo list`: the ref, its state (and its priority, when it is not normal), its title. */
+export function listLine(t: TodoItem): string {
+  return `${t.ref}  (${t.state}${priorityTag(t.priority)})${t.title ? `  ${t.title}` : ''}`;
 }
 
 /** The one open todo a person means; an error that lists the candidates when it is not one. */
@@ -106,7 +123,9 @@ export function showTodo(nd: string, ref: string, now: Date = new Date()): Recor
   const lock = readWorkLock(nd, t.batch);
   const inWork =
     lock === null ? null : lock.state === 'invalid' ? { state: 'unreadable' } : { state: lock.lock.state, live: lockLiveness(lock.lock, now).live, agent: lock.lock.agent, todo: lock.lock.todo, updated: lock.lock.updated };
-  return { ...t, brief: existsSync(join(dir, PROMPT)) ? readFileSync(join(dir, PROMPT), 'utf8') : '', records, batchInWork: inWork, files: listFilesIn(dir) };
+  // What changed its priority (and its links), with who and when — only when something was ever recorded.
+  const history = readTodoMeta(dir).history;
+  return { ...t, ...(history.length > 0 ? { history } : {}), brief: existsSync(join(dir, PROMPT)) ? readFileSync(join(dir, PROMPT), 'utf8') : '', records, batchInWork: inWork, files: listFilesIn(dir) };
 }
 
 function listFilesIn(dir: string): string[] {
@@ -306,6 +325,17 @@ export function reviewTodo(nd: string, ref: string, payload: Record<string, unkn
   };
 }
 
+/**
+ * A person changed a todo's priority (they said so; an agent or a chat bot runs this for them): the level,
+ * and who decided, when and why, go into the todo's todo.json. Not refused behind a lock: an urgent todo is
+ * often one somebody is already working on.
+ */
+export function priorityTodo(nd: string, ref: string, level: string | undefined, who: { by?: unknown; reason?: unknown }, now: Date = new Date()): Record<string, unknown> {
+  const t = resolveTodo(nd, ref);
+  const by = resolveActor(dirname(nd), who.by, { personOnly: true, what: 'decided the priority' });
+  return changePriority({ ref: t.ref, dir: join(nd, 'todos', t.batch, t.todo), state: t.state }, level, { by, reason: reasonText(who.reason) }, now);
+}
+
 function readPayload(argument: string | undefined): Record<string, unknown> {
   if (argument === undefined) throw new Error(USAGE);
   const path = isAbsolute(argument) ? argument : resolve(process.cwd(), argument);
@@ -315,21 +345,37 @@ function readPayload(argument: string | undefined): Record<string, unknown> {
   return payload as Record<string, unknown>;
 }
 
+/** The arguments of a `novadev todo` call: what is positional, and the options that take a value. */
+function parseArgs(args: string[]): { positional: string[]; by?: string; state?: string; json: boolean } {
+  const out: { positional: string[]; by?: string; state?: string; json: boolean } = { positional: [], json: false };
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (arg === '--by' || arg === '--state') {
+      const value = args[i + 1];
+      if (value === undefined || value.startsWith('--')) throw new Error(`${arg} needs a value.\n${USAGE}`);
+      if (arg === '--by') out.by = value;
+      else out.state = value;
+      i++;
+    } else if (arg === '--json') out.json = true;
+    else out.positional.push(arg);
+  }
+  return out;
+}
+
 export function todoCommand(args: string[]): void {
-  const [command, ref, argument] = args;
   const nd = novadevDir(requireProjectRoot());
-  const json = args.includes('--json');
   try {
+    const opts = parseArgs(args);
+    const [command, ref, argument, second] = opts.positional;
     if (command === 'list' || command === undefined) {
-      const at = args.indexOf('--state');
-      const states = at !== -1 ? (args[at + 1] ?? '').split(',').map((s) => s.trim()).filter(Boolean) : [];
-      const todos = listTodos(nd).filter((t) => states.length === 0 || states.includes(t.state));
-      if (json) {
+      const states = (opts.state ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+      const todos = todosInOrder(nd).filter((t) => states.length === 0 || states.includes(t.state));
+      if (opts.json) {
         console.log(JSON.stringify({ todos }, null, 2));
         return;
       }
       if (todos.length === 0) console.log('todos — none open');
-      for (const t of todos) console.log(`${t.ref}  (${t.state})${t.title ? `  ${t.title}` : ''}`);
+      for (const t of todos) console.log(listLine(t));
       return;
     }
     if (ref === undefined) throw new Error(USAGE);
@@ -338,6 +384,11 @@ export function todoCommand(args: string[]): void {
     if (command === 'edit') return void console.log(JSON.stringify(editTodo(nd, ref, readPayload(argument)), null, 2));
     if (command === 'cancel') return void console.log(JSON.stringify(cancelTodo(nd, ref, readPayload(argument)), null, 2));
     if (command === 'review') return void console.log(JSON.stringify(reviewTodo(nd, ref, readPayload(argument)), null, 2));
+    if (command === 'priority') {
+      // `--by` names who decided; a payload carries their reason too (their words never go through the shell).
+      const payload = second === undefined ? {} : readPayload(second);
+      return void console.log(JSON.stringify(priorityTodo(nd, ref, argument, { by: opts.by ?? payload['by'], reason: payload['reason'] }), null, 2));
+    }
     throw new Error(USAGE);
   } catch (error) {
     console.log(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }, null, 2));

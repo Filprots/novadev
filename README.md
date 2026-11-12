@@ -44,7 +44,8 @@ novadev sync                          # the close-out: measure (if set), derive,
 novadev totest                        # what needs YOUR hands-on testing
 novadev status                        # is a work cycle on? then open todos + record states, postponed, health
 novadev status --json                 # the same as data (a tool, a chat bot); totest --json too
-novadev todo list --state open        # open todos with their titles; `todo show <ref>` gives one as JSON
+novadev todo list --state open        # open todos with their titles, by priority; `todo show <ref>` gives one as JSON
+novadev todo priority <ref> urgent --by human:<id>   # a person's decision: urgent | high | normal | later
 novadev work start 2026-08-16_1       # take a batch's lock (agents do this; see Work in progress)
 novadev features --touching src/auth  # which features already own this code (conflict pre-flight)
 novadev features --hubs               # which features lean on each hub (see Placement)
@@ -151,7 +152,8 @@ so the playbooks learn the new commands. It is for more builders at once in one 
     memories/    guardrails, gotchas, decisions and guides, written the moment they cost time
     features/    what the software DOES — FEAT-NNNN/ folders: feature.md + derived work.md/tests.md
   todos/       task batches YYYY-MM-DD_N/<todo>/ — briefs: human-authored (.txt/.md + screenshots) or agent-filed prompt.md (chat-initiated);
-               a batch in work carries working.md, its lock (see Work in progress)
+               a batch in work carries working.md, its lock (see Work in progress);
+               a todo's todo.json holds its priority (see Priority and order)
   archive/     finished work by year — <year>/todos/<batch>/ and <year>/totest/<task>/<round>/
   postponed/   deferred work with do-when / discard-if triggers
   sparks/      raw unshaped ideas
@@ -310,6 +312,56 @@ WAITING ON THE HUMAN (1):
 **You write todo briefs and walk the tests only a person can walk. That is the whole
 job.** No command to remember, no skill to pick, no archive step to run — if
 something needs doing and an agent can do it, `sync` says so and the agent does it.
+
+## Priority and order — what to take first
+
+Every todo has a **priority**: `urgent`, `high`, `normal` (the default) or `later`. It is kept
+in the todo folder, in `todo.json`, written by novadev and never by hand:
+
+```json
+{
+  "priority": "urgent",
+  "history": [
+    { "at": "2026-11-12T15:02:11+01:00", "by": "human:filipp", "change": "priority",
+      "from": "normal", "to": "urgent", "reason": "Board on IRR-260: nobody can log in." }
+  ]
+}
+```
+
+A todo without the file is `normal`: every todo filed before priorities existed reads so, and
+nothing has to be migrated.
+
+- **When filing**, a part of the `file-todo` payload may carry `"priority"`; the payload's
+  `"by"` names the person who asked (`human:<id>`, or `human` for git's `user.name`).
+  `/novadev-file-a-todo` names a priority only when the person signalled one ("urgent",
+  "whenever there is time"): it never invents one.
+- **Later**, `novadev todo priority <ref> <urgent|high|normal|later>` changes it. This is a
+  person's decision, so the command needs the person: `--by human:<id>`, or a payload file
+  `{ "by": "human:<id>", "reason": "their words" }`. An agent as `by` is refused. Who decided,
+  when, from which level to which, and why are appended to `history`; `novadev todo show`
+  gives it back. A finished todo takes no priority.
+
+```sh
+novadev todo priority 2026-10-02_1/01 urgent --by human:filipp
+novadev todo priority login later reason.json      # { "by": "human", "reason": "After the release." }
+```
+
+**Every queue is ordered by priority, then by filing order** (batch, then todo number):
+`novadev todo list`, `novadev status` and `status --json` (a batch with an urgent todo left to
+do comes first, and inside a batch the higher priority comes first), and the todos in sync's
+NEXT ACTIONS. A priority other than `normal` is named beside the state; `--json` carries
+`priority` on every todo.
+
+```
+$ novadev todo list
+2026-10-02_1/01-login  (open, urgent)  Magic link
+2026-10-01_1/02-export  (open)  PDF export
+2026-10-01_1/01-dark-mode  (open, later)  Dark mode
+```
+
+A `todo.json` novadev cannot read (a merge conflict, a level that is none of the four) is a
+problem `novadev sync` and `novadev doctor` name; until it is fixed the todo reads as
+`normal`.
 
 ## Work in progress — the lock, waypoints and pauses
 
@@ -1111,7 +1163,7 @@ that exist for exactly this:
 
 ```sh
 novadev file-todo plan                  # which batch a chat request lands in, and the next number
-novadev file-todo file payload.json     # write the folders, the briefs, and the attachments
+novadev file-todo file payload.json     # write the folders, the briefs, and the attachments (a part's "priority" → its todo.json)
 
 novadev test-result tasks [query]       # resolve "16" / "the selection one" against the real queue
 novadev test-result write payload.json  # one scenario's verdict → scenario-<N>.txt   (APPENDS)
@@ -1123,6 +1175,7 @@ novadev work pause <batch> payload.json # the pause record, newest entry of the 
 novadev todo addendum <ref> payload.json # {text, attachments}: a Chat addendum to an open todo's brief (files copied in)
 novadev todo edit <ref> payload.json     # {title, request, context, reason}: the brief changed, the old one in .brief-history/
 novadev todo cancel <ref> payload.json   # {reason}: the person decided against it → ai_failed.md (cancelled)
+novadev todo priority <ref> <level> payload.json   # {by, reason}: the person changed its priority → todo.json (who, when, why)
 ```
 
 All take a JSON **file**, because the content is a person's own multi-line words and
