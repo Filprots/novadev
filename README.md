@@ -48,6 +48,7 @@ novadev todo list --state open        # open todos with their titles, by priorit
 novadev todo priority <ref> urgent --by human:<id>   # a person's decision (or the lead's): urgent | high | normal | later
 novadev todo priority --changed-since <date>         # who changed which priority, when and why (--by-agent, --json)
 novadev todo after <ref> <ref…>       # the todos it waits for; `work start` refuses it until they are completed
+novadev owners src/auth/login.ts       # who owns a path or a feature area, and who must review it (see Area owners)
 novadev work start 2026-08-16_1       # take a batch's lock (agents do this; see Work in progress)
 novadev features --touching src/auth  # which features already own this code (conflict pre-flight)
 novadev features --hubs               # which features lean on each hub (see Placement)
@@ -729,6 +730,91 @@ judged from git's history, which differs between clones (a shallow CI checkout l
 commits). So derived files leave it out: a feature's `work.md` shows an approved todo as
 `completed`, and `sync --check` gives the same answer in every clone.
 
+### Area owners — who builds and who must review
+
+`"owners"` in `.novadev/novadev.json` says who normally takes work in an area of the product
+and whose review a change there needs — the CODEOWNERS idea, by feature area and by path:
+
+```json
+{
+  "lead": "paperclip/minifil",
+  "owners": {
+    "areas": {
+      "auth": { "owner": "paperclip/dev", "reviewers": ["paperclip/reviewer", "human:anna"] }
+    },
+    "paths": {
+      "src/billing/**": { "owner": "paperclip/dev-2", "reviewers": ["human:filipp"] },
+      "irrippr:ps/**": { "reviewers": ["paperclip/reviewer"] },
+      "*.sql": { "reviewers": ["human:filipp"] }
+    },
+    "override": ["human:filipp"]
+  }
+}
+```
+
+- **`areas`** are keyed by a feature's `area:`. **`paths`** are globs relative to the project
+  root — `*` inside one folder, `**` across folders, `?` one character; a path without any of
+  them is a file, or a folder with all that is in it; a name without a "/" (`*.sql`) is looked
+  for in every folder. `"<sub-repo>:<glob>"` is a path inside a sub-repo (`"subrepos"`).
+- **`owner`** is one actor: the developer who normally takes work there. **`reviewers`** are
+  the actors of whom ONE must approve a change there. A rule has either or both.
+- **`override`** names actors who may approve without a required review, besides a person
+  and the lead (`"lead"`).
+
+Without the setting nothing below happens: no answer carries a key more, and no review is
+held. With it:
+
+| Where | What it says |
+|---|---|
+| `novadev file-todo file`, `novadev todo show`, `todo list --json`, `status --json` | `suggestedOwner` on a todo a rule with an owner matches: `{ "owner", "because": ["area auth (FEAT-0003)"], "others"? }`. It is read from the features the todo names (a `**Feature:**` line, or a FEAT id anywhere in its brief) — their area, and their `touches` against the path rules — and from the paths its brief names in backticks. The owner most matching rules name; on a tie, the first in the setting. It is a suggestion: the lead still decides who takes the todo. |
+| `novadev todo show` | `requiredReviewers` on a finished todo: the rules its work falls under, each with its reviewers. |
+| `novadev worktree mr` | a **Required reviewers** section: the path rules that hold the files the branch changed, and the area rules of the features whose `touches` hold them. |
+| `novadev todo review` | the approval itself — see below. |
+| `novadev owners <path\|area>` | who owns a path or an area and who must review it; no argument lists the rules (`--json` for data). |
+| `novadev sync`, `novadev doctor` | a setting novadev cannot read is a PROBLEM (an entry that is no actor, an unknown key, a sub-repo the project does not name); doctor also notes an area no feature has. |
+
+```
+$ novadev owners src/billing/totals.ts
+src/billing/totals.ts — owner: paperclip/dev-2; reviewers: human:filipp
+  path src/billing/**  owner: paperclip/dev-2  reviewers: human:filipp  (src/billing/totals.ts)
+```
+
+**An approval needs one reviewer of EACH matching rule.** A finished todo's work falls under
+the area rules of the features its records link (`**Feature:**`) and the path rules that hold
+the files its commits changed (`**Commits:**`; novadev's own folder aside — and when the
+record names no commit git knows, the features' `touches` stand in for the files). When
+`novadev todo review` gets an APPROVE:
+
+- every rule has an approval from one of its reviewers → the review is the APPROVE it always
+  was, with three lines more: `**Sign-offs:**`, `**Reviewed commits:**`, `**Required reviewers:**`;
+- a rule is still without one → the approval is **kept as a sign-off**, and the review reads
+  `**Verdict:** PARTIAL — approved by …; still needed: …`. The answer says `"approved": false`
+  and `"waitingFor"`. The todo's state is `review` — in every project, team mode or not — and
+  sync lists it under WAITING ON REVIEW OR MERGE with the reviewers still needed. The next
+  reviewer's APPROVE adds to the sign-offs; the one that completes them is the approval;
+- sign-offs are for the work as it was reviewed: they stay while the record's `**Commits:**`
+  line names the same commits, and a CHANGES verdict clears them.
+
+One reviewer named by several rules approves for all of them. An APPROVE from somebody no
+rule names is kept too, and completes nothing.
+
+**The override.** A person, the lead, or an actor of `override` may approve without the
+missing reviews, with a reason:
+
+```sh
+novadev todo review 2026-11-10_1/02 review.json
+# { "verdict": "APPROVE", "by": "paperclip/minifil", "checks": ["bun test — 547 pass"],
+#   "override": { "reason": "Hotfix for production; the billing reviewer is away until Monday." } }
+```
+
+The review then carries `**Override:** <who> @ <when> — <why>`, and the answer an `override`
+with the rules that were passed over. Any other actor's override is refused. As with a
+priority, novadev does not check who is calling: the rule holds through the record.
+
+For the rule to mean anything the actors must tell people and agents apart: builders and
+reviewers that all sign as `claude-code/<model>` are one actor to novadev. Give each role its
+own (`paperclip/dev`, `paperclip/reviewer`).
+
 ### `novadev worktree` — one worktree per task, across repositories
 
 The whole flow, generalised from the IRRIS company's `irris-worktree`:
@@ -738,7 +824,7 @@ novadev worktree create irr-12-layout irrippr --claim irrippr:ps/layouting/   # 
 novadev worktree list [--json]          # every worktree novadev made: branch, sub-repos, claims, batches in work
 novadev worktree status irr-12-layout   # per repository: commits ahead, behind, uncommitted, diffstat
 novadev worktree gate irr-12-layout     # the checks that must pass before a merge request
-novadev worktree mr irr-12-layout       # the merge request's text: commits per repository (irrippr@hash), claims
+novadev worktree mr irr-12-layout       # the merge request's text: commits per repository (irrippr@hash), required reviewers, claims
 novadev worktree sync irr-12-layout     # merge the default branches into the worktree (then sync --after-merge)
 novadev worktree merge irr-12-layout    # the lead: a dry run; --yes merges, all or nothing
 novadev worktree remove irr-12-layout   # after the merge: worktrees, links, merged branches (--force: unmerged too)

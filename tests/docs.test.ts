@@ -13,6 +13,7 @@ import { readFrontmatterText } from '../src/okf.ts';
 import { placementState } from '../src/placement.ts';
 import { afterTodo, priorityTodo } from '../src/todo.ts';
 import { PRIORITIES, readTodoMeta } from '../src/todo-meta.ts';
+import { auditOwners, readOwners } from '../src/owners.ts';
 import {
   REPO,
   STAMP,
@@ -586,5 +587,51 @@ describe('"do after" links in the docs', () => {
     const help = run(tempDir(), 'help').stdout;
     expect(help).toContain('"after <ref> [<ref>…] [--clear] [--by <actor>]"');
     expect(help).toContain('"after": the todos it waits for');
+  });
+});
+
+describe('area owners in the docs', () => {
+  const section = readme.split('### Area owners — who builds and who must review')[1]!.split('\n### ')[0]!;
+
+  test('the README\'s setting is one novadev reads without a problem, and its sample answer is what `novadev owners` prints', () => {
+    const setting = JSON.parse(fences(section, 'json')[0]!);
+    const root = project({ subrepos: ['repos/*'], ...setting });
+    feature(root, 'FEAT-0001', 'login', { area: 'auth', touches: 'src/auth/' });
+    const nd = join(root, '.novadev');
+    expect(readOwners(nd).errors).toEqual([]);
+    expect(readOwners(nd).rules.map((r) => r.name)).toEqual(['area auth', 'path src/billing/**', 'path irrippr:ps/**', 'path *.sql']);
+    expect(auditOwners(nd)).toEqual({ problems: [], notes: [] });
+    const sample = fences(section, '').find((body) => body.includes('$ novadev owners'))!;
+    expect(run(root, 'owners', 'src/billing/totals.ts').stdout).toBe(sample.split('\n').slice(1).join('\n'));
+  });
+
+  test('the README states the rules the code enforces', () => {
+    for (const text of [
+      '`"<sub-repo>:<glob>"`',
+      '`suggestedOwner`',
+      '`requiredReviewers`',
+      '**Required reviewers** section',
+      '**An approval needs one reviewer of EACH matching rule.**',
+      '`**Verdict:** PARTIAL',
+      '`"approved": false`',
+      'in every project, team mode or not',
+      'a CHANGES verdict clears them',
+      '"override": { "reason":',
+      '`**Override:** <who> @ <when> — <why>`',
+      'Without the setting nothing below happens',
+    ]) {
+      expect(section).toContain(text);
+    }
+    expect(readme).toContain('novadev owners src/auth/login.ts');
+  });
+
+  test('the playbooks teach it, and the CLI help names the command', () => {
+    expect(playbook).toContain('**Area owners.**');
+    expect(playbook).toContain('one reviewer of EACH matching rule');
+    expect(playbook).toContain('"override": { "reason": "…" }');
+    expect(filingPlaybook).toContain('the `suggestedOwner` the answer names');
+    const help = run(tempDir(), 'help').stdout;
+    expect(help).toContain('novadev owners [<path|area>] [--json]');
+    expect(help).toContain('"priority --changed-since <date> [--by-agent] [--json]"');
   });
 });

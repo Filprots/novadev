@@ -116,7 +116,7 @@ For each part write:
   write the memory yourself.
 
 **6. Confirm.** Report the refs it created (`2026-09-08_4/01-green-highlight-too-thin`),
-which files landed in each, the priority of each that has one, and stop. **Do not start working on the todo.** Do not run
+which files landed in each, the priority of each that has one, the `suggestedOwner` the answer names (when the project has area owners), and stop. **Do not start working on the todo.** Do not run
 `novadev sync` either; a brand-new brief with no record is exactly what the tree expects.
 
 ## Rules

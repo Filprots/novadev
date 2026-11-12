@@ -516,6 +516,18 @@ commit on its `**Commits:**` line is on the default branch (a sub-repo's on its 
 branch). Until then sync lists it under WAITING ON REVIEW OR MERGE. That is not your NEXT
 ACTION, and never write the review yourself to clear it.
 
+**Area owners.** A project may name who builds and who reviews each area (`"owners"` in
+`novadev.json`; `novadev owners <path|area>` answers who). Then a todo carries a
+`suggestedOwner` (`novadev todo show`, the JSON lists, file-todo's answer) — tell the human
+or the lead; do not take a todo that is suggested for somebody else without their word.
+`novadev worktree mr` lists the **Required reviewers**: ask exactly those for the review. An
+APPROVE counts only when one reviewer of EACH matching rule has approved: until then
+`novadev todo review` answers `"approved": false` with `"waitingFor"`, the review reads
+PARTIAL, and the todo stays in `review` — pass the todo on to the reviewers still needed,
+never sign as one of them. Only a person, the lead (`"lead"`) or an actor of
+`owners.override` may approve without them, with `"override": { "reason": "…" }` in the
+payload; the reason is recorded in the review.
+
 The `**Feature:**` and `**Commits:**` lines are the *authored* half of the link graph;
 `novadev sync` regenerates the feature's `work.md` from them. Saying
 `none — <why>` is required when there is no feature: silence is indistinguishable from
