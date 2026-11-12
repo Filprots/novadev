@@ -43,7 +43,7 @@ const STATE_MARK = {
  * The repository's worktrees (git worktree list), each with its branch and the batches in work there
  * (the registry, registry.ts; this worktree's own locks from its files). Null outside git.
  */
-export function worktreesData(nd: string): { path: string; branch: string | null; current: boolean; main: boolean; batches: { batch: string; state: string; agent: string; claims: string[] }[] }[] | null {
+export function worktreesData(nd: string): { path: string; branch: string | null; current: boolean; main: boolean; batches: { batch: string; state: string; agent: string; claims: string[]; covers: string[] | null }[] }[] | null {
   const root = dirname(nd);
   const list = worktreeList(root);
   if (list === null) return null;
@@ -58,8 +58,8 @@ export function worktreesData(nd: string): { path: string; branch: string | null
     .map((w) => {
       const current = here === w.path;
       const batches = current
-        ? listWorkLocks(nd).flatMap((read) => (read.state === 'ok' ? [{ batch: read.batch, state: read.lock.state, agent: read.lock.agent, claims: read.lock.claims }] : []))
-        : registry.filter((lock) => topOf(lock.worktree) === w.path).map((lock) => ({ batch: lock.batch, state: lock.state, agent: lock.agent, claims: lock.claims }));
+        ? listWorkLocks(nd).flatMap((read) => (read.state === 'ok' ? [{ batch: read.batch, state: read.lock.state, agent: read.lock.agent, claims: read.lock.claims, covers: read.lock.covers }] : []))
+        : registry.filter((lock) => topOf(lock.worktree) === w.path).map((lock) => ({ batch: lock.batch, state: lock.state, agent: lock.agent, claims: lock.claims, covers: lock.covers }));
       return { path: w.path, branch: w.branch, current, main: w.main, batches };
     });
 }
@@ -72,7 +72,7 @@ export function statusData(nd: string, now: Date = new Date()): Record<string, u
     return {
       batch: read.batch, state: lock.state, live: live.live, liveness: live.reason, minutesSinceUpdate: live.ageMinutes,
       agent: lock.agent, host: lock.host, started: lock.started, updated: lock.updated, resumed: lock.resumed,
-      todo: lock.todo, phase: lock.phase, phaseLabel: lock.phase === null ? null : phaseLabel(lock.phase),
+      covers: lock.covers, todo: lock.todo, phase: lock.phase, phaseLabel: lock.phase === null ? null : phaseLabel(lock.phase),
       latest: latestLine(lock), entries: lock.entries.length,
     };
   });
@@ -132,7 +132,7 @@ export function status(args: string[] = []): void {
   if (worktrees !== null && worktrees.length > 1) {
     console.log(`\nworktrees — ${worktrees.length} (* = this one)`);
     for (const w of worktrees) {
-      const batches = w.batches.map((b) => `${b.batch} ${b.state === 'paused' ? 'PAUSED' : 'in work'} (${b.agent})${b.claims.length > 0 ? `, claims ${b.claims.join(', ')}` : ''}`);
+      const batches = w.batches.map((b) => `${b.batch}${b.covers === null ? '' : ` (todos ${b.covers.join(', ')})`} ${b.state === 'paused' ? 'PAUSED' : 'in work'} (${b.agent})${b.claims.length > 0 ? `, claims ${b.claims.join(', ')}` : ''}`);
       console.log(`  ${w.current ? '*' : ' '} ${w.path}  ${w.branch ?? '(detached)'}${w.main ? '  [main checkout]' : ''}${batches.length > 0 ? ` — ${batches.join('; ')}` : ''}`);
     }
   }

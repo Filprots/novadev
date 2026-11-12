@@ -36,10 +36,12 @@ usage:
                             work is, "pause <batch> <payload.json>" writes exactly where it stopped
                             (the command half of /novadev-pause), "stop <batch>" releases it,
                             "claim <batch> <path>…" adds paths the batch owns (start: --claim);
+                            "start <batch> --todo <nn|slug>" locks only those todos (part of a batch);
                             every worktree sees the locks (a registry in the common git dir), and
                             overlapping claims across worktrees are refused (--allow-overlap)
   novadev worktree …        one worktree per task across the project and the sub-repos it changes, on
-                            one branch: "create <name> [<sub-repo>…] [--claim <path>]…", "list", "status",
+                            one branch: "create <name> [<sub-repo>…] [--claim <path>]…", "claim <name>
+                            <path>…" (more claims, same check), "list", "status",
                             "gate" (the checks before a merge request), "mr" (its text), "sync" (merge the
                             default branches in), "merge <name> [--yes]" (the lead: all or nothing, then
                             sync --after-merge), "remove <name> [--force]"

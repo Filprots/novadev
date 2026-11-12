@@ -22,7 +22,17 @@
 // claim may be written `<sub-repo>:<path>` (`irrippr:ps/layouting/`), which is the sub-repo's
 // folder plus the path. A worktree made by `novadev worktree create --claim` claims paths too.
 // `novadev work start` refuses a batch whose claims overlap the claims of a batch in work in
-// another worktree, or of another worktree; `novadev worktree create` refuses the same.
+// another worktree, or of another worktree; `novadev worktree create` and `novadev worktree claim`
+// refuse the same. Inside a worktree novadev made, a batch claims the WORKTREE's paths (plus
+// `--claim`), not its features' folders, and the paths a `novadev work` command adds there become
+// the worktree's too, so the gate sees them after the lock is gone.
+//
+// Part of a batch — `novadev work start <batch> --todo <todo>`: the lock COVERS only the named
+// todos (`covers`), and another worktree may lock other todos of the same batch. A whole-batch
+// entry is `locks/<batch>.json`, as before; a partial one is `locks/<batch>@<worktree hash>.json`,
+// one per worktree. Two entries of one batch collide when either covers the whole batch, or they
+// share a todo.
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { commonGitDir, worktreeList } from './git.ts';
@@ -48,6 +58,10 @@ export type RegistryLock = {
   phase: number | null;
   /** Project-relative paths, "/" separated. */
   claims: string[];
+  /** The todos the lock covers (`work start --todo`); null: the whole batch. */
+  covers: string[] | null;
+  /** The registry file it was read from (never written into it). */
+  file?: string;
 };
 
 /** `<common git dir>/novadev`, or null outside git. */
@@ -91,7 +105,19 @@ function asLock(value: unknown): RegistryLock | null {
     todo: text('todo'),
     phase: typeof v.phase === 'number' ? v.phase : null,
     claims: Array.isArray(v.claims) ? v.claims.filter((c): c is string => typeof c === 'string') : [],
+    covers: Array.isArray(v.covers) ? v.covers.filter((c): c is string => typeof c === 'string') : null,
   };
+}
+
+/** Do two locks of one batch collide? Yes when either covers the whole batch, or they share a todo. */
+export function coversOverlap(a: readonly string[] | null, b: readonly string[] | null): boolean {
+  return a === null || b === null || a.some((todo) => b.includes(todo));
+}
+
+/** The registry file of a lock: `<batch>.json` for the whole batch, `<batch>@<hash of the worktree>.json` for a part. */
+function lockFileName(lock: RegistryLock): string {
+  if (lock.covers === null) return `${lock.batch}.json`;
+  return `${lock.batch}@${createHash('sha1').update(real(lock.worktree)).digest('hex').slice(0, 12)}.json`;
 }
 
 /** Every lock the registry holds, readable ones only; [] outside git. */
@@ -105,7 +131,7 @@ export function registryLocks(root: string): RegistryLock[] {
     if (!file.endsWith('.json')) continue;
     try {
       const lock = asLock(JSON.parse(readFileSync(join(locks, file), 'utf8')));
-      if (lock !== null) out.push(lock);
+      if (lock !== null) out.push({ ...lock, file });
     } catch {
       // An entry nobody can read says nothing; the next write replaces it.
     }
@@ -113,25 +139,35 @@ export function registryLocks(root: string): RegistryLock[] {
   return out;
 }
 
-/** Write (or replace) a batch's entry. Nothing outside git. */
+/**
+ * Write (or replace) a batch's entry for the worktree it names, and drop that worktree's other entry
+ * of the batch (a lock that went from part of the batch to all of it, or back). Nothing outside git.
+ * A whole-batch entry is written exactly as 0.16.0 wrote it (no `covers`).
+ */
 export function writeRegistryLock(root: string, lock: RegistryLock): void {
   const dir = registryDir(root);
   if (dir === null) return;
   mkdirSync(join(dir, 'locks'), { recursive: true });
-  writeFileSync(join(dir, 'locks', `${lock.batch}.json`), `${JSON.stringify(lock, null, 2)}\n`);
+  const name = lockFileName(lock);
+  const { file: _file, covers, ...rest } = lock;
+  writeFileSync(join(dir, 'locks', name), `${JSON.stringify(covers === null ? rest : { ...rest, covers }, null, 2)}\n`);
+  for (const other of registryLocks(root)) {
+    if (other.file !== name && other.batch === lock.batch && samePlace(other.worktree, lock.worktree)) removeRegistryEntry(root, other);
+  }
 }
 
-/** Remove a batch's entry — only when it is this worktree's, unless `any`. */
-export function removeRegistryLock(root: string, batch: string, any = false): void {
+/** Remove one entry, as read by `registryLocks`. */
+export function removeRegistryEntry(root: string, lock: RegistryLock): void {
   const dir = registryDir(root);
   if (dir === null) return;
-  const path = join(dir, 'locks', `${batch}.json`);
-  if (!existsSync(path)) return;
-  if (!any) {
-    const entry = registryLocks(root).find((lock) => lock.batch === batch);
-    if (entry !== undefined && !samePlace(entry.worktree, root)) return;
+  rmSync(join(dir, 'locks', lock.file ?? lockFileName(lock)), { force: true });
+}
+
+/** Remove a batch's entries — only this worktree's, unless `any` (then every entry of the batch). */
+export function removeRegistryLock(root: string, batch: string, any = false): void {
+  for (const entry of registryLocks(root)) {
+    if (entry.batch === batch && (any || samePlace(entry.worktree, root))) removeRegistryEntry(root, entry);
   }
-  rmSync(path, { force: true });
 }
 
 /** The worktrees git knows for this repository, as real paths; null outside git. */
@@ -175,11 +211,11 @@ export function locksElsewhere(root: string): ElsewhereLock[] {
 /** Remove the entries whose worktree is gone; returns their batches. */
 export function pruneGone(root: string): string[] {
   const gone = locksElsewhere(root).filter((lock) => lock.gone);
-  for (const lock of gone) removeRegistryLock(root, lock.batch, true);
+  for (const lock of gone) removeRegistryEntry(root, lock);
   return gone.map((lock) => lock.batch);
 }
 
-/** The batches in work (or paused) in another worktree that still exists. */
+/** The batches in work (or paused) in another worktree that still exists — wholly or in part. */
 export function batchesInWorkElsewhere(root: string): Set<string> {
   return new Set(locksElsewhere(root).filter((lock) => !lock.gone).map((lock) => lock.batch));
 }
@@ -280,6 +316,18 @@ export function writeRegistryWorktree(root: string, entry: RegistryWorktree): vo
   writeFileSync(join(dir, 'worktrees', `${entry.name}.json`), `${JSON.stringify(entry, null, 2)}\n`);
 }
 
+/** The worktree novadev made whose root is `root`, or null (the main checkout, a worktree made by hand). */
+export function worktreeAt(root: string): RegistryWorktree | null {
+  return registryWorktrees(root).find((w) => samePlace(w.path, root)) ?? null;
+}
+
+/** Add claims (already normalised and checked) to a worktree's entry; returns the ones it did not hold. */
+export function addWorktreeClaims(root: string, entry: RegistryWorktree, claims: readonly string[]): string[] {
+  const added = claims.filter((claim, i) => !entry.claims.includes(claim) && claims.indexOf(claim) === i);
+  if (added.length > 0) writeRegistryWorktree(root, { ...entry, claims: [...entry.claims, ...added] });
+  return added;
+}
+
 export function removeRegistryWorktree(root: string, name: string): void {
   const dir = registryDir(root);
   if (dir !== null) rmSync(join(dir, 'worktrees', `${name}.json`), { force: true });
@@ -334,10 +382,11 @@ export function overlapText(overlap: Overlap): string {
 
 /**
  * The paths a batch claims: the ones given (`--claim`, `work claim`, a resumed lock's), and the
- * `touches:` of every feature a `**Feature:**` line in the batch's files names. Throws on a claim
- * that is not a path inside the project.
+ * `touches:` of every feature a `**Feature:**` line in the batch's files names — in the files of the
+ * todos in `covers` only, when the lock covers part of the batch. Throws on a claim that is not a
+ * path inside the project.
  */
-export function batchClaims(root: string, nd: string, batch: string, given: readonly string[]): { claims: string[]; from: { given: string[]; features: Record<string, string[]> } } {
+export function batchClaims(root: string, nd: string, batch: string, given: readonly string[], covers: readonly string[] | null = null): { claims: string[]; from: { given: string[]; features: Record<string, string[]> } } {
   const explicit: string[] = [];
   for (const raw of given) {
     const claim = normalizeClaim(root, raw);
@@ -347,6 +396,7 @@ export function batchClaims(root: string, nd: string, batch: string, given: read
   const batchDir = join(nd, 'todos', batch);
   const ids = new Set<string>();
   for (const todo of listDirs(batchDir)) {
+    if (covers !== null && !covers.includes(todo)) continue;
     for (const file of listFiles(join(batchDir, todo))) {
       if (!file.endsWith('.md') && !file.endsWith('.txt')) continue;
       const field = readField(readFileSync(join(batchDir, todo, file), 'utf8'), 'Feature');

@@ -2,6 +2,7 @@
 // changes, on one branch. Generalised from the IRRIS company's `irris-worktree` (2026-11-10).
 //
 //   novadev worktree create <name> [<sub-repo>…] [--claim <path>]…   make it (the builder)
+//   novadev worktree claim <name> <path>… [--allow-overlap]          add paths to its claims
 //   novadev worktree list [--json]                                   every worktree novadev made
 //   novadev worktree status <name>                                   per repository: ahead/behind, dirty, diffstat
 //   novadev worktree gate <name>                                     the checks that must pass before a merge request
@@ -27,7 +28,8 @@
 //   }
 //
 // Claims (registry.ts): `--claim` paths are the worktree's; one that overlaps a claim of another
-// worktree or of a batch in work elsewhere is refused. The gate fails on a change outside them.
+// worktree or of a batch in work elsewhere is refused; `claim` adds more, checked the same way. The
+// gate fails on a change outside the worktree's claims and the claims of the batches locked in it.
 //
 // The merge: on the main checkout, every repository on its default branch with no uncommitted
 // change; every merge is first tried with `git merge-tree` and nothing is merged unless all of them
@@ -41,14 +43,16 @@ import { projectDefaultBranch } from './branch.ts';
 import { commonGitDir, defaultBranch, worktreeList } from './git.ts';
 import { type Parsed, ROOT_DIR_NAME, WORK_LOCK_FILE, isPlainObject, novadevDir, packageDir, pathWithin, readManifest, refuse, requireProjectRoot } from './lib.ts';
 import {
+  type Overlap,
   type RegistryWorktree,
+  addWorktreeClaims,
   claimHolders,
   claimOverlaps,
   normalizeClaim,
   overlapText,
   registryLocks,
   registryWorktrees,
-  removeRegistryLock,
+  removeRegistryEntry,
   removeRegistryWorktree,
   samePlace,
   writeRegistryWorktree,
@@ -221,18 +225,9 @@ export function createWorktree(root: string, name: string, repoNames: readonly s
   const branch = `${settings.branchPrefix}${name}`;
   if (git(main, 'rev-parse', '--verify', '--quiet', `refs/heads/${branch}`).ok) throw new Error(`Branch ${branch} exists already in the project's repository.`);
 
-  const claims: string[] = [];
-  for (const raw of rawClaims) {
-    const claim = normalizeClaim(main, raw);
-    if (!claim.ok) throw new Error(claim.error);
-    if (!claims.includes(claim.value)) claims.push(claim.value);
-  }
-  const outside = claims.filter((c) => subrepos.repos.some((r) => pathWithin(c, r.rel) && !chosen.includes(r)));
-  if (outside.length > 0) throw new Error(`Claimed in a sub-repo this worktree does not have: ${outside.join(', ')} — name the sub-repo on create.`);
+  const claims = worktreeClaims(main, rawClaims, chosen.map((r) => r.name), 'name the sub-repo on create');
   const overlaps = claimOverlaps(main, claims, undefined, claimHolders(main, null));
-  if (overlaps.length > 0 && !allowOverlap) {
-    throw new Error(`One owner per file — these claims are taken:\n${overlaps.map((o) => `  ${overlapText(o)}`).join('\n')}\nAsk the lead; --allow-overlap when they decided the two may share.`);
-  }
+  if (overlaps.length > 0 && !allowOverlap) throw new Error(takenText(overlaps));
 
   const base: RegistryWorktree['base'] = {};
   const made: { repoMain: string; path: string }[] = [];
@@ -303,6 +298,49 @@ export function createWorktree(root: string, name: string, repoNames: readonly s
   return lines;
 }
 
+/** Claims normalised, each once; refused when one lies in a sub-repo the worktree has no worktree of. */
+function worktreeClaims(main: string, rawClaims: readonly string[], repoNames: readonly string[], hint: string): string[] {
+  const claims: string[] = [];
+  for (const raw of rawClaims) {
+    const claim = normalizeClaim(main, raw);
+    if (!claim.ok) throw new Error(claim.error);
+    if (!claims.includes(claim.value)) claims.push(claim.value);
+  }
+  const repos = listSubrepos(main).repos;
+  const outside = claims.filter((c) => repos.some((r) => pathWithin(c, r.rel) && !repoNames.includes(r.name)));
+  if (outside.length > 0) throw new Error(`Claimed in a sub-repo this worktree does not have: ${outside.join(', ')} — ${hint}.`);
+  return claims;
+}
+
+function takenText(overlaps: Overlap[]): string {
+  return `One owner per file — these claims are taken:\n${overlaps.map((o) => `  ${overlapText(o)}`).join('\n')}\nAsk the lead; --allow-overlap when they decided the two may share.`;
+}
+
+// ---------------------------------------------------------------------------
+// claim — more paths for an existing worktree
+// ---------------------------------------------------------------------------
+
+/**
+ * Add paths to a worktree's claims, with the same check as `create`: one that overlaps a claim of
+ * another worktree, or of a batch in work in another worktree, is refused unless `allowOverlap`.
+ * The batches locked IN this worktree are its own work and never block it. The gate reads them.
+ */
+export function claimWorktree(root: string, name: string, rawClaims: readonly string[], allowOverlap = false): string[] {
+  const main = mainCheckout(root);
+  const entry = find(main, name);
+  if (rawClaims.length === 0) throw new Error(`Name the paths to claim.\n${USAGE}`);
+  forgetSubrepos();
+  const claims = worktreeClaims(main, rawClaims, entry.repos.map((r) => r.name), 'make a new worktree that has that sub-repo');
+  const fresh = claims.filter((c) => !entry.claims.includes(c));
+  const overlaps = claimOverlaps(main, fresh, undefined, claimHolders(main, entry.path));
+  if (overlaps.length > 0 && !allowOverlap) throw new Error(takenText(overlaps));
+  addWorktreeClaims(main, entry, fresh);
+  const lines = [fresh.length > 0 ? `✓ worktree ${name} claims ${fresh.join(', ')}` : `· worktree ${name} holds ${claims.join(', ')} already`];
+  if (overlaps.length > 0) lines.push(`  overlaps (allowed): ${overlaps.map(overlapText).join('; ')}`);
+  lines.push(`  claims: ${[...entry.claims, ...fresh].join(', ')}`);
+  return lines;
+}
+
 // ---------------------------------------------------------------------------
 // list / status
 // ---------------------------------------------------------------------------
@@ -348,9 +386,23 @@ function changedFiles(repo: Repo, branch: string): string[] {
   return out.ok ? out.out.split('\n').filter(Boolean).map((f) => (repo.rel === '' ? f : `${repo.rel}/${f}`)) : [];
 }
 
+/**
+ * The paths a worktree's changes may touch: its own claims, and the claims of every batch locked in
+ * it (`novadev work claim` adds those, and 0.16.0 kept them in the lock only).
+ */
+function gateClaims(entry: RegistryWorktree): string[] {
+  const claims = [...entry.claims];
+  for (const lock of registryLocks(entry.main)) {
+    if (!samePlace(lock.worktree, entry.path)) continue;
+    for (const claim of lock.claims) if (!claims.includes(claim)) claims.push(claim);
+  }
+  return claims;
+}
+
 export function gateWorktree(root: string, name: string): { passed: boolean; lines: string[] } {
   const entry = find(mainCheckout(root), name);
   const settings = settingsOf(entry.main);
+  const claims = gateClaims(entry);
   const fails: string[] = [];
   const ran: string[] = [];
   for (const repo of reposOf(entry)) {
@@ -363,8 +415,8 @@ export function gateWorktree(root: string, name: string): { passed: boolean; lin
     if (!git(repo.path, 'diff', '--check', `${repo.base}...${entry.branch}`).ok) fails.push(`${label(repo)}: whitespace errors (git diff --check ${repo.base}...${entry.branch})`);
     const changed = changedFiles(repo, entry.branch);
     if (entry.claims.length > 0) {
-      const outside = changed.filter((f) => !f.startsWith(`${ROOT_DIR_NAME}/`) && !entry.claims.some((c) => pathWithin(f, c)));
-      if (outside.length > 0) fails.push(`${label(repo)}: changed outside the claims (${entry.claims.join(', ')}): ${outside.slice(0, 10).join(', ')}${outside.length > 10 ? ` … +${outside.length - 10}` : ''}`);
+      const outside = changed.filter((f) => !f.startsWith(`${ROOT_DIR_NAME}/`) && !claims.some((c) => pathWithin(f, c)));
+      if (outside.length > 0) fails.push(`${label(repo)}: changed outside the claims (${claims.join(', ')}): ${outside.slice(0, 10).join(', ')}${outside.length > 10 ? ` … +${outside.length - 10}` : ''}`);
     }
     const env = {
       ...process.env,
@@ -406,7 +458,7 @@ export function mrText(root: string, name: string): string {
   const batches = registryLocks(entry.main).filter((l) => samePlace(l.worktree, entry.path)).map((l) => l.batch);
   lines.push(
     '',
-    `Claims: ${entry.claims.join(', ') || 'none'}`,
+    `Claims: ${gateClaims(entry).join(', ') || 'none'}`,
     ...(batches.length > 0 ? [`Batches in work there: ${batches.join(', ')} — stop (or pause) them before the merge`] : []),
     `Gate: run \`novadev worktree gate ${entry.name}\` and paste its result.`,
     'Targeted checks run (command → result): …',
@@ -531,7 +583,7 @@ export function removeWorktree(root: string, name: string, force: boolean): stri
       lines.push(`✓ ${label(repo)}: worktree removed, branch ${entry.branch} kept (not merged — --force drops it)`);
     }
   }
-  for (const lock of itsLocks) removeRegistryLock(main, lock.batch, true);
+  for (const lock of itsLocks) removeRegistryEntry(main, lock);
   removeRegistryWorktree(main, entry.name);
   try {
     if (existsSync(entry.path) && readdirSync(entry.path).length === 0) rmdirSync(entry.path);
@@ -546,6 +598,7 @@ export function removeWorktree(root: string, name: string, force: boolean): stri
 // ---------------------------------------------------------------------------
 
 const USAGE = `usage: novadev worktree create <name> [<sub-repo>…] [--claim <path>]… [--allow-overlap]
+       novadev worktree claim <name> <path>… [--allow-overlap]
        novadev worktree list [--json]
        novadev worktree status <name>
        novadev worktree gate <name>
@@ -568,7 +621,7 @@ export function worktree(args: string[]): void {
       i++;
     } else if (!rest[i]!.startsWith('--')) positional.push(rest[i]!);
   }
-  const known: Record<string, string[]> = { create: ['--claim', '--allow-overlap'], list: ['--json'], status: [], gate: [], mr: [], sync: [], merge: ['--yes'], remove: ['--force'] };
+  const known: Record<string, string[]> = { create: ['--claim', '--allow-overlap'], claim: ['--allow-overlap'], list: ['--json'], status: [], gate: [], mr: [], sync: [], merge: ['--yes'], remove: ['--force'] };
   if (command === undefined || !(command in known)) return void fail(USAGE, 2);
   const unknown = flags.filter((f) => !known[command]!.includes(f));
   if (unknown.length > 0) return void fail(`unknown option ${unknown.join(', ')}\n${USAGE}`, 2);
@@ -577,6 +630,10 @@ export function worktree(args: string[]): void {
       case 'create':
         if (positional[0] === undefined) return void fail(USAGE, 2);
         console.log(createWorktree(root, positional[0], positional.slice(1), claims, flags.includes('--allow-overlap')).join('\n'));
+        return;
+      case 'claim':
+        if (positional[0] === undefined) return void fail(USAGE, 2);
+        console.log(claimWorktree(root, positional[0], positional.slice(1), flags.includes('--allow-overlap')).join('\n'));
         return;
       case 'list': {
         const data = listData(root);
