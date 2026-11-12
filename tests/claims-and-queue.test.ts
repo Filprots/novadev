@@ -175,7 +175,7 @@ describe('the merge queue', () => {
     // The express lane goes first.
     run(main, 'worktree', 'create', 'w3');
     run(main, 'worktree', 'queue', 'add', 'w1');
-    expect(run(main, 'worktree', 'queue', 'add', 'w3', '--express').stdout).toContain('place 1 of 2 (express lane)');
+    expect(run(main, 'worktree', 'queue', 'add', 'w3', '--express').stdout).toContain('place 1 of 2 (express lane —');
   });
 
   test('two branches that each pass alone and conflict: the first lands, the second fails with nothing merged, the queue goes on; fixed and queued again it lands', () => {

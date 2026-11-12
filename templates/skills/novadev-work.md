@@ -295,6 +295,16 @@ novadev todo priority 2026-10-24_1/02 urgent "$payload"   # urgent | high | norm
 
 ## 2 · PLAN — before you write code
 
+**The work-in-progress limit.** When the project set `"wipLimit"`, `novadev work start`
+refuses one more todo than the limit allows for one holder (your `--agent` actor), and names
+what you hold. That is not an error to work around: finish one and hand it to review (write
+its record, then `novadev work stop <ref>`), or stop one you will not continue — then start
+the next. Never start under another actor to get past it. An **urgent** todo is the
+express lane: it is never refused, and when you are at the limit `work start` pauses what you were
+working on in this worktree first (its lock then opens with "Paused for the urgent todo …" and
+says how to resume). Do the urgent todo with every check — gate, review, merge queue — and
+then resume what was paused.
+
 **Take the highest priority first.** `novadev todo list` (and the todo lines of sync's NEXT
 ACTIONS) are ordered: `urgent`, then `high`, `normal`, `later`, and inside one level the
 filing order. Work in that order unless the human names a todo. An `urgent` todo goes before

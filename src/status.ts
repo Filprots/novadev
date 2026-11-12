@@ -13,12 +13,15 @@ import {
   listTestTasks,
   novadevDir,
   readFrontmatter,
+  readManifest,
   requireProjectRoot,
   todoState,
 } from './lib.ts';
 import { sharedClaims } from './claim-policy.ts';
 import { worktreeList } from './git.ts';
 import { queueLockHolder, queueOrder, readQueue } from './queue.ts';
+import { type WipHolder, parseWipSettings, wipHolders } from './wip.ts';
+import { ruleRoot } from './claim-policy.ts';
 import { metricsStatusLine } from './metrics-audit.ts';
 import { batchesInWorkElsewhere, insideWorktree, lockRef, registryLocks } from './registry.ts';
 import { stateText, todosInOrder, usesLinks } from './todo.ts';
@@ -47,6 +50,16 @@ const STATE_MARK = {
  * a todo's (`unit: "todo"`, `ref` names it) or a batch's — from the registry (registry.ts); this
  * worktree's own from its files. Null outside git.
  */
+/**
+ * Work in progress per holder against the project's limit ("wipLimit"); `limit` null = no limit
+ * set — the counts are still true. An unreadable setting counts as no limit here (sync names it).
+ */
+export function wipData(nd: string, holders: ReadonlyMap<string, TodoHolder>): { limit: number | null; countsPaused: boolean; holders: WipHolder[] } {
+  const parsed = parseWipSettings(readManifest(novadevDir(ruleRoot(dirname(nd)))));
+  const settings = parsed.ok ? parsed.value : { limit: null, countsPaused: true };
+  return { limit: settings.limit, countsPaused: settings.countsPaused, holders: wipHolders(nd, settings, holders) };
+}
+
 /** The merge queue as `status` shows it: in running order, then the failed ones. */
 export function mergeQueueData(nd: string): { running: string | null; entries: { name: string; state: 'queued' | 'failed'; position: number | null; express: boolean; reason: string | null }[] } {
   const root = dirname(nd);
@@ -122,7 +135,7 @@ export function statusData(nd: string, now: Date = new Date()): Record<string, u
   let archived = 0;
   for (const year of listDirs(join(nd, 'archive'))) archived += listDirs(join(nd, 'archive', year)).length;
   return {
-    inWork, worktrees: worktreesData(nd), mergeQueue: mergeQueueData(nd), sharedClaims: sharedClaims(dirname(nd)).map((s) => ({ path: s.path, between: s.between })), batches, todoCounts: counts, totest: tasks, postponed,
+    inWork, worktrees: worktreesData(nd), wip: wipData(nd, holders), mergeQueue: mergeQueueData(nd), sharedClaims: sharedClaims(dirname(nd)).map((s) => ({ path: s.path, between: s.between })), batches, todoCounts: counts, totest: tasks, postponed,
     sparks: listFiles(join(nd, 'sparks')).filter((f) => f !== 'README.md').length,
     features, archivedBatches: archived,
   };
@@ -190,6 +203,15 @@ export function status(args: string[] = []): void {
     if (shared.length > 20) console.log(`  … +${shared.length - 20}`);
   }
 
+  // Work in progress against the limit, when the project set one.
+  const wip = wipData(nd, todoHolders(nd));
+  if (wip.limit !== null && wip.holders.length > 0) {
+    console.log(`\nwork in progress — limit ${wip.limit} todo(s) per holder${wip.countsPaused ? ', paused ones count' : ', paused ones do not count'}`);
+    for (const h of wip.holders) {
+      console.log(`  ${h.agent}  ${h.count}/${wip.limit}${h.atLimit ? '  AT THE LIMIT' : ''}${h.todos.length > 0 ? `  ${h.todos.join(', ')}` : ''}${h.urgent.length > 0 ? `  + urgent (exempt): ${h.urgent.join(', ')}` : ''}${h.pausedNotCounted.length > 0 ? `  + paused: ${h.pausedNotCounted.join(', ')}` : ''}`);
+    }
+  }
+
   // The merge queue: what lands next, and what went back to its builder.
   const queue = mergeQueueData(nd);
   if (queue.entries.length > 0 || queue.running !== null) {
@@ -221,7 +243,13 @@ export function status(args: string[] = []): void {
           : held.some((h) => h.state === 'working') ? '  [in work]' : '  [paused]';
     const done = batchIsDone(batchDir) ? '  [ready to archive]' : mark;
     console.log(`  ${batch}${done}`);
-    for (const t of listed.filter((item) => item.batch === batch)) console.log(`    ${STATE_MARK[t.state]} ${t.todo}  ${stateText(t, showReady)}${whole ? '' : holderNote(holders.get(`${batch}/${t.todo}`))}`);
+    for (const t of listed.filter((item) => item.batch === batch)) {
+      console.log(`    ${STATE_MARK[t.state]} ${t.todo}  ${stateText(t, showReady)}${whole ? '' : holderNote(holders.get(`${batch}/${t.todo}`))}`);
+      if (t.priority === 'urgent') {
+        const pausedFor = [...holders].filter(([, h]) => h.state === 'paused' && (h.latest ?? '').startsWith('Paused for the urgent todo') && (h.latest ?? '').includes(t.ref)).map(([ref, h]) => `${ref} (${h.agent})`);
+        if (pausedFor.length > 0) console.log(`        paused for it: ${pausedFor.join(', ')}`);
+      }
+    }
   }
   if (batches.length === 0) console.log('  (none)');
 

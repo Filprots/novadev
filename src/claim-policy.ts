@@ -12,6 +12,7 @@
 //
 // Both settings are read from the MAIN checkout's novadev.json: a task branch cannot loosen the
 // rule for itself.
+import { dirname } from 'node:path';
 import { worktreeList } from './git.ts';
 import { type Parsed, novadevDir, pathWithin, readManifest, refuse } from './lib.ts';
 import { type ClaimHolder, type Overlap, claimHolders, normalizeClaim, samePlace } from './registry.ts';
@@ -41,7 +42,7 @@ export function parseProtectedPaths(root: string, value: unknown): Parsed<string
 }
 
 /** The checkout whose novadev.json holds the rule: git's first worktree, when the project sits there too. */
-function ruleRoot(root: string): string {
+export function ruleRoot(root: string): string {
   const main = worktreeList(root)?.[0]?.path;
   return main !== undefined && readManifest(novadevDir(main)) !== null ? main : root;
 }
@@ -123,6 +124,16 @@ export function judgeOverlaps(policy: ClaimPolicy, overlaps: readonly Overlap[])
     (policy.protectedPaths.some((pattern) => reaches(pattern, shared)) ? hard : soft).push(overlap);
   }
   return { hard, soft };
+}
+
+export function auditClaimPolicy(nd: string): { problems: string[] } {
+  const manifest = readManifest(nd);
+  const problems: string[] = [];
+  const mode = parseClaimsSetting(manifest?.claims);
+  if (!mode.ok) problems.push(mode.error);
+  const paths = parseProtectedPaths(dirname(nd), manifest?.protectedPaths);
+  if (!paths.ok) problems.push(paths.error);
+  return { problems: problems.map((p) => `.novadev/novadev.json: ${p}. Until it is fixed, commands that judge claims are refused.`) };
 }
 
 /** The line that follows a refusal, by policy. */

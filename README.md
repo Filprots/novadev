@@ -748,6 +748,47 @@ itself. Without `"claims": "notice"` nothing changes by upgrading, whatever `pro
 says. Turn it on together with the merge queue below: the checks on the merged result are
 what replaces the lock.
 
+### The work-in-progress limit, and the express lane
+
+Work that is started and not finished goes stale. A project can cap it:
+
+```json
+"wipLimit": 2,
+"wipCountsPaused": true
+```
+
+| Key | Default | Means |
+|---|---|---|
+| `wipLimit` | off | how many unfinished todos one holder may have in work at once (0 or absent: no limit) |
+| `wipCountsPaused` | `true` | a paused todo takes a slot too; `false`: only the ones being worked |
+
+A **holder** is the actor a lock records (`novadev work start … --agent <actor>`), so every
+developer or agent needs its own actor id for the limit to mean anything; a lock without an
+actor is not counted. A todo takes a slot while a lock holds it and it is not finished; a lock
+on a whole batch holds every unfinished todo of that batch. `work start` on one more is
+refused — `Work-in-progress limit: … holds 2 of 2 todo(s)` — naming what the holder has and
+how to free a slot: finish one and hand it to review (its record, then `work stop`), or stop
+one that will not be continued. Resuming what you hold is never one more. `status` shows each
+holder's count against the limit (*work in progress*), `status --json` has it as `wip`
+(with or without a limit).
+
+**The express lane.** An **urgent** todo (*Priority and order*; a person's decision, or the
+lead's) does not wait behind normal work, and it skips no check:
+
+- It is exempt from the limit: it is never refused, and it takes no slot. When its holder is
+  at the limit, `work start` first **pauses** every todo that holder is working on in this
+  worktree — the ordinary pause, with a record that says it was paused for the urgent todo and
+  how to resume — so nothing stays locked without a resume point. The answer lists them
+  (`expressLane.paused`); a todo the holder is working on in ANOTHER worktree cannot be paused
+  from here and is named (`expressLane.stillInWorkElsewhere`): pause it there.
+- Its worktree goes to the head of the merge queue, behind other express entries:
+  `worktree queue add` sees the urgent todo by itself (`--express` is the lead's hand-set
+  form).
+- The gate, the review and the queue's checks on the merged result all still run. A bad urgent
+  branch is refused like any other.
+
+`status` lists an urgent todo first and names who was paused for it.
+
 ### Merging parallel branches: `.gitattributes` and `sync --after-merge`
 
 Two branches that both record knowledge, or both regenerate a derived file, would conflict on

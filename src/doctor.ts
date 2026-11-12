@@ -32,6 +32,8 @@ import { auditPlacement } from './placement.ts';
 import { auditTodoLinks } from './todo-links.ts';
 import { auditTodoMeta } from './todo-meta.ts';
 import { auditLead } from './lead.ts';
+import { auditClaimPolicy } from './claim-policy.ts';
+import { auditWip } from './wip.ts';
 import { auditOwners } from './owners.ts';
 import { auditWork } from './work.ts';
 
@@ -123,6 +125,7 @@ export function doctor(): void {
   problems.push(...auditTodoMeta(nd).problems);
   // … and who may decide them besides a person ("lead" in novadev.json).
   problems.push(...auditLead(nd).problems);
+  problems.push(...auditClaimPolicy(nd).problems, ...auditWip(nd).problems);
   // --- owners: who builds and who reviews each area ("owners" in novadev.json) ---
   const owners = auditOwners(nd);
   problems.push(...owners.problems);

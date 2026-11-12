@@ -44,6 +44,8 @@ import { afterMergeRefusal, commitAfterMerge, MERGE_DRIVER, hasMergeRules, merge
 import { merged, reviewIsPartial } from './review.ts';
 import { auditTodoLinks, depName, linkReader } from './todo-links.ts';
 import { auditLead } from './lead.ts';
+import { auditClaimPolicy } from './claim-policy.ts';
+import { auditWip } from './wip.ts';
 import { auditOwners, waitingReviews } from './owners.ts';
 import { auditTodoMeta, orderByPriority, priorityLabel, todoPriority } from './todo-meta.ts';
 import { auditWork } from './work.ts';
@@ -140,7 +142,7 @@ export async function sync(args: string[]): Promise<void> {
   // The todos' own settings (todo.json: priority, "do after" links): a file novadev cannot read.
   // … and a link to a todo nobody has, or todos that wait for each other (todo-links.ts).
   // … who may decide them besides a person ("lead"), and who owns and reviews what ("owners").
-  const todoMeta = { problems: [...auditTodoMeta(nd).problems, ...auditLead(nd).problems, ...auditOwners(nd).problems] };
+  const todoMeta = { problems: [...auditTodoMeta(nd).problems, ...auditLead(nd).problems, ...auditClaimPolicy(nd).problems, ...auditWip(nd).problems, ...auditOwners(nd).problems] };
   const todoLinks = auditTodoLinks(nd);
   const problems = [...inWork.problems, ...audit.problems, ...todoMeta.problems, ...todoLinks.problems, ...metricsAudit.problems, ...placement.problems, ...knowledge.problems];
   if (problems.length > 0) {

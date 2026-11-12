@@ -68,7 +68,8 @@ usage:
                             branch onto the newest default branch, checked there, then landed; a
                             failure lands nothing and the queue goes on), "remove <name> [--force]";
                             "claims": "notice" in novadev.json makes an overlapping claim a notice,
-                            "protectedPaths" names where it stays a lock"
+                            "protectedPaths" names where it stays a lock; "wipLimit" caps the unfinished
+                            todos one holder may have in work (an urgent todo is exempt: the express lane)
   novadev archive <batch>…  move fully-recorded batch(es) to archive/<year>/   (or: --done for all);
                             on the default branch only — a task branch leaves the moves to it
   novadev knowledge [words] the knowledge bundle (.novadev/knowledge/, Open Knowledge Format 0.2):

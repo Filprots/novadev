@@ -70,6 +70,7 @@ import {
 import { type QueueEntry, queueLockHolder, queueOrder, readQueue, withQueueLock, writeQueue } from './queue.ts';
 import { requiredReviewerLines } from './owners.ts';
 import { forgetSubrepos, listSubrepos } from './subrepos.ts';
+import { todoPriority } from './todo-meta.ts';
 import { briefTitle, resolveTodo } from './todo.ts';
 
 const NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
@@ -704,13 +705,17 @@ export function queueAdd(root: string, name: string, opts: { by: string | null; 
   if (!existsSync(entry.path)) throw new Error(`Worktree ${name} is missing (${entry.path}).`);
   const queue = readQueue(main);
   const was = queue.find((e) => e.name === name);
+  // The express lane: asked for (--express), or the worktree carries an urgent todo — as the main
+  // checkout or the worktree itself has its priority. It skips no check; it only goes first.
+  const urgent = mrTodos(entry).map((t) => t.ref).filter((ref) => [entry.main, entry.path].some((at) => existsSync(join(novadevDir(at), 'todos', ref)) && todoPriority(join(novadevDir(at), 'todos', ref)) === 'urgent'));
+  opts = { ...opts, express: opts.express || urgent.length > 0 };
   if (was?.state === 'queued' && was.express === opts.express) {
     return [`· ${name} is in the merge queue already (place ${queueOrder(queue).findIndex((e) => e.name === name) + 1})`];
   }
   const next: QueueEntry[] = [...queue.filter((e) => e.name !== name), { name, state: 'queued', added: now.toISOString(), by: opts.by, express: opts.express }];
   writeQueue(main, next);
   const place = queueOrder(next).findIndex((e) => e.name === name) + 1;
-  const lines = [`✓ ${name} queued for merge — place ${place} of ${queueOrder(next).length}${opts.express ? ' (express lane)' : ''}${was?.state === 'failed' ? ' (again, after its failure)' : ''}`];
+  const lines = [`✓ ${name} queued for merge — place ${place} of ${queueOrder(next).length}${opts.express ? ` (express lane${urgent.length > 0 ? `: urgent ${urgent.join(', ')}` : ''} — behind other express entries, ahead of the rest; every check still runs)` : ''}${was?.state === 'failed' ? ' (again, after its failure)' : ''}`];
   const dry = tryMerge(root, name, false);
   if (!dry.ok) lines.push(`  note: as it stands it would not merge — ${(dry.lines.find((l) => l.startsWith('✗')) ?? dry.lines[0] ?? '').replace(/^✗\s*/, '')}`);
   lines.push('  The lead runs the queue: novadev worktree queue run');
