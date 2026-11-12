@@ -1,6 +1,6 @@
 {
   "novadev": true,
-  "version": "0.16.0",
+  "version": "0.17.0",
   "deployedAt": "2026-11-12",
   "metrics": null,
   "debtBudget": null,
@@ -13,5 +13,5 @@
       "features": 365
     }
   },
-  "migratedAt": "2026-11-10"
+  "migratedAt": "2026-11-12"
 }

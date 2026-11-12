@@ -6,7 +6,7 @@ import { readFrontmatterText } from './okf.ts';
 import { reviewGate } from './review.ts';
 
 export const ROOT_DIR_NAME = '.novadev';
-export const NOVADEV_VERSION = '0.16.0';
+export const NOVADEV_VERSION = '0.17.0';
 
 /**
  * The project's knowledge — wiki, memories, features — is one Open Knowledge Format bundle under

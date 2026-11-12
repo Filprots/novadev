@@ -127,6 +127,19 @@ conflict. The new settings are all off when absent: `defaultBranch`, `subrepos`,
 - Every `novadev work` command also mirrors the batch's lock into
   `<git common dir>/novadev/locks/`, so other worktrees see it.
 
+0.17.0 changes no layout: `migrate-repo` only stamps the version; run `novadev deploy` after it
+so the playbooks learn the new commands. It is for more builders at once in one project:
+
+- The worktree gate also accepts the files a batch locked in that worktree claims
+  (`novadev work claim` after the worktree was made).
+- `novadev work start <batch> --todo <nn|slug>` locks part of a batch; another worktree can lock
+  another part of the same batch. A lock written by 0.16.0 is a lock on the whole batch.
+- A batch started inside a worktree claims only that worktree's files, not the folders its
+  features touch; `novadev worktree claim <name> <path…> [--allow-overlap]` adds files later.
+  A claim is judged once, when it is added.
+- `novadev test-result skip <payload>`: the person skips scenarios (or the rest of a round), the
+  round closes without a confirmation, and its todos get `ai_testskipped.md`.
+
 ## The system
 
 ```
