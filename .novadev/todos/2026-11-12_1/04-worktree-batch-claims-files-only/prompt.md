@@ -22,3 +22,9 @@ Wanted (proposal):
 3. `work claim` on a paused lock and `work start` agree (both refuse or both accept).
 
 Test: worktree W2 holds file F in folder D; worktree W1's batch has a feature touching D; `work start` in W1 (claims not including F) passes; `worktree claim W1 F` is refused without `--allow-overlap` and accepted with it; after that a change to F in W1 passes the gate.
+
+## Second case: IRR-152 (added 2026-11-12, board yes on IRR-198)
+
+Board (Filipp, 2026-11-12), question card on IRR-198 (finding 1 of IRR-152): chose "File it in novadev" for the proposal "when `work start` runs in a worktree, it uses that worktree's claims and not the features' folders (or a new option `--only-claims`)". No further notes. The same proposal as point 1 above, so it is added here and not filed as a second todo.
+
+Found on IRR-152 (IRRIS _ecosystem, batch 2026-11-03_2, todo 06 decoder system, worktree irr-152-decoders, novadev 0.16.0). The worktree was created with FILE claims only (about 90 files in irris, irrippr and irrisketch_locales); none overlapped another worktree. `"$IRRIS_HOST" novadev work start 2026-11-03_2` in the worktree (with or without `--claim`) was refused: the batch lock adds the `touches:` of every feature its todos link, and FEAT-0001 touches all of `repos/irrippr/ps`. First refusal: IRR-147's claims (`ps/init.js`, `ps/layouting/overlays/callout`, …); after IRR-147 merged: IRR-149's single file `repos/irrippr/ps/drawing/sprinkling/piping/autolay/autolay.js`. With `--allow-overlap` the lock would have held all of `ps` and refused every other developer's ps worktree, so the lead (IRR-198) decided: no batch lock for that branch. The gate itself passed on the file claims.
