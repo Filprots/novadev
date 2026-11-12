@@ -8,6 +8,9 @@ import { copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { BATCH_RE, batchLockFiles, listDirs, todayStamp } from './lib.ts';
 import { batchesInWorkElsewhere } from './registry.ts';
+import { type SuggestedOwner, ownerSuggester } from './owners.ts';
+import { resolveFiledLinks } from './todo-links.ts';
+import { DEFAULT_PRIORITY, PRIORITIES, type Priority, parsePriority, writeFiledMeta } from './todo-meta.ts';
 
 const SLUG = /^[a-z0-9][a-z0-9-]*$/;
 /** novadev's own record names — their presence is what makes a batch "touched". */
@@ -35,13 +38,26 @@ export type TodoPart = {
   readonly request: string;
   readonly context?: string;
   readonly attachments?: readonly string[];
+  /** urgent | high | normal | later — absent means normal (todo-meta.ts). */
+  readonly priority?: Priority;
+  /** The todos this one waits for (todo-links.ts): refs, or the slug of another part of the same filing. */
+  readonly after?: readonly string[];
 };
 
 export type FiledTodo = {
   readonly ref: string;
   readonly path: string;
   readonly attachments: readonly string[];
+  /** Named only when the part set one other than normal. */
+  readonly priority?: Priority;
+  /** The refs it waits for — named only when the part had any. */
+  readonly after?: readonly string[];
+  /** Who normally takes work there — only in a project with area owners, when a rule with an owner matches (owners.ts). */
+  readonly suggestedOwner?: SuggestedOwner;
 };
+
+/** Who asked for the filing (`by` in the payload): recorded in each todo.json the filing writes. */
+export type FilingOptions = { readonly by?: string | null };
 
 export type BatchPlan = { readonly batch: string; readonly reused: boolean; readonly nextNumber: number };
 
@@ -70,23 +86,26 @@ export function planBatch(nd: string, today = todayStamp()): BatchPlan {
   return { batch: nextBatchName(nd, today), reused: false, nextNumber: 1 };
 }
 
-/** Create the folders, write the briefs, copy the attachments in. */
-export function fileTodos(nd: string, parts: readonly TodoPart[]): readonly FiledTodo[] {
+/** Create the folders, write the briefs, copy the attachments in; a part's priority goes into its todo.json. */
+export function fileTodos(nd: string, parts: readonly TodoPart[], opts: FilingOptions = {}): readonly FiledTodo[] {
   if (parts.length === 0) throw new Error('Nothing to file.');
   if (parts.length > MAX_PARTS) throw new Error(`At most ${MAX_PARTS} todos in one filing.`);
   // Validate EVERY slug before touching the disk: a refusal must leave no half-made batch behind
   // (a stray empty batch is litter novadev then reports forever).
   const slugs = parts.map((part) => normalizeSlug(part.slug));
   const target = planBatch(nd);
+  const folders = slugs.map((slug, index) => `${String(target.nextNumber + index).padStart(2, '0')}-${slug}`);
+  // … and every "do after" link: a part that waits for a todo nobody has must not be filed half-linked.
+  const links = resolveFiledLinks(nd, parts.map((part, index) => ({ ref: `${target.batch}/${folders[index]!}`, slug: slugs[index]!, after: part.after ?? [] })));
   const batchDir = join(nd, 'todos', target.batch);
   mkdirSync(batchDir, { recursive: true });
   if (!existsSync(join(batchDir, CHAT_MARKER))) {
     writeFileSync(join(batchDir, CHAT_MARKER), `${todayStamp()}\n`);
   }
   const filed: FiledTodo[] = [];
-  let number = target.nextNumber;
+  const owner = ownerSuggester(nd);
   for (const [index, part] of parts.entries()) {
-    const folder = `${String(number).padStart(2, '0')}-${slugs[index]!}`;
+    const folder = folders[index]!;
     const dir = join(batchDir, folder);
     if (existsSync(dir)) throw new Error(`${target.batch}/${folder} already exists.`);
     mkdirSync(dir, { recursive: true });
@@ -94,12 +113,18 @@ export function fileTodos(nd: string, parts: readonly TodoPart[]): readonly File
     // The brief is written LAST: it owns the name `prompt.md`, and an attachment that wanted that
     // name has already been moved out of its way.
     writeFileSync(join(dir, 'prompt.md'), renderBrief(slugs[index]!, part, attachments));
+    const priority = part.priority ?? DEFAULT_PRIORITY;
+    const after = links[index]!;
+    writeFiledMeta(dir, { priority, after }, opts.by ?? null);
+    const suggested = owner(dir);
     filed.push({
       ref: `${target.batch}/${folder}`,
       path: `.novadev/todos/${target.batch}/${folder}`,
       attachments,
+      ...(priority !== DEFAULT_PRIORITY ? { priority } : {}),
+      ...(after.length > 0 ? { after } : {}),
+      ...(suggested !== null ? { suggestedOwner: suggested } : {}),
     });
-    number += 1;
   }
   return filed;
 }
@@ -230,12 +255,23 @@ export function parseParts(raw: unknown): readonly TodoPart[] {
     const files = Array.isArray(rawFiles)
       ? rawFiles.filter((id): id is string => typeof id === 'string')
       : undefined;
+    // A priority is named only when the person signalled one; a word that is none of the four is refused
+    // rather than filed as normal — the person would believe it was urgent.
+    const priority = record['priority'] === undefined || record['priority'] === null ? undefined : parsePriority(record['priority']);
+    if (priority === null) throw new Error(`A part's 'priority' must be one of ${PRIORITIES.join(', ')} — not "${String(record['priority'])}".`);
+    const rawAfter = record['after'];
+    if (rawAfter !== undefined && rawAfter !== null && (!Array.isArray(rawAfter) || rawAfter.some((ref) => typeof ref !== 'string' || ref.trim() === ''))) {
+      throw new Error("A part's 'after' must be a list of todos it waits for: refs (\"2026-11-12_2/05\"), or the slug of another part of this filing.");
+    }
+    const after = Array.isArray(rawAfter) ? (rawAfter as string[]) : undefined;
     return {
       slug,
       title,
       request,
       ...(context !== undefined ? { context } : {}),
       ...(files !== undefined ? { attachments: files } : {}),
+      ...(priority !== undefined ? { priority } : {}),
+      ...(after !== undefined && after.length > 0 ? { after } : {}),
     };
   });
 }

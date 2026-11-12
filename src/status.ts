@@ -21,7 +21,8 @@ import { worktreeList } from './git.ts';
 import { queueLockHolder, queueOrder, readQueue } from './queue.ts';
 import { metricsStatusLine } from './metrics-audit.ts';
 import { batchesInWorkElsewhere, insideWorktree, lockRef, registryLocks } from './registry.ts';
-import { listTodos } from './todo.ts';
+import { stateText, todosInOrder, usesLinks } from './todo.ts';
+import { batchesByPriority } from './todo-meta.ts';
 import { type TodoHolder, auditWork, batchWorkLocks, holderNote, latestLine, listWorkLocks, lockLiveness, phaseLabel, todoHolders } from './work.ts';
 
 const STATE_MARK = {
@@ -94,18 +95,19 @@ export function statusData(nd: string, now: Date = new Date()): Record<string, u
       latest: latestLine(lock), entries: lock.entries.length,
     };
   });
-  const todos = listTodos(nd);
+  // By priority (todo-meta.ts): urgent first, then the filing order — the todos, and the batches by their best open todo.
+  const todos = todosInOrder(nd);
   // Per todo, who holds it — here or in another worktree — and where it stopped; a batch is in work
   // while any todo of it is.
   const holders = todoHolders(nd, now);
   const elsewhere = batchesInWorkElsewhere(dirname(nd));
-  const batches = listDirs(join(nd, 'todos')).map((batch) => {
+  const batches = batchesByPriority(join(nd, 'todos'), todoState).map((batch) => {
     return {
       batch,
       readyToArchive: batchIsDone(join(nd, 'todos', batch)),
       inWork: batchInWork(nd, batch),
       inWorkElsewhere: elsewhere.has(batch),
-      todos: todos.filter((t) => t.batch === batch).map(({ todo, title, state }) => ({ todo, title, state, holder: holderData(holders.get(`${batch}/${todo}`)) })),
+      todos: todos.filter((t) => t.batch === batch).map(({ todo, title, state, priority, after, waitsFor, ready, suggestedOwner }) => ({ todo, title, state, priority, after, waitsFor, ready, ...(suggestedOwner !== undefined ? { suggestedOwner } : {}), holder: holderData(holders.get(`${batch}/${todo}`)) })),
     };
   });
   const counts: Record<string, number> = {};
@@ -195,11 +197,14 @@ export function status(args: string[] = []): void {
     for (const e of queue.entries) console.log(e.state === 'queued' ? `  ${e.position}. ${e.name}${e.express ? ' [express]' : ''}` : `  ✗ ${e.name} — ${e.reason ?? 'failed'}`);
   }
 
-  // Open batches.
+  // Open batches — by priority (todo-meta.ts): a batch with an urgent todo to do first, and in a batch the urgent todo first.
+  // Each todo says what it waits for ("do after" links, todo-links.ts), or that it is ready, once any todo has a link.
   // Per todo: its state, then who holds it and in which phase — a todo's own lock, here or in another
   // worktree, or a 0.17.0 lock on part of the batch. (A lock on the WHOLE batch is the batch's mark.)
-  const batches = listDirs(join(nd, 'todos'));
   const holders = todoHolders(nd);
+  const batches = batchesByPriority(join(nd, 'todos'), todoState);
+  const listed = todosInOrder(nd);
+  const showReady = usesLinks(listed);
   console.log(`\ntodos — ${batches.length} open batch(es)`);
   for (const batch of batches) {
     const batchDir = join(nd, 'todos', batch);
@@ -216,10 +221,7 @@ export function status(args: string[] = []): void {
           : held.some((h) => h.state === 'working') ? '  [in work]' : '  [paused]';
     const done = batchIsDone(batchDir) ? '  [ready to archive]' : mark;
     console.log(`  ${batch}${done}`);
-    for (const todo of names) {
-      const state = todoState(join(batchDir, todo));
-      console.log(`    ${STATE_MARK[state]} ${todo}  (${state})${whole ? '' : holderNote(holders.get(`${batch}/${todo}`))}`);
-    }
+    for (const t of listed.filter((item) => item.batch === batch)) console.log(`    ${STATE_MARK[t.state]} ${t.todo}  ${stateText(t, showReady)}${whole ? '' : holderNote(holders.get(`${batch}/${t.todo}`))}`);
   }
   if (batches.length === 0) console.log('  (none)');
 

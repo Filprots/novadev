@@ -144,8 +144,8 @@ describe('--json views', () => {
     expect(r.code).toBe(0);
     const s = JSON.parse(r.stdout);
     expect(s.batches).toEqual([
-      { batch: '2026-10-01_1', readyToArchive: false, inWork: null, inWorkElsewhere: false, todos: [{ todo: '01-dark-mode', title: 'Dark mode', state: 'progress', holder: null }] },
-      { batch: '2026-10-02_1', readyToArchive: true, inWork: null, inWorkElsewhere: false, todos: [{ todo: '01-login', title: 'Magic link', state: 'completed', holder: null }] },
+      { batch: '2026-10-01_1', readyToArchive: false, inWork: null, inWorkElsewhere: false, todos: [{ todo: '01-dark-mode', title: 'Dark mode', state: 'progress', priority: 'normal', after: [], waitsFor: [], ready: true, holder: null }] },
+      { batch: '2026-10-02_1', readyToArchive: true, inWork: null, inWorkElsewhere: false, todos: [{ todo: '01-login', title: 'Magic link', state: 'completed', priority: 'normal', after: [], waitsFor: [], ready: false, holder: null }] },
     ]);
     expect(s.todoCounts).toEqual({ progress: 1, completed: 1 });
     expect(s.inWork).toEqual([]);

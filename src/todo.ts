@@ -7,8 +7,25 @@
 //   novadev todo edit <ref> <payload.json>                   {title, request, context, reason}: the brief rewritten where
 //                                                            asked, the previous one kept in .brief-history/
 //   novadev todo cancel <ref> <payload.json>                 {reason}: an ai_failed.md that says *cancelled*
-//   novadev todo review <ref> <payload.json>                 {verdict, by, checks, findings?, notes?}: ai_review.md, a
-//                                                            reviewer's APPROVE or CHANGES on a finished todo (review.ts)
+//   novadev todo review <ref> <payload.json>                 {verdict, by, checks, findings?, notes?, override?}: ai_review.md,
+//                                                            a reviewer's APPROVE or CHANGES on a finished todo (review.ts);
+//                                                            with area owners (owners.ts) an APPROVE is PARTIAL until one
+//                                                            reviewer of each matching rule approved, or a person or the
+//                                                            lead overrides: "override": { "reason" }
+//   novadev todo priority <ref> <level> [<payload.json>] [--by <actor>]
+//                                                            urgent|high|normal|later, on a person's decision or the
+//                                                            lead's ("lead" in novadev.json): {by, reason} — who, when
+//                                                            and why go into the todo's todo.json (todo-meta.ts)
+//   novadev todo priority --changed-since <date> [--by-agent] [--json]
+//                                                            the recorded changes of priority since a day or a
+//                                                            timestamp, saying which ones an agent made
+//   novadev todo after <ref> [<ref>…] [--clear] [--by <actor>]
+//                                                            the todos it waits for ("do after" links, todo-links.ts):
+//                                                            refs add links, --clear removes them all (with refs:
+//                                                            replaces them), no refs shows them
+//
+// `list` and the JSON views order the todos by priority (urgent first), then by filing order, and say for
+// each todo whether it is ready or which todos it waits for.
 //
 // A <ref> is how people name a todo: `2026-10-16_2/02-router-…`, `2026-10-16_2/02`, or a word of its slug that only one
 // open todo has. The two writes follow the playbook's intake rules: a todo with a terminal record, or one waiting on a
@@ -25,16 +42,34 @@ import {
   RECORD_PROGRESS,
   TERMINAL_STATES,
   type TodoState,
+  listAllTodos,
   listDirs,
   novadevDir,
   requireProjectRoot,
   todoState,
 } from './lib.ts';
 import { humanActor } from './knowledge-log.ts';
-import { ACTOR_FORMAT, actorKind } from './okf.ts';
+import { ACTOR_FORMAT, actorKind, nowTimestamp } from './okf.ts';
+import { type SuggestedOwner, VERDICT_PARTIAL, judgeReviews, mayOverride, ownerSuggester, overrideText, readOwners, readSignOffs, recordCommits, requiredReviews, reviewFields, todoReviewRules } from './owners.ts';
 import { RECORD_REVIEW, REVIEW_HISTORY_DIR, parseReviewPayload, renderReview } from './review.ts';
 import { batchWorkLocks, holderNote, liveElsewhere, lockHolding, lockLiveness, todoHolders } from './work.ts';
 import { copyAttachments } from './todo-filing.ts';
+import { type LinkFacts, changeAfter, linkReader, linkTag } from './todo-links.ts';
+import {
+  PRIORITIES,
+  type Priority,
+  type PriorityChange,
+  changePriority,
+  decidedAs,
+  orderByPriority,
+  parseSince,
+  priorityChangeLine,
+  priorityChanges,
+  priorityTag,
+  readTodoMeta,
+  reasonText,
+  resolveActor,
+} from './todo-meta.ts';
 
 const PROMPT = 'prompt.md';
 const RECORDS = [RECORD_NEEDSTEST, RECORD_CONFIRMED, RECORD_TESTSKIPPED, RECORD_REVIEW, RECORD_COMPLETED, RECORD_FAILED, RECORD_PROGRESS] as const;
@@ -46,9 +81,16 @@ const USAGE =
   '       novadev todo addendum <ref> <payload.json>   ({ "text": …, "attachments": [paths] })\n' +
   '       novadev todo edit <ref> <payload.json>       ({ "title"?, "request"?, "context"?, "reason"? })\n' +
   '       novadev todo cancel <ref> <payload.json>     ({ "reason": … })\n' +
-  '       novadev todo review <ref> <payload.json>     ({ "verdict": "APPROVE"|"CHANGES", "by", "checks": […], "findings"?, "notes"? })';
+  '       novadev todo review <ref> <payload.json>     ({ "verdict": "APPROVE"|"CHANGES", "by", "checks": […], "findings"?, "notes"?, "override"?: { "reason" } })\n' +
+  `       novadev todo priority <ref> <${PRIORITIES.join('|')}> [<payload.json>] [--by <actor>]   ({ "by": "human:<id>" or the lead, "reason"? })\n` +
+  '       novadev todo priority --changed-since <YYYY-MM-DD|timestamp> [--by-agent] [--json]   (who changed which priority, when and why)\n' +
+  '       novadev todo after <ref> [<ref>…] [--clear] [--by <actor>]   (the todos it waits for; --clear removes them)';
 
-export type TodoItem = { ref: string; batch: string; todo: string; title: string; state: TodoState };
+/**
+ * One open todo: where it is, what it is called, its state, its priority, and what its "do after" links say now.
+ * `suggestedOwner` is there only in a project with area owners (owners.ts), on a todo a rule with an owner matches.
+ */
+export type TodoItem = { ref: string; batch: string; todo: string; title: string; state: TodoState; priority: Priority; suggestedOwner?: SuggestedOwner } & LinkFacts;
 
 /** The brief's title: its first `## ` heading (the filed form), else the first line that says something. */
 export function briefTitle(text: string): string {
@@ -64,14 +106,51 @@ export function briefTitle(text: string): string {
 /** Every todo of the open batches, oldest batch first. */
 export function listTodos(nd: string): TodoItem[] {
   const out: TodoItem[] = [];
+  const links = linkReader(nd);
+  const owner = ownerSuggester(nd);
   for (const batch of listDirs(join(nd, 'todos'))) {
     for (const todo of listDirs(join(nd, 'todos', batch))) {
       const dir = join(nd, 'todos', batch, todo);
       const prompt = join(dir, PROMPT);
-      out.push({ ref: `${batch}/${todo}`, batch, todo, title: existsSync(prompt) ? briefTitle(readFileSync(prompt, 'utf8')) : '', state: todoState(dir) });
+      const state = todoState(dir);
+      const suggested = owner(dir);
+      out.push({
+        ref: `${batch}/${todo}`,
+        batch,
+        todo,
+        title: existsSync(prompt) ? briefTitle(readFileSync(prompt, 'utf8')) : '',
+        state,
+        priority: readTodoMeta(dir).priority,
+        ...links(dir, state),
+        ...(suggested !== null ? { suggestedOwner: suggested } : {}),
+      });
     }
   }
   return out;
+}
+
+/** The todos as every queue shows them: the highest priority first, then the filing order (batch, then todo). */
+export function todosInOrder(nd: string): TodoItem[] {
+  return orderByPriority(listTodos(nd), (t) => t.priority);
+}
+
+/**
+ * A todo's state as the lists print it: `(open)`, `(open, urgent)`, `(open, waits for 05-todo-priority)`,
+ * `(open, ready)`. `ready` is said only in a project that uses "do after" links (`showReady`), so a
+ * project without them prints as it always did.
+ */
+export function stateText(t: TodoItem, showReady: boolean): string {
+  return `(${t.state}${priorityTag(t.priority)}${linkTag(t, showReady)})`;
+}
+
+/** Does any of these todos wait for another? Then the lists say `ready` on the ones that do not. */
+export function usesLinks(todos: readonly TodoItem[]): boolean {
+  return todos.some((t) => t.after.length > 0);
+}
+
+/** One line of `novadev todo list`: the ref, its state (with its priority and what it waits for), its title. */
+export function listLine(t: TodoItem, showReady = false): string {
+  return `${t.ref}  ${stateText(t, showReady)}${t.title ? `  ${t.title}` : ''}`;
 }
 
 /** The one open todo a person means; an error that lists the candidates when it is not one. */
@@ -108,7 +187,11 @@ export function showTodo(nd: string, ref: string, now: Date = new Date()): Recor
   const inWork =
     lock === null ? null : lock.state === 'invalid' ? { state: 'unreadable' } : { state: lock.lock.state, live: lockLiveness(lock.lock, now).live, agent: lock.lock.agent, todo: lock.lock.todo, updated: lock.lock.updated };
   const holder = todoHolders(nd, now).get(t.ref) ?? null;
-  return { ...t, brief: existsSync(join(dir, PROMPT)) ? readFileSync(join(dir, PROMPT), 'utf8') : '', records, holder, batchInWork: inWork, files: listFilesIn(dir) };
+  // What changed its priority (and its links), with who and when — only when something was ever recorded.
+  const history = readTodoMeta(dir).history;
+  // The reviews its area owners ask for (owners.ts) — only in a project with owners, on a todo a rule matches.
+  const required = requiredReviews(todoReviewRules(nd, dir));
+  return { ...t, ...(required.length > 0 ? { requiredReviewers: required.map(({ rule, reviewers }) => ({ rule, reviewers })) } : {}), ...(history.length > 0 ? { history } : {}), brief: existsSync(join(dir, PROMPT)) ? readFileSync(join(dir, PROMPT), 'utf8') : '', records, holder, batchInWork: inWork, files: listFilesIn(dir) };
 }
 
 function listFilesIn(dir: string): string[] {
@@ -275,6 +358,12 @@ export function cancelTodo(nd: string, ref: string, payload: Record<string, unkn
  * A reviewer's verdict on a finished todo: ai_review.md beside its ai_completed.md. The review before
  * it, if any, moves to the todo's .review-history/. Not refused behind a lock: reviewing is part of
  * the loop, often done while the builder still holds the batch.
+ *
+ * In a project with area owners (owners.ts) an APPROVE is the approval only when one reviewer of EACH
+ * rule the work falls under has approved. Until then every APPROVE is kept as a sign-off — the review
+ * reads PARTIAL and names who is still needed — and the sign-offs stay for as long as the record names
+ * the same commits. `"override": { "reason" }` from a person, the lead or an actor of `owners.override`
+ * approves without the missing ones; who, when and why are written into the review.
  */
 export function reviewTodo(nd: string, ref: string, payload: Record<string, unknown>, now: Date = new Date()): Record<string, unknown> {
   const t = resolveTodo(nd, ref);
@@ -291,21 +380,105 @@ export function reviewTodo(nd: string, ref: string, payload: Record<string, unkn
     throw new Error(`'by' must be an actor — ${ACTOR_FORMAT}.`);
   }
   const path = join(dir, RECORD_REVIEW);
+  const before = existsSync(path) ? readFileSync(path, 'utf8') : null;
+
+  // Area owners: which reviews this work needs, and which of them it has by now.
+  const owners = readOwners(nd);
+  const required = review.verdict === 'APPROVE' ? requiredReviews(todoReviewRules(nd, dir, owners)) : [];
+  let more: { verdict?: string; fields?: string[] } = {};
+  let answer: Record<string, unknown> = {};
+  if (required.length > 0) {
+    const commits = recordCommits(dir);
+    const kept = before === null ? { signoffs: [], commits: null } : readSignOffs(before);
+    // A sign-off is for the work as it was: new commits in the record ask for the reviews again.
+    const carried = kept.commits === commits ? kept.signoffs.filter((s) => s.by !== review.by) : [];
+    const dropped = kept.commits === commits ? [] : kept.signoffs.filter((s) => s.by !== review.by).map((s) => s.by);
+    const signoffs = [...carried, { by: review.by, at: nowTimestamp(now) }];
+    const judgement = judgeReviews(required, signoffs);
+    let override: { by: string; at: string; reason: string } | null = null;
+    if (payload['override'] !== undefined && payload['override'] !== null && payload['override'] !== false && judgement.missing.length > 0) {
+      const given = payload['override'];
+      const reason = reasonText(typeof given === 'string' ? given : (given as Record<string, unknown>)?.['reason']);
+      if (reason === undefined) throw new Error('An override needs its reason: "override": { "reason": "why this is approved without the required review" } — it is recorded in the review.');
+      if (!mayOverride(nd, owners, review.by)) {
+        throw new Error(
+          `"${review.by}" may not approve without the required reviews (${judgement.missing.map((m) => m.rule).join(', ')}): an override is for ${overrideText(nd, owners)}. Without "override" the approval is kept as a sign-off.`,
+        );
+      }
+      override = { by: review.by, at: nowTimestamp(now), reason };
+    }
+    const approved = judgement.missing.length === 0 || override !== null;
+    more = { ...(approved ? {} : { verdict: `${VERDICT_PARTIAL} — approved by ${signoffs.map((s) => s.by).join(', ')}; still needed: ${judgement.missing.map((m) => `${m.rule} (one of ${m.reviewers.join(', ')})`).join('; ')}` }), fields: reviewFields(judgement, signoffs, commits, override) };
+    answer = {
+      approved,
+      signoffs,
+      requiredReviewers: judgement.required.map(({ rule, reviewers, approvedBy }) => ({ rule, reviewers, approvedBy })),
+      ...(approved ? {} : { waitingFor: judgement.missing.map(({ rule, reviewers }) => ({ rule, reviewers })), message: `Kept as a sign-off, not the approval yet: ${judgement.missing.map((m) => `${m.rule} needs one of ${m.reviewers.join(', ')}`).join('; ')}.` }),
+      ...(override !== null ? { override: { ...override, without: judgement.missing.map((m) => m.rule) } } : {}),
+      ...(dropped.length > 0 ? { dropped: { signoffs: dropped, why: `the record names other commits now (${commits}; reviewed: ${kept.commits ?? 'none'})` } } : {}),
+    };
+  }
+
   let previous: string | null = null;
-  if (existsSync(path)) {
+  if (before !== null) {
     const history = join(dir, REVIEW_HISTORY_DIR);
     mkdirSync(history, { recursive: true });
     previous = `${now.toISOString().replace(/[:.]/g, '-')}.md`;
-    writeFileSync(join(history, previous), readFileSync(path, 'utf8'));
+    writeFileSync(join(history, previous), before);
   }
-  writeFileSync(path, renderReview(t.todo, today(now), review));
+  writeFileSync(path, renderReview(t.todo, today(now), review, more));
   return {
     ref: t.ref,
     written: `todos/${t.ref}/${RECORD_REVIEW}`,
-    verdict: review.verdict,
+    verdict: more.verdict !== undefined ? VERDICT_PARTIAL : review.verdict,
     state: todoState(dir),
+    ...answer,
     ...(previous === null ? {} : { previous: `todos/${t.ref}/${REVIEW_HISTORY_DIR}/${previous}` }),
   };
+}
+
+/**
+ * A person changed a todo's priority (they said so; an agent or a chat bot runs this for them), or the
+ * project's lead did ("lead" in novadev.json — it gives its own actor and a reason): the level, and who
+ * decided, when and why, go into the todo's todo.json. Any other agent is refused. Not refused behind a
+ * lock: an urgent todo is often one somebody is already working on.
+ */
+export function priorityTodo(nd: string, ref: string, level: string | undefined, who: { by?: unknown; reason?: unknown }, now: Date = new Date()): Record<string, unknown> {
+  const t = resolveTodo(nd, ref);
+  const root = dirname(nd);
+  const by = resolveActor(root, who.by, { personOnly: true, orLead: true, what: 'decided the priority' });
+  return changePriority({ ref: t.ref, dir: join(nd, 'todos', t.batch, t.todo), state: t.state }, level, { by, reason: reasonText(who.reason), as: decidedAs(root, by) }, now);
+}
+
+/**
+ * The recorded changes of priority since a day or a timestamp, oldest first, each with the todo's title —
+ * what the lead's morning digest to the board lists. `byAgent` keeps only the ones an agent made.
+ */
+export function priorityReport(nd: string, since: string, opts: { byAgent?: boolean } = {}): { since: string; byAgents: number; changes: (PriorityChange & { title: string })[] } {
+  const from = parseSince(since);
+  const titles = new Map<string, string>();
+  const title = (c: PriorityChange): string => {
+    if (!titles.has(c.ref)) {
+      const open = join(nd, 'todos', c.ref, PROMPT);
+      const path = existsSync(open) ? open : (listAllTodos(nd).find((t) => t.ref === c.ref)?.dir ?? '') + `/${PROMPT}`;
+      titles.set(c.ref, existsSync(path) ? briefTitle(readFileSync(path, 'utf8')) : '');
+    }
+    return titles.get(c.ref)!;
+  };
+  const all = priorityChanges(nd, from);
+  const changes = all.filter((c) => opts.byAgent !== true || c.byKind === 'agent').map((c) => ({ ...c, title: title(c) }));
+  return { since: nowTimestamp(from), byAgents: all.filter((c) => c.byKind === 'agent').length, changes };
+}
+
+/**
+ * The todos a todo waits for: add links (`deps`), replace or remove them (`clear`), or — with neither —
+ * only say what they are. Who set them is recorded when `by` is given (any actor: the lead, an agent, a person).
+ */
+export function afterTodo(nd: string, ref: string, deps: readonly string[], opts: { clear?: boolean; by?: unknown } = {}, now: Date = new Date()): Record<string, unknown> {
+  const t = resolveTodo(nd, ref);
+  if (deps.length === 0 && opts.clear !== true) return { ref: t.ref, after: t.after, waitsFor: t.waitsFor, ready: t.ready };
+  const by = opts.by === undefined || opts.by === null ? null : resolveActor(dirname(nd), opts.by, { personOnly: false, what: 'set the links' });
+  return changeAfter(nd, { ref: t.ref, batch: t.batch, dir: join(nd, 'todos', t.batch, t.todo), state: t.state }, deps, { clear: opts.clear === true, by }, now);
 }
 
 function readPayload(argument: string | undefined): Record<string, unknown> {
@@ -317,23 +490,53 @@ function readPayload(argument: string | undefined): Record<string, unknown> {
   return payload as Record<string, unknown>;
 }
 
+/** The arguments of a `novadev todo` call: what is positional, and the options that take a value. */
+type TodoArgs = { positional: string[]; by?: string; state?: string; changedSince?: string; json: boolean; clear: boolean; byAgent: boolean };
+function parseArgs(args: string[]): TodoArgs {
+  const out: TodoArgs = { positional: [], json: false, clear: false, byAgent: false };
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (arg === '--by' || arg === '--state' || arg === '--changed-since') {
+      const value = args[i + 1];
+      if (value === undefined || value.startsWith('--')) throw new Error(`${arg} needs a value.\n${USAGE}`);
+      if (arg === '--by') out.by = value;
+      else if (arg === '--state') out.state = value;
+      else out.changedSince = value;
+      i++;
+    } else if (arg === '--json') out.json = true;
+    else if (arg === '--clear') out.clear = true;
+    else if (arg === '--by-agent') out.byAgent = true;
+    else out.positional.push(arg);
+  }
+  return out;
+}
+
 export function todoCommand(args: string[]): void {
-  const [command, ref, argument] = args;
   const nd = novadevDir(requireProjectRoot());
-  const json = args.includes('--json');
   try {
+    const opts = parseArgs(args);
+    const [command, ref, argument, second] = opts.positional;
     if (command === 'list' || command === undefined) {
-      const at = args.indexOf('--state');
-      const states = at !== -1 ? (args[at + 1] ?? '').split(',').map((s) => s.trim()).filter(Boolean) : [];
-      const todos = listTodos(nd).filter((t) => states.length === 0 || states.includes(t.state));
+      const states = (opts.state ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+      const todos = todosInOrder(nd).filter((t) => states.length === 0 || states.includes(t.state));
       // Who holds each todo (work.ts): its own lock or its batch's, here or in another worktree.
       const holders = todoHolders(nd);
-      if (json) {
+      if (opts.json) {
         console.log(JSON.stringify({ todos: todos.map((t) => ({ ...t, holder: holders.get(t.ref) ?? null })) }, null, 2));
         return;
       }
       if (todos.length === 0) console.log('todos — none open');
-      for (const t of todos) console.log(`${t.ref}  (${t.state})${t.title ? `  ${t.title}` : ''}${holderNote(holders.get(t.ref))}`);
+      const showReady = usesLinks(todos);
+      for (const t of todos) console.log(`${listLine(t, showReady)}${holderNote(holders.get(t.ref))}`);
+      return;
+    }
+    if (command === 'priority' && opts.changedSince !== undefined) {
+      if (ref !== undefined) throw new Error(`--changed-since lists the changes of every todo: leave the todo out.\n${USAGE}`);
+      const report = priorityReport(nd, opts.changedSince, { byAgent: opts.byAgent });
+      if (opts.json) return void console.log(JSON.stringify(report, null, 2));
+      const count = report.changes.length;
+      console.log(`priority changes since ${report.since} — ${count === 0 ? 'none' : count}${opts.byAgent ? ' by an agent' : count > 0 ? ` (${report.byAgents} by an agent)` : ''}`);
+      for (const c of report.changes) console.log(`  ${priorityChangeLine(c)}${c.title ? `  · ${c.title}` : ''}`);
       return;
     }
     if (ref === undefined) throw new Error(USAGE);
@@ -342,6 +545,12 @@ export function todoCommand(args: string[]): void {
     if (command === 'edit') return void console.log(JSON.stringify(editTodo(nd, ref, readPayload(argument)), null, 2));
     if (command === 'cancel') return void console.log(JSON.stringify(cancelTodo(nd, ref, readPayload(argument)), null, 2));
     if (command === 'review') return void console.log(JSON.stringify(reviewTodo(nd, ref, readPayload(argument)), null, 2));
+    if (command === 'priority') {
+      // `--by` names who decided; a payload carries their reason too (their words never go through the shell).
+      const payload = second === undefined ? {} : readPayload(second);
+      return void console.log(JSON.stringify(priorityTodo(nd, ref, argument, { by: opts.by ?? payload['by'], reason: payload['reason'] }), null, 2));
+    }
+    if (command === 'after') return void console.log(JSON.stringify(afterTodo(nd, ref, opts.positional.slice(2), { clear: opts.clear, by: opts.by }), null, 2));
     throw new Error(USAGE);
   } catch (error) {
     console.log(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }, null, 2));

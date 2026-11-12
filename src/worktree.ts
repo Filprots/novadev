@@ -68,6 +68,7 @@ import {
   writeRegistryWorktree,
 } from './registry.ts';
 import { type QueueEntry, queueLockHolder, queueOrder, readQueue, withQueueLock, writeQueue } from './queue.ts';
+import { requiredReviewerLines } from './owners.ts';
 import { forgetSubrepos, listSubrepos } from './subrepos.ts';
 import { briefTitle, resolveTodo } from './todo.ts';
 
@@ -573,7 +574,10 @@ export function mrText(root: string, name: string): string {
   const batches = held.filter((l) => l.unit === 'batch').map((l) => l.batch);
   const locked = held.filter((l) => l.unit === 'todo').map(lockRef);
   const shared = claimPolicy(entry.main).mode === 'notice' ? sharedFiles(entry, reposOf(entry).flatMap((repo) => (existsSync(repo.path) ? changedFiles(repo, entry.branch) : []))) : [];
+  // Area owners (owners.ts): who must review the files this branch changed — nothing in a project without them.
+  const reviewers = requiredReviewerLines(existsSync(novadevDir(entry.path)) ? entry.path : entry.main, reposOf(entry).flatMap((repo) => (existsSync(repo.path) ? changedFiles(repo, entry.branch) : [])));
   lines.push(
+    ...(reviewers.length > 0 ? ['', ...reviewers] : []),
     '',
     `Claims: ${gateClaims(entry).join(', ') || 'none'}`,
     ...(shared.length > 0 ? ['Shared with other open worktrees (the merge checks the combination):', ...shared.slice(0, 15).map((s) => `- ${s}`), ...(shared.length > 15 ? [`- … +${shared.length - 15}`] : [])] : []),

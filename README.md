@@ -44,7 +44,11 @@ novadev sync                          # the close-out: measure (if set), derive,
 novadev totest                        # what needs YOUR hands-on testing
 novadev status                        # is a work cycle on? then open todos + record states, postponed, health
 novadev status --json                 # the same as data (a tool, a chat bot); totest --json too
-novadev todo list --state open        # open todos with their titles; `todo show <ref>` gives one as JSON
+novadev todo list --state open        # open todos with their titles, by priority; `todo show <ref>` gives one as JSON
+novadev todo priority <ref> urgent --by human:<id>   # a person's decision (or the lead's): urgent | high | normal | later
+novadev todo priority --changed-since <date>         # who changed which priority, when and why (--by-agent, --json)
+novadev todo after <ref> <ref…>       # the todos it waits for; `work start` refuses it until they are completed
+novadev owners src/auth/login.ts       # who owns a path or a feature area, and who must review it (see Area owners)
 novadev work start 2026-08-16_1/02    # take a todo's lock (agents do this; see Work in progress)
 novadev features --touching src/auth  # which features already own this code (conflict pre-flight)
 novadev features --hubs               # which features lean on each hub (see Placement)
@@ -151,7 +155,8 @@ so the playbooks learn the new commands. It is for more builders at once in one 
     memories/    guardrails, gotchas, decisions and guides, written the moment they cost time
     features/    what the software DOES — FEAT-NNNN/ folders: feature.md + derived work.md/tests.md
   todos/       task batches YYYY-MM-DD_N/<todo>/ — briefs: human-authored (.txt/.md + screenshots) or agent-filed prompt.md (chat-initiated);
-               a todo in work carries working.md, its lock (see Work in progress)
+               a todo in work carries working.md, its lock (see Work in progress);
+               a todo's todo.json holds its priority and the todos it waits for (see Priority and order)
   archive/     finished work by year — <year>/todos/<batch>/ and <year>/totest/<task>/<round>/
   postponed/   deferred work with do-when / discard-if triggers
   sparks/      raw unshaped ideas
@@ -310,6 +315,138 @@ WAITING ON THE HUMAN (1):
 **You write todo briefs and walk the tests only a person can walk. That is the whole
 job.** No command to remember, no skill to pick, no archive step to run — if
 something needs doing and an agent can do it, `sync` says so and the agent does it.
+
+## Priority and order — what to take first
+
+Every todo has a **priority**: `urgent`, `high`, `normal` (the default) or `later`. It is kept
+in the todo folder, in `todo.json`, written by novadev and never by hand:
+
+```json
+{
+  "priority": "urgent",
+  "history": [
+    { "at": "2026-11-12T15:02:11+01:00", "by": "human:filipp", "change": "priority",
+      "from": "normal", "to": "urgent", "reason": "Board on IRR-260: nobody can log in." }
+  ]
+}
+```
+
+A todo without the file is `normal`: every todo filed before priorities existed reads so, and
+nothing has to be migrated.
+
+- **When filing**, a part of the `file-todo` payload may carry `"priority"`; the payload's
+  `"by"` names the person who asked (`human:<id>`, or `human` for git's `user.name`).
+  `/novadev-file-a-todo` names a priority only when the person signalled one ("urgent",
+  "whenever there is time"): it never invents one.
+- **Later**, `novadev todo priority <ref> <urgent|high|normal|later>` changes it. This is a
+  person's decision, so the command needs the person: `--by human:<id>`, or a payload file
+  `{ "by": "human:<id>", "reason": "their words" }`. Who decided, when, from which level to
+  which, and why are appended to `history`; `novadev todo show` gives it back. A finished
+  todo takes no priority.
+- **The lead may decide it too.** `"lead"` in `.novadev/novadev.json` names the project's
+  lead — one actor (`"lead": "paperclip/minifil"`) or a list. It works with team mode on or
+  off: `"team": true` says a lead approves and merges, `"lead"` says who that is. The lead
+  runs the same command with its own actor as `by`, and a `reason` is then required; the
+  history entry carries `"as": "lead"`. An agent as `by` is refused unless it is the lead; a
+  project that names no lead keeps the decision with people. novadev does not check who is
+  calling — an actor is what the caller says — so the rule holds through the record, and
+  the record is listed:
+
+```sh
+novadev todo priority 2026-10-02_1/01 urgent --by human:filipp
+novadev todo priority login later reason.json      # { "by": "human", "reason": "After the release." }
+novadev todo priority login urgent lead.json       # { "by": "paperclip/minifil", "reason": "Three customers cannot log in." }
+novadev todo priority --changed-since 2026-11-12   # every change since that day (or a timestamp with an offset)
+novadev todo priority --changed-since 2026-11-12 --by-agent --json
+```
+
+`--changed-since` reads the histories of the open and the archived todos and lists every
+change of priority from that moment on, oldest first — and every todo filed with a priority
+(`"change": "filed"`). It is what a lead's morning digest to the owner is built from: each
+entry says who (`by`), whether that is a person or an agent (`byKind`), when and why.
+
+```json
+{
+  "since": "2026-11-12T00:00:00+01:00",
+  "byAgents": 1,
+  "changes": [
+    { "ref": "2026-10-02_1/01-login", "archived": false, "change": "priority",
+      "from": "normal", "to": "urgent", "by": "paperclip/minifil", "byKind": "agent", "as": "lead",
+      "at": "2026-11-12T06:30:00+01:00", "reason": "Three customers cannot log in.", "title": "Magic link" }
+  ]
+}
+```
+
+**Every queue is ordered by priority, then by filing order** (batch, then todo number):
+`novadev todo list`, `novadev status` and `status --json` (a batch with an urgent todo left to
+do comes first, and inside a batch the higher priority comes first), and the todos in sync's
+NEXT ACTIONS. A priority other than `normal` is named beside the state; `--json` carries
+`priority` on every todo.
+
+```
+$ novadev todo list
+2026-10-02_1/01-login  (open, urgent)  Magic link
+2026-10-01_1/02-export  (open)  PDF export
+2026-10-01_1/01-dark-mode  (open, later)  Dark mode
+```
+
+A `todo.json` novadev cannot read (a merge conflict, a level that is none of the four) is a
+problem `novadev sync` and `novadev doctor` name; until it is fixed the todo reads as
+`normal`.
+
+### "Do after" links — a todo that waits for another
+
+A todo can name the todos it **waits for**. The links are kept in the same `todo.json`, as
+full refs, so they still resolve after a batch is archived:
+
+```json
+{
+  "after": ["2026-10-01_1/01-schema"],
+  "history": [
+    { "at": "2026-11-12T15:10:40+01:00", "by": "claude-code/claude-opus-5-5", "change": "after",
+      "from": [], "to": ["2026-10-01_1/01-schema"] }
+  ]
+}
+```
+
+```sh
+novadev todo after 2026-10-01_1/02 2026-10-01_1/01   # 02 waits for 01 (adds a link); refs as `novadev todo` takes them
+novadev todo after api --clear                       # remove its links; `--clear <ref>…` replaces them
+novadev todo after api                               # show them: after, waitsFor, ready
+```
+
+`--by <actor>` records who set them. When filing, a part's `"after"` lists what it waits for:
+refs of existing todos, or the `slug` of another part of the same payload. A link to itself,
+to a todo that does not exist, or one that would close a cycle is refused, and so are links on
+a finished todo.
+
+**A dependency is satisfied when it is completed** (`completed` or `confirmed`). In team mode
+that means approved and merged. An archived completed todo is satisfied. A todo is **ready**
+when it can be started and nothing it waits for is unsatisfied.
+
+- **`novadev work start` refuses a todo that still waits**, and names what it waits for. A
+  start that covers several todos — a whole batch, or `--todo 01 --todo 02` — judges each todo
+  it covers that is still to be worked. A dependency inside the same start is fine: one holder
+  works them, in the order the links give. A dependency outside it must be completed. The way
+  to start early is to remove the link, which is recorded.
+- **The lists say it.** Once any open todo has a link, `novadev todo list` and `novadev status`
+  print `ready` or `waits for …` beside each open todo; their JSON (and `todo show`) carries
+  `after`, `waitsFor` (each with its state) and `ready` for every todo. In sync's NEXT ACTIONS
+  a todo that waits says "do that first" in place of "do the work".
+- **sync and doctor check the links** of the todos that are not finished. A link to a todo that
+  does not exist, and todos that wait for each other in a cycle, are PROBLEMS: nothing in
+  them can ever start. A link to a todo that did not land (`ai_failed.md`: cancelled,
+  deferred) is a NEXT ACTION (a note in doctor): somebody decides whether the link goes.
+
+```
+$ novadev todo list
+2026-10-02_1/01-docs  (open, high, waits for 2026-10-01_1/02-api)  The docs
+2026-10-01_1/01-schema  (open, ready)  The schema
+2026-10-01_1/02-api  (open, waits for 01-schema)  The API
+```
+
+(The `high` todo is listed first and still waits: priority orders the list, the links say what
+can be started.)
 
 ## Work in progress — the lock, waypoints and pauses
 
@@ -680,6 +817,91 @@ judged from git's history, which differs between clones (a shallow CI checkout l
 commits). So derived files leave it out: a feature's `work.md` shows an approved todo as
 `completed`, and `sync --check` gives the same answer in every clone.
 
+### Area owners — who builds and who must review
+
+`"owners"` in `.novadev/novadev.json` says who normally takes work in an area of the product
+and whose review a change there needs — the CODEOWNERS idea, by feature area and by path:
+
+```json
+{
+  "lead": "paperclip/minifil",
+  "owners": {
+    "areas": {
+      "auth": { "owner": "paperclip/dev", "reviewers": ["paperclip/reviewer", "human:anna"] }
+    },
+    "paths": {
+      "src/billing/**": { "owner": "paperclip/dev-2", "reviewers": ["human:filipp"] },
+      "irrippr:ps/**": { "reviewers": ["paperclip/reviewer"] },
+      "*.sql": { "reviewers": ["human:filipp"] }
+    },
+    "override": ["human:filipp"]
+  }
+}
+```
+
+- **`areas`** are keyed by a feature's `area:`. **`paths`** are globs relative to the project
+  root — `*` inside one folder, `**` across folders, `?` one character; a path without any of
+  them is a file, or a folder with all that is in it; a name without a "/" (`*.sql`) is looked
+  for in every folder. `"<sub-repo>:<glob>"` is a path inside a sub-repo (`"subrepos"`).
+- **`owner`** is one actor: the developer who normally takes work there. **`reviewers`** are
+  the actors of whom ONE must approve a change there. A rule has either or both.
+- **`override`** names actors who may approve without a required review, besides a person
+  and the lead (`"lead"`).
+
+Without the setting nothing below happens: no answer carries a key more, and no review is
+held. With it:
+
+| Where | What it says |
+|---|---|
+| `novadev file-todo file`, `novadev todo show`, `todo list --json`, `status --json` | `suggestedOwner` on a todo a rule with an owner matches: `{ "owner", "because": ["area auth (FEAT-0003)"], "others"? }`. It is read from the features the todo names (a `**Feature:**` line, or a FEAT id anywhere in its brief) — their area, and their `touches` against the path rules — and from the paths its brief names in backticks. The owner most matching rules name; on a tie, the first in the setting. It is a suggestion: the lead still decides who takes the todo. |
+| `novadev todo show` | `requiredReviewers` on a finished todo: the rules its work falls under, each with its reviewers. |
+| `novadev worktree mr` | a **Required reviewers** section: the path rules that hold the files the branch changed, and the area rules of the features whose `touches` hold them. |
+| `novadev todo review` | the approval itself — see below. |
+| `novadev owners <path\|area>` | who owns a path or an area and who must review it; no argument lists the rules (`--json` for data). |
+| `novadev sync`, `novadev doctor` | a setting novadev cannot read is a PROBLEM (an entry that is no actor, an unknown key, a sub-repo the project does not name); doctor also notes an area no feature has. |
+
+```
+$ novadev owners src/billing/totals.ts
+src/billing/totals.ts — owner: paperclip/dev-2; reviewers: human:filipp
+  path src/billing/**  owner: paperclip/dev-2  reviewers: human:filipp  (src/billing/totals.ts)
+```
+
+**An approval needs one reviewer of EACH matching rule.** A finished todo's work falls under
+the area rules of the features its records link (`**Feature:**`) and the path rules that hold
+the files its commits changed (`**Commits:**`; novadev's own folder aside — and when the
+record names no commit git knows, the features' `touches` stand in for the files). When
+`novadev todo review` gets an APPROVE:
+
+- every rule has an approval from one of its reviewers → the review is the APPROVE it always
+  was, with three lines more: `**Sign-offs:**`, `**Reviewed commits:**`, `**Required reviewers:**`;
+- a rule is still without one → the approval is **kept as a sign-off**, and the review reads
+  `**Verdict:** PARTIAL — approved by …; still needed: …`. The answer says `"approved": false`
+  and `"waitingFor"`. The todo's state is `review` — in every project, team mode or not — and
+  sync lists it under WAITING ON REVIEW OR MERGE with the reviewers still needed. The next
+  reviewer's APPROVE adds to the sign-offs; the one that completes them is the approval;
+- sign-offs are for the work as it was reviewed: they stay while the record's `**Commits:**`
+  line names the same commits, and a CHANGES verdict clears them.
+
+One reviewer named by several rules approves for all of them. An APPROVE from somebody no
+rule names is kept too, and completes nothing.
+
+**The override.** A person, the lead, or an actor of `override` may approve without the
+missing reviews, with a reason:
+
+```sh
+novadev todo review 2026-11-10_1/02 review.json
+# { "verdict": "APPROVE", "by": "paperclip/minifil", "checks": ["bun test — 547 pass"],
+#   "override": { "reason": "Hotfix for production; the billing reviewer is away until Monday." } }
+```
+
+The review then carries `**Override:** <who> @ <when> — <why>`, and the answer an `override`
+with the rules that were passed over. Any other actor's override is refused. As with a
+priority, novadev does not check who is calling: the rule holds through the record.
+
+For the rule to mean anything the actors must tell people and agents apart: builders and
+reviewers that all sign as `claude-code/<model>` are one actor to novadev. Give each role its
+own (`paperclip/dev`, `paperclip/reviewer`).
+
 ### `novadev worktree` — one worktree per task, across repositories
 
 The task is a todo: one todo, one owner, one worktree, one merge request. The whole flow,
@@ -690,7 +912,7 @@ novadev worktree create irr-12-layout irrippr --claim irrippr:ps/layouting/ --to
 novadev worktree list [--json]          # every worktree novadev made: branch, sub-repos, claims, its todos, the locks held there
 novadev worktree status irr-12-layout   # per repository: commits ahead, behind, uncommitted, diffstat
 novadev worktree gate irr-12-layout     # the checks that must pass before a merge request
-novadev worktree mr irr-12-layout       # the merge request's text: its todo(s), commits per repository (irrippr@hash), claims
+novadev worktree mr irr-12-layout       # the merge request's text: its todo(s), commits per repository (irrippr@hash), required reviewers, claims
 novadev worktree sync irr-12-layout     # merge the default branches into the worktree (then sync --after-merge)
 novadev worktree merge irr-12-layout    # the lead: a dry run; --yes merges, all or nothing
 novadev worktree remove irr-12-layout   # after the merge: worktrees, links, merged branches (--force: unmerged too)
@@ -1242,7 +1464,7 @@ that exist for exactly this:
 
 ```sh
 novadev file-todo plan                  # which batch a chat request lands in, and the next number
-novadev file-todo file payload.json     # write the folders, the briefs, and the attachments
+novadev file-todo file payload.json     # write the folders, the briefs, and the attachments (a part's "priority" and "after" → its todo.json)
 
 novadev test-result tasks [query]       # resolve "16" / "the selection one" against the real queue
 novadev test-result write payload.json  # one scenario's verdict → scenario-<N>.txt   (APPENDS)
@@ -1254,6 +1476,8 @@ novadev work pause <batch>/<todo> payload.json # the pause record, newest entry 
 novadev todo addendum <ref> payload.json # {text, attachments}: a Chat addendum to an open todo's brief (files copied in)
 novadev todo edit <ref> payload.json     # {title, request, context, reason}: the brief changed, the old one in .brief-history/
 novadev todo cancel <ref> payload.json   # {reason}: the person decided against it → ai_failed.md (cancelled)
+novadev todo priority <ref> <level> payload.json   # {by, reason}: the person (or the lead) changed its priority → todo.json (who, when, why)
+novadev todo priority --changed-since <date> [--by-agent] [--json]   # the recorded changes: who, person or agent, when, why
 ```
 
 All take a JSON **file**, because the content is a person's own multi-line words and

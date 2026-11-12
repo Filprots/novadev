@@ -107,6 +107,17 @@ Phase 1 below routes to the first; phases 5 and 6 sit either side of the next tw
 - **Waypoint** — one entry of that trail, `novadev work waypoint`: which todo, which
   phase, what is done and what is next, in a few lines. The pause record `/novadev-pause`
   writes is the last waypoint, in full: exactly where things stopped.
+- **Priority** — `urgent`, `high`, `normal` (the default) or `later`, per todo, kept in the
+  todo folder's `todo.json` by `novadev file-todo` and `novadev todo priority`. Every list
+  (`novadev todo list`, `novadev status`, sync's NEXT ACTIONS) is ordered by it, then by
+  filing order. A todo without the file is `normal`. It is a PERSON's decision — or the
+  LEAD's, when `"lead"` in `novadev.json` names you: never set or change one on your own
+  otherwise, and never edit `todo.json` by hand.
+- **"Do after" link** — a todo names the todos it WAITS FOR (`after` in its `todo.json`,
+  set by `novadev file-todo` or `novadev todo after <ref> <ref>…`). A dependency is
+  satisfied once it is completed (in team mode: approved and merged; an archived completed
+  todo counts). A todo is **ready** when nothing it waits for is unsatisfied; the lists say
+  `ready` or `waits for …`, and `novadev work start` refuses a todo that still waits.
 - **Feature** — one capability, `knowledge/features/FEAT-NNNN-<slug>/`: you write
   `feature.md`; `work.md` and `tests.md` beside it are generated.
 - **Concept** — one file of the knowledge bundle: a wiki page, a memory, a feature. It opens
@@ -230,12 +241,36 @@ continues normally.
 ```sh
 novadev file-todo plan                 # which batch, and the next number
 payload=$(mktemp -t novadev-todo.XXXXXX.json)   # or your session's own scratch dir
-novadev file-todo file "$payload"      # { "parts": [ { slug, title, request, context?, attachments? } ] }
+novadev file-todo file "$payload"      # { "parts": [ { slug, title, request, context?, attachments?, priority?, after? } ], "by"? }
 ```
 
    It reuses the batch a conversation opened earlier while nobody has started work in
    it — no record in it, and no lock on it — and never touches a human-authored batch.
    `novadev new <slug>` is still the way to open a batch you are about to fill yourself.
+   A part carries `"priority"` (`urgent`, `high`, `later`) only when the human signalled
+   one, with the payload's `"by"` naming them (`"human"`, or `human:<id>`); otherwise leave
+   it out. When they change their mind about an existing todo ("do the export first", "that
+   can wait"), record their decision — `by` is THEM, `reason` quotes them:
+
+```sh
+cat > "$payload" <<'JSON'
+{ "by": "human", "reason": "Do the export first: the customer demo is on Friday." }
+JSON
+novadev todo priority 2026-10-24_1/02 urgent "$payload"   # urgent | high | normal | later
+```
+
+   A brief a person wrote by hand that says how urgent it is ("URGENT", "no hurry") is such
+   a decision too: record it the same way before you plan.
+   Only if you are the project's lead (`"lead"` in `.novadev/novadev.json` names your
+   actor) may you decide a priority yourself: `by` is then your own actor and `reason` is
+   required. Every such change is listed for the owner by `novadev todo priority
+   --changed-since <date>` (`--by-agent` keeps the agents' changes, `--json` gives data) —
+   when you report to them, include that list. Any other agent is refused.
+   A part carries `"after"` when the order between todos matters ("the import needs the new
+   table first"): the slug of another part of the same payload, or the ref of an existing
+   todo. For todos that already exist, `novadev todo after <ref> <ref>…` adds links and
+   `--clear` removes them (`--by <actor>` records who). An order that lives only in a
+   brief's prose ("stage 3 after stage 2") is not enforced: write the link.
 3. **What goes in the brief.** `request` is THEIR words — verbatim where short, tightly
    faithful where long. `context` is what you know that their words do not say:
    constraints, clarifications and decisions stated in chat. The command renders:
@@ -260,9 +295,25 @@ novadev file-todo file "$payload"      # { "parts": [ { slug, title, request, co
 
 ## 2 · PLAN — before you write code
 
+**Take the highest priority first.** `novadev todo list` (and the todo lines of sync's NEXT
+ACTIONS) are ordered: `urgent`, then `high`, `normal`, `later`, and inside one level the
+filing order. Work in that order unless the human names a todo. An `urgent` todo goes before
+everything else you have not started; it skips no check.
+
+**Take only what is ready.** A todo that `waits for …` another is not yours to start yet:
+`novadev work start` refuses it until every todo it waits for is completed (in team mode:
+approved and merged), and names them. Do the todos it waits for first, or take another
+ready todo. In a round that covers several todos of one batch (a whole-batch start, or
+`--todo a --todo b`), the links between THOSE todos do not refuse the start: work them in
+the order the links give. Never remove a link to get past the refusal on your own
+judgement: `novadev todo after <ref> --clear` is for when the human or the lead decided the
+order no longer holds. When sync says a todo waits for one that did not land (cancelled,
+deferred), or names a cycle, ask whoever decides the order; do not guess.
+
 **Multi-todo batches**: read EVERY brief first, then group the todos into waves (quick
 fixes ship while the big ones are still being designed), spot cross-todo overlaps (two
-briefs on one seam get ONE design), and order by dependency, not folder order. Settle
+briefs on one seam get ONE design), and order by priority, then by dependency, not folder
+order. Settle
 open decisions with the human in **one batched round** of concrete options (recommend
 one each) — never mid-implementation stalls. Record the answers in the batch's
 `ai_progress.md`; they govern the whole batch. Do the recon (read the real modules)
@@ -335,6 +386,8 @@ next todo, take its lock too (and stop or pause the one you leave).
 - **A finished batch** (`completed.md`) → refused: a new request gets a new batch.
 - **In work in another worktree** → refused, with where. A paused one resumes in ITS worktree,
   where its pause record is; never `--take` it from here unless the human says so.
+- **A todo that still waits for another** ("do after" link, phase 2) → refused, naming what
+  it waits for. Start the ready todos only (`--todo`), or wait.
 
 **The whole batch, alone.** When the whole batch is yours — one developer, every todo of
 it, one after the other — lock it as one round: `novadev work start <batch>` with no todo
@@ -498,6 +551,18 @@ ACTION, and never write the review yourself to clear it. The todo's lock is your
 before that: once its record is written, `novadev work stop <batch>/<todo>` (phase 10) — the
 review and the merge need the record, not the lock, and a branch whose todo is still
 `working` is not merged.
+
+**Area owners.** A project may name who builds and who reviews each area (`"owners"` in
+`novadev.json`; `novadev owners <path|area>` answers who). Then a todo carries a
+`suggestedOwner` (`novadev todo show`, the JSON lists, file-todo's answer) — tell the human
+or the lead; do not take a todo that is suggested for somebody else without their word.
+`novadev worktree mr` lists the **Required reviewers**: ask exactly those for the review. An
+APPROVE counts only when one reviewer of EACH matching rule has approved: until then
+`novadev todo review` answers `"approved": false` with `"waitingFor"`, the review reads
+PARTIAL, and the todo stays in `review` — pass the todo on to the reviewers still needed,
+never sign as one of them. Only a person, the lead (`"lead"`) or an actor of
+`owners.override` may approve without them, with `"override": { "reason": "…" }` in the
+payload; the reason is recorded in the review.
 
 The `**Feature:**` and `**Commits:**` lines are the *authored* half of the link graph;
 `novadev sync` regenerates the feature's `work.md` from them. Saying

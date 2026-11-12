@@ -114,6 +114,7 @@ import {
   type TodoState,
 } from './lib.ts';
 import { ACTOR_FORMAT, actorKind, isTimestamp, nowTimestamp } from './okf.ts';
+import { refuseWaitingTodos } from './todo-links.ts';
 
 export const LOCK_STATES = ['working', 'paused'] as const;
 export type LockState = (typeof LOCK_STATES)[number];
@@ -1036,6 +1037,11 @@ export function startWork(root: string, nd: string, batch: string, opts: StartOp
   for (const target of targets) {
     if (target.read?.state === 'invalid') throw new Error(`${lockRel(batch, target.todo)} cannot be read: ${target.read.error} — fix it, or delete it and start again.`);
   }
+
+  // "Do after" links (todo-links.ts): a todo that still waits for another is not started. Judged once
+  // for everything this start takes, so two todos started together may depend on each other in order.
+  const wholeBatch = targets.some((target) => target.todo === null && (target.read?.state === 'ok' ? target.read.lock.covers : null) === null);
+  refuseWaitingTodos(nd, batch, wholeBatch ? null : targets.flatMap((target) => (target.todo !== null ? [target.todo] : target.read?.state === 'ok' ? (target.read.lock.covers ?? []) : [])));
 
   pruneGone(root);
   const plans = targets.map((target) => planStart(ctx, target));
