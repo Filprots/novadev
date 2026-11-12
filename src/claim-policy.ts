@@ -12,7 +12,7 @@
 //
 // Both settings are read from the MAIN checkout's novadev.json: a task branch cannot loosen the
 // rule for itself.
-import { dirname } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { worktreeList } from './git.ts';
 import { type Parsed, novadevDir, pathWithin, readManifest, refuse } from './lib.ts';
 import { type ClaimHolder, type Overlap, claimHolders, normalizeClaim, samePlace } from './registry.ts';
@@ -34,6 +34,8 @@ export function parseProtectedPaths(root: string, value: unknown): Parsed<string
   }
   const out: string[] = [];
   for (const raw of value as string[]) {
+    // A pattern novadev would read differently than its writer is refused, never half-understood.
+    if (/[{}[\]!]/.test(raw)) return refuse(`"protectedPaths": "${raw}" — only *, ** and ? are patterns here; write one entry per alternative instead of {a,b}, [abc] or !`);
     const path = normalizeClaim(root, raw);
     if (!path.ok) return refuse(`"protectedPaths": ${path.error.replace(/^claim /, '')}`);
     if (!out.includes(path.value)) out.push(path.value);
@@ -43,8 +45,14 @@ export function parseProtectedPaths(root: string, value: unknown): Parsed<string
 
 /** The checkout whose novadev.json holds the rule: git's first worktree, when the project sits there too. */
 export function ruleRoot(root: string): string {
-  const main = worktreeList(root)?.[0]?.path;
-  return main !== undefined && readManifest(novadevDir(main)) !== null ? main : root;
+  const list = worktreeList(root);
+  const main = list?.[0]?.path;
+  if (main === undefined) return root;
+  if (readManifest(novadevDir(main)) !== null) return main;
+  // A project below its repository's top: the same folder in the main checkout.
+  const top = (list ?? []).map((w) => w.path).filter((path) => root === path || root.startsWith(`${path}/`)).sort((a, b) => b.length - a.length)[0];
+  const twin = top === undefined ? null : join(main, relative(top, root));
+  return twin !== null && readManifest(novadevDir(twin)) !== null ? twin : root;
 }
 
 /** The project's claim policy. Throws on a setting that cannot be read (as every other setting does). */
@@ -53,6 +61,8 @@ export function claimPolicy(root: string): ClaimPolicy {
   const manifest = readManifest(novadevDir(from));
   const mode = parseClaimsSetting(manifest?.claims);
   if (!mode.ok) throw new Error(`novadev.json: ${mode.error}`);
+  // Without "notice" the protected paths mean nothing, and say nothing: every path is a lock.
+  if (mode.value === 'lock') return { mode: 'lock', protectedPaths: [] };
   const paths = parseProtectedPaths(from, manifest?.protectedPaths);
   if (!paths.ok) throw new Error(`novadev.json: ${paths.error}`);
   return { mode: mode.value, protectedPaths: paths.value };
@@ -83,6 +93,8 @@ function globRegex(glob: string): RegExp {
 /** Is `file` the protected path `pattern`, or inside it? */
 function protects(pattern: string, file: string): boolean {
   if (!isGlob(pattern)) return pathWithin(file, pattern);
+  // A pattern with no folder (`*.sql`) is about the name, in any folder — as in "owners".
+  if (!pattern.includes('/')) return file.split('/').some((name) => globRegex(pattern).test(name));
   const re = globRegex(pattern);
   const parts = file.split('/');
   for (let i = parts.length; i >= 1; i--) if (re.test(parts.slice(0, i).join('/'))) return true;
@@ -93,6 +105,9 @@ function protects(pattern: string, file: string): boolean {
 function reaches(pattern: string, path: string): boolean {
   if (protects(pattern, path)) return true;
   if (!isGlob(pattern)) return pathWithin(pattern, path);
+  // A name pattern can match under any folder: every folder reaches it.
+  // (A path whose last name has an extension is read as a file, and was judged above.)
+  if (!pattern.includes('/')) return !path.split('/').at(-1)!.includes('.');
   const want = pattern.split('/');
   const have = path.split('/');
   for (let i = 0; i < have.length; i++) {

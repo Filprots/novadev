@@ -1049,7 +1049,7 @@ export function startWork(root: string, nd: string, batch: string, opts: StartOp
   const plans = targets.map((target) => planStart(ctx, target));
   // The work-in-progress limit (wip.ts) — judged after every other refusal, before the first write.
   const express = wipCheck(ctx, targets);
-  const pausedForUrgent = express === null ? [] : pauseForUrgent(ctx, express.urgent, targets);
+  const pausedForUrgent = express === null ? [] : pauseForUrgent(ctx, express.urgent, express.here, targets);
   const taken = plans.map((plan) => plan());
   // In a worktree novadev made, the todos started there are the worktree's: its merge request
   // names them after the locks are gone.
@@ -1097,11 +1097,14 @@ function startRefs(ctx: StartContext, targets: readonly StartTarget[]): string[]
  * at the limit; else the urgent todos being started at the limit — the express lane — and the
  * holder's working todos in other worktrees, which this command cannot pause.
  */
-function wipCheck(ctx: StartContext, targets: readonly StartTarget[]): { urgent: string[]; elsewhere: string[] } | null {
+function wipCheck(ctx: StartContext, targets: readonly StartTarget[]): { urgent: string[]; elsewhere: string[]; here: string[] } | null {
   const { root, nd, agent, now, holder } = ctx;
   const settings = wipSettings(root);
-  // A lock without an actor cannot be counted: the limit is per holder.
-  if (settings.limit === null || agent === UNKNOWN_AGENT) return null;
+  if (settings.limit === null) return null;
+  // The limit is per holder: a start that does not say who it is cannot be counted, so it is not taken.
+  if (agent === UNKNOWN_AGENT) {
+    throw new Error('This project limits work in progress per holder ("wipLimit" in novadev.json): say who starts — `--agent <actor>` (your own actor, the same every time).');
+  }
   const holders = todoHolders(nd, now, holder);
   const mine = wipHolders(nd, settings, holders).find((h) => h.agent === agent);
   const before = mine?.todos ?? [];
@@ -1123,33 +1126,42 @@ function wipCheck(ctx: StartContext, targets: readonly StartTarget[]): { urgent:
   const urgent = taking.filter((ref) => isUrgent(ref) && holders.get(ref)?.agent !== agent);
   if (urgent.length === 0 || before.length < settings.limit) return null;
   const working = before.filter((ref) => holders.get(ref)!.state === 'working');
-  return { urgent, elsewhere: working.filter((ref) => holders.get(ref)!.worktree !== null) };
+  return { urgent, elsewhere: working.filter((ref) => holders.get(ref)!.worktree !== null), here: working.filter((ref) => holders.get(ref)!.worktree === null) };
 }
 
 /**
- * The express lane: before an urgent todo is started at the limit, every lock this holder is
- * WORKING on in this worktree is paused — the existing pause, with its record — so nothing is left
- * locked without a resume point. Answers what was paused.
+ * The express lane: before an urgent todo is started at the limit, the locks that hold the todos
+ * this holder is WORKING on in this worktree and that take a slot (`refs`) are paused — the
+ * existing pause, with its record — so nothing is left locked without a resume point. A lock that
+ * cannot be paused (unreadable, taken over elsewhere) is said, never a reason to refuse the urgent
+ * start. Answers what was paused.
  */
-function pauseForUrgent(ctx: StartContext, urgent: readonly string[], targets: readonly StartTarget[]): { ref: string; waypoint: number | null }[] {
+function pauseForUrgent(ctx: StartContext, urgent: readonly string[], refs: readonly string[], targets: readonly StartTarget[]): { ref: string; waypoint: number | null; notPaused?: string }[] {
   const { root, nd, agent, now, batch } = ctx;
-  const out: { ref: string; waypoint: number | null }[] = [];
+  const out: { ref: string; waypoint: number | null; notPaused?: string }[] = [];
   for (const read of listWorkLocks(nd)) {
     if (read.state !== 'ok' || read.lock.state !== 'working' || read.lock.agent !== agent) continue;
     // A lock this very start resumes is not paused for itself.
     if (read.batch === batch && targets.some((target) => target.todo === read.todo)) continue;
+    // Only a lock that holds a todo counted against the limit: not an urgent one, not a finished one.
+    const holds = (read.lock.covers ?? listDirs(join(nd, 'todos', read.batch))).map((todo) => `${read.batch}/${todo}`);
+    if (!holds.some((ref) => refs.includes(ref))) continue;
     const ref = readRef(read);
-    const result = pauseWork(
-      root,
-      nd,
-      { batch: read.batch, todo: read.todo },
-      {
-        stopped: `Paused for the urgent todo ${urgent.join(', ')} (the express lane): ${agent} was at the work-in-progress limit when it started. The work on ${ref} stopped where its last waypoint says.`,
-        next: [`When the urgent todo is handed over, resume: \`novadev work start ${ref}\`.`, 'Read the waypoint below this record first: it is where the work was.'],
-      },
-      now,
-    ) as { waypoint?: number };
-    out.push({ ref, waypoint: result.waypoint ?? null });
+    try {
+      const result = pauseWork(
+        root,
+        nd,
+        { batch: read.batch, todo: read.todo },
+        {
+          stopped: `Paused for the urgent todo ${urgent.join(', ')} (the express lane): ${agent} was at the work-in-progress limit when it started. The work on ${ref} stopped where its last waypoint says.`,
+          next: [`When the urgent todo is handed over, resume: \`novadev work start ${ref}\`.`, 'Read the waypoint below this record first: it is where the work was.'],
+        },
+        now,
+      ) as { waypoint?: number };
+      out.push({ ref, waypoint: result.waypoint ?? null });
+    } catch (error) {
+      out.push({ ref, waypoint: null, notPaused: error instanceof Error ? error.message : String(error) });
+    }
   }
   return out;
 }

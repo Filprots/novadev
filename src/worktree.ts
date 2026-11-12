@@ -67,7 +67,7 @@ import {
   samePlace,
   writeRegistryWorktree,
 } from './registry.ts';
-import { type QueueEntry, queueLockHolder, queueOrder, readQueue, withQueueLock, writeQueue } from './queue.ts';
+import { type QueueEntry, queueLockHolder, queueOrder, readQueue, updateQueue, withQueueLock } from './queue.ts';
 import { requiredReviewerLines } from './owners.ts';
 import { forgetSubrepos, listSubrepos } from './subrepos.ts';
 import { todoPriority } from './todo-meta.ts';
@@ -469,7 +469,7 @@ export function gateWorktree(root: string, name: string): { passed: boolean; lin
     allChanged.push(...changed);
     if (policy.mode === 'notice') {
       // Claims are notices: only a protected path is a lock, and a file under one must be held here.
-      const unheld = changed.filter((f) => !f.startsWith(`${ROOT_DIR_NAME}/`) && protectedBy(policy, f) !== null && !claims.some((c) => pathWithin(f, c)));
+      const unheld = changed.filter((f) => protectedBy(policy, f) !== null && !claims.some((c) => pathWithin(f, c)));
       if (unheld.length > 0) {
         fails.push(`${label(repo)}: changed under a protected path this worktree does not hold: ${unheld.slice(0, 10).map((f) => `${f} (${protectedBy(policy, f)})`).join(', ')}${unheld.length > 10 ? ` … +${unheld.length - 10}` : ''} — claim it first (\`novadev worktree claim ${entry.name} <path>\`)`);
       }
@@ -501,6 +501,15 @@ export function gateWorktree(root: string, name: string): { passed: boolean; lin
   if (shared.length > 0) lines.push('  shared with other open worktrees (a notice — the merge checks the combination):', ...shared.slice(0, 15).map((s) => `    ${s}`), ...(shared.length > 15 ? [`    … +${shared.length - 15}`] : []));
   if (fails.length === 0) lines.push('  The merge request still names the targeted checks you ran, with their results (novadev worktree mr).');
   return { passed: fails.length === 0, lines };
+}
+
+/** Are claims notices here? An unreadable setting reads as no (sync and the gate name it). */
+function noticeMode(main: string): boolean {
+  try {
+    return claimPolicy(main).mode === 'notice';
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -574,7 +583,7 @@ export function mrText(root: string, name: string): string {
   const held = registryLocks(entry.main).filter((l) => samePlace(l.worktree, entry.path));
   const batches = held.filter((l) => l.unit === 'batch').map((l) => l.batch);
   const locked = held.filter((l) => l.unit === 'todo').map(lockRef);
-  const shared = claimPolicy(entry.main).mode === 'notice' ? sharedFiles(entry, reposOf(entry).flatMap((repo) => (existsSync(repo.path) ? changedFiles(repo, entry.branch) : []))) : [];
+  const shared = noticeMode(entry.main) ? sharedFiles(entry, reposOf(entry).flatMap((repo) => (existsSync(repo.path) ? changedFiles(repo, entry.branch) : []))) : [];
   // Area owners (owners.ts): who must review the files this branch changed — nothing in a project without them.
   const reviewers = requiredReviewerLines(existsSync(novadevDir(entry.path)) ? entry.path : entry.main, reposOf(entry).flatMap((repo) => (existsSync(repo.path) ? changedFiles(repo, entry.branch) : [])));
   lines.push(
@@ -636,13 +645,18 @@ export function mergeWorktree(root: string, name: string, yes: boolean): { ok: b
   return withQueueLock(main, `worktree merge ${name}`, () => {
     const landed = landWorktree(root, name);
     // Landed directly: it no longer waits in the queue.
-    if (landed.ok) writeQueue(main, readQueue(main).filter((e) => e.name !== name));
+    if (landed.ok) updateQueue(main, (queue) => queue.filter((e) => e.name !== name));
     return landed;
   });
 }
 
 function repoHeads(repos: readonly Repo[]): string {
   return repos.map((repo) => git(repo.main, 'rev-parse', repo.base).out).join(' ');
+}
+
+/** Each repository's commit at the tip of the task branch — what the checks ran on, and so what may land. */
+function branchTips(repos: readonly Repo[], branch: string): Record<string, string> {
+  return Object.fromEntries(repos.map((repo) => [repo.name, git(repo.main, 'rev-parse', '--verify', '--quiet', `refs/heads/${branch}`).out]));
 }
 
 /**
@@ -653,7 +667,7 @@ function repoHeads(repos: readonly Repo[]): string {
  * Nothing lands on a failure. The merges into the branch stay: they are what `worktree sync` makes,
  * and the builder fixes on top of them.
  */
-function landWorktree(root: string, name: string): { ok: boolean; lines: string[]; reason?: string } {
+function landWorktree(root: string, name: string): { ok: boolean; lines: string[]; reason?: string; mainCheckout?: boolean } {
   const entry = find(mainCheckout(root), name);
   const repos = reposOf(entry);
   const lines: string[] = [];
@@ -664,7 +678,9 @@ function landWorktree(root: string, name: string): { ok: boolean; lines: string[
   for (let round = 1; ; round++) {
     const heads = repoHeads(repos);
     const dry = tryMerge(root, name, false);
-    if (!dry.ok) return stop(dry);
+    // A main checkout that is dirty, off its default branch, or holds a file in the way is the
+    // lead's to sort out — no branch failed.
+    if (!dry.ok) return { ...stop(dry), mainCheckout: dry.lines.some((l) => l.includes('the main checkout')) };
     if (!dry.lines[0]?.startsWith('Dry run')) return { ok: true, lines: [...lines, ...dry.lines] };
     if (repos.some((repo) => aheadBehind(repo.path, repo.base, entry.branch).behind > 0)) {
       const synced = syncWorktree(root, name);
@@ -674,6 +690,9 @@ function landWorktree(root: string, name: string): { ok: boolean; lines: string[
       }
       lines.push(...synced.lines.map((l) => l.replace(/^✓ /, '✓ on the newest default branch — ')));
     }
+    // What is checked is what lands: the branch tips are pinned before the gate, compared after it,
+    // and the merges take those commits — never whatever the branch names by then.
+    const tips = branchTips(repos, entry.branch);
     const gate = gateWorktree(root, name);
     if (!gate.passed) {
       return {
@@ -690,7 +709,11 @@ function landWorktree(root: string, name: string): { ok: boolean; lines: string[
       lines.push('· a default branch moved while the checks ran — again, on the newest');
       continue;
     }
-    const merged = tryMerge(root, name, true);
+    const after = branchTips(repos, entry.branch);
+    if (repos.some((repo) => after[repo.name] !== tips[repo.name])) {
+      return stop({ lines: [`✗ ${entry.branch} got a new commit while the checks ran — what was checked is not what would land. Nothing merged. Queue it again when the builder is done.`] });
+    }
+    const merged = tryMerge(root, name, true, tips);
     return merged.ok ? { ok: true, lines: [...lines, ...merged.lines] } : stop(merged);
   }
 }
@@ -712,8 +735,7 @@ export function queueAdd(root: string, name: string, opts: { by: string | null; 
   if (was?.state === 'queued' && was.express === opts.express) {
     return [`· ${name} is in the merge queue already (place ${queueOrder(queue).findIndex((e) => e.name === name) + 1})`];
   }
-  const next: QueueEntry[] = [...queue.filter((e) => e.name !== name), { name, state: 'queued', added: now.toISOString(), by: opts.by, express: opts.express }];
-  writeQueue(main, next);
+  const next = updateQueue(main, (current): QueueEntry[] => [...current.filter((e) => e.name !== name), { name, state: 'queued', added: now.toISOString(), by: opts.by, express: opts.express }]);
   const place = queueOrder(next).findIndex((e) => e.name === name) + 1;
   const lines = [`✓ ${name} queued for merge — place ${place} of ${queueOrder(next).length}${opts.express ? ` (express lane${urgent.length > 0 ? `: urgent ${urgent.join(', ')}` : ''} — behind other express entries, ahead of the rest; every check still runs)` : ''}${was?.state === 'failed' ? ' (again, after its failure)' : ''}`];
   const dry = tryMerge(root, name, false);
@@ -726,7 +748,7 @@ export function queueRemove(root: string, name: string): string[] {
   const main = mainCheckout(root);
   const queue = readQueue(main);
   if (!queue.some((e) => e.name === name)) throw new Error(`${name} is not in the merge queue (novadev worktree queue list).`);
-  writeQueue(main, queue.filter((e) => e.name !== name));
+  updateQueue(main, (current) => current.filter((e) => e.name !== name));
   return [`✓ ${name} taken out of the merge queue`];
 }
 
@@ -769,6 +791,7 @@ export function queueRun(root: string, one: boolean, now: () => Date = () => new
     const lines: string[] = [];
     let failed = 0;
     let landed = 0;
+    let stopped = false;
     const tried = new Set<string>();
     for (;;) {
       // Read again each time: an entry may have been added or removed while a merge ran.
@@ -776,7 +799,7 @@ export function queueRun(root: string, one: boolean, now: () => Date = () => new
       if (head === undefined) break;
       tried.add(head.name);
       lines.push(`— ${head.name}${head.express ? ' (express lane)' : ''}`);
-      let result: { ok: boolean; lines: string[]; reason?: string };
+      let result: { ok: boolean; lines: string[]; reason?: string; mainCheckout?: boolean };
       try {
         result = landWorktree(root, head.name);
       } catch (error) {
@@ -784,24 +807,28 @@ export function queueRun(root: string, one: boolean, now: () => Date = () => new
         result = { ok: false, lines: [`✗ ${message}`], reason: message };
       }
       lines.push(...result.lines.map((l) => `  ${l}`));
-      const queue = readQueue(main);
+      if (!result.ok && result.mainCheckout) {
+        lines.push('✗ the queue stopped: the main checkout is not ready for a merge. Nothing merged, and no entry is marked failed — sort the main checkout out, then run the queue again.');
+        stopped = true;
+        break;
+      }
       if (result.ok) {
         landed++;
-        writeQueue(main, queue.filter((e) => e.name !== head.name));
+        updateQueue(main, (queue) => queue.filter((e) => e.name !== head.name));
       } else {
         failed++;
-        writeQueue(main, queue.map((e) => (e.name === head.name ? { ...e, state: 'failed' as const, reason: (result.reason ?? 'failed').slice(0, 600), failedAt: now().toISOString() } : e)));
+        updateQueue(main, (queue) => queue.map((e) => (e.name === head.name ? { ...e, state: 'failed' as const, reason: (result.reason ?? 'failed').slice(0, 600), failedAt: now().toISOString() } : e)));
         lines.push(`  ✗ ${head.name} failed — nothing of it merged; the queue goes on`);
       }
       if (one) break;
     }
     lines.push(`merge queue: ${landed} landed, ${failed} failed, ${queueOrder(readQueue(main)).length} still waiting`);
-    return { ok: failed === 0, lines };
+    return { ok: failed === 0 && !stopped, lines };
   });
 }
 
 /** The merge itself, with every refusal that needs no check to be run: dry (`yes` false) or for real. */
-function tryMerge(root: string, name: string, yes: boolean): { ok: boolean; lines: string[] } {
+function tryMerge(root: string, name: string, yes: boolean, tips: Record<string, string> = {}): { ok: boolean; lines: string[] } {
   const entry = find(mainCheckout(root), name);
   const repos = reposOf(entry);
   const lines: string[] = [];
@@ -854,7 +881,7 @@ function tryMerge(root: string, name: string, yes: boolean): { ok: boolean; line
   const done: { repo: Repo; before: string }[] = [];
   for (const repo of order) {
     const before = must(git(repo.main, 'rev-parse', 'HEAD'), `git rev-parse (${label(repo)})`);
-    const merge = git(repo.main, 'merge', '--no-ff', '-m', `Merge ${entry.branch} (worktree ${entry.name})`, entry.branch);
+    const merge = git(repo.main, 'merge', '--no-ff', '-m', `Merge ${entry.branch} (worktree ${entry.name})`, tips[repo.name] || entry.branch);
     if (!merge.ok) {
       git(repo.main, 'merge', '--abort');
       // All or nothing, even when a merge fails late (a hook, a file appearing): the merges this run
@@ -906,7 +933,7 @@ export function removeWorktree(root: string, name: string, force: boolean): stri
   }
   for (const lock of itsLocks) removeRegistryEntry(main, lock);
   removeRegistryWorktree(main, entry.name);
-  if (readQueue(main).some((e) => e.name === entry.name)) writeQueue(main, readQueue(main).filter((e) => e.name !== entry.name));
+  if (readQueue(main).some((e) => e.name === entry.name)) updateQueue(main, (queue) => queue.filter((e) => e.name !== entry.name));
   try {
     if (existsSync(entry.path) && readdirSync(entry.path).length === 0) rmdirSync(entry.path);
   } catch {

@@ -727,7 +727,7 @@ checks — sets, in the main checkout's `novadev.json`:
 | Key | Default | Means |
 |---|---|---|
 | `claims` | `"lock"` | `"lock"`: one owner per file, an overlap is refused (every version before 0.18.0). `"notice"`: an overlap is said, not refused |
-| `protectedPaths` | `[]` | with `"notice"`: paths or globs (`**` crosses folders; `<sub-repo>:<path>` for a sub-repo) where a claim stays a one-owner lock |
+| `protectedPaths` | `[]` | with `"notice"`: paths or globs (`*`, `**` crosses folders, `?`; a pattern with no folder, `*.sql`, means that name in any folder; `<sub-repo>:<path>` for a sub-repo) where a claim stays a one-owner lock. `{a,b}`, `[abc]` and `!` are refused: one entry per alternative |
 
 With `"claims": "notice"`:
 
@@ -744,7 +744,7 @@ With `"claims": "notice"`:
   notice. The merge request carries the same list.
 
 Both settings are read from the main checkout, so a task branch cannot loosen the rule for
-itself. Without `"claims": "notice"` nothing changes by upgrading, whatever `protectedPaths`
+itself — as are `"wipLimit"`, `"owners"` and `"lead"`. Without `"claims": "notice"` nothing changes by upgrading, whatever `protectedPaths`
 says. Turn it on together with the merge queue below: the checks on the merged result are
 what replaces the lock.
 
@@ -763,8 +763,8 @@ Work that is started and not finished goes stale. A project can cap it:
 | `wipCountsPaused` | `true` | a paused todo takes a slot too; `false`: only the ones being worked |
 
 A **holder** is the actor a lock records (`novadev work start … --agent <actor>`), so every
-developer or agent needs its own actor id for the limit to mean anything; a lock without an
-actor is not counted. A todo takes a slot while a lock holds it and it is not finished; a lock
+developer or agent needs its own actor id for the limit to mean anything; with a limit set, a
+start that does not say who it is (`--agent`) is refused. A todo takes a slot while a lock holds it and it is not finished; a lock
 on a whole batch holds every unfinished todo of that batch. `work start` on one more is
 refused — `Work-in-progress limit: … holds 2 of 2 todo(s)` — naming what the holder has and
 how to free a slot: finish one and hand it to review (its record, then `work stop`), or stop
@@ -1010,7 +1010,9 @@ It tries every merge with `git merge-tree` (git 2.38 or newer) and merges nothin
 of them would go through. Then — with `--yes` — it **checks the merged result before anything
 lands**: the default branches are merged into the branch, in the worktree (what
 `worktree sync` does), and the gate with the project's gate commands runs there, on exactly
-the tree that would land. A failure lands nothing and goes back to the builder. Only then it
+the tree that would land. A failure lands nothing and goes back to the builder. What was checked is
+what lands: the branch's commits are pinned before the checks, and a commit added while they
+ran sends it back. Only then it
 merges the sub-repos first and the project last, `--no-ff`, so records never land without
 their code. If a merge still fails late (a hook refuses it), the merges this run made are
 undone, so nothing is merged. Then it runs `novadev sync --after-merge`. One merge runs at a
@@ -1031,7 +1033,8 @@ novadev worktree queue remove <name>
 tried, the branch brought onto the newest default branches, the gate on the merged result,
 then the merges, all or nothing — and goes on to the next (`--one`: only the head). A
 conflict or a failed check lands nothing: the entry is marked **failed** with its reason and
-the queue goes on. The failed one goes back to its builder: `novadev worktree sync <name>`,
+the queue goes on. (A main checkout that is dirty or off its default branch is not a branch's
+failure: the run stops there and marks nothing.) The failed one goes back to its builder: `novadev worktree sync <name>`,
 fix, commit, and `queue add` again (it goes to the end). The order is first in, first out;
 `--express` puts an entry ahead of every normal one. The queue lives in the common git dir
 (`novadev/queue.json`), is never committed, and is shown by `status` (*merge queue*),

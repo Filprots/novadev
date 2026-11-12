@@ -13,14 +13,17 @@
 // setting is therefore a rule the record can be checked against, not a lock — which is why every
 // such decision is written down with who, when and why, and why `novadev todo priority
 // --changed-since` lists the ones an agent made.
-import { ROOT_DIR_NAME, readManifest } from './lib.ts';
+import { dirname } from 'node:path';
+import { ruleRoot } from './claim-policy.ts';
+import { ROOT_DIR_NAME, novadevDir, readManifest } from './lib.ts';
 import { ACTOR_FORMAT, actorKind } from './okf.ts';
 
 export const LEAD_SETTING = 'lead';
 
 /** The actors `"lead"` names (none when it is absent), and what novadev could not read in it. */
 export function readLeads(nd: string): { leads: string[]; error: string | null } {
-  const raw = readManifest(nd)?.[LEAD_SETTING];
+  // The main checkout's rule (claim-policy.ts): a task branch cannot name its own lead.
+  const raw = readManifest(novadevDir(ruleRoot(dirname(nd))))?.[LEAD_SETTING];
   if (raw === undefined || raw === null) return { leads: [], error: null };
   const list = Array.isArray(raw) ? raw : [raw];
   const leads: string[] = [];

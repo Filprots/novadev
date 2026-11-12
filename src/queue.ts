@@ -2,7 +2,7 @@
 // lock that lets a single merge run at a time. It lives beside the registry, in the common git dir
 // (`<git common dir>/novadev/queue.json`, `queue.lock`), so every worktree of the clone sees it and
 // nothing of it is ever committed. The commands are `novadev worktree queue …` (src/worktree.ts).
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, rmdirSync, statSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { isPlainObject } from './lib.ts';
@@ -24,7 +24,7 @@ export type QueueEntry = {
 
 const QUEUE_FILE = 'queue.json';
 const LOCK_FILE = 'queue.lock';
-/** A lock this old is nobody's: no merge with its checks runs for half a day. */
+/** A lock from ANOTHER host this old is nobody's: no merge with its checks runs for half a day. */
 const LOCK_STALE_MS = 12 * 60 * 60 * 1000;
 
 function asEntry(value: unknown): QueueEntry | null {
@@ -57,7 +57,58 @@ export function writeQueue(root: string, entries: readonly QueueEntry[]): void {
   const dir = registryDir(root);
   if (dir === null) throw new Error('The merge queue needs a git repository.');
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, QUEUE_FILE), `${JSON.stringify({ entries }, null, 2)}\n`);
+  // Whole or not at all: a reader never sees half a file.
+  const tmp = join(dir, `${QUEUE_FILE}.${process.pid}.tmp`);
+  writeFileSync(tmp, `${JSON.stringify({ entries }, null, 2)}\n`);
+  renameSync(tmp, join(dir, QUEUE_FILE));
+}
+
+/**
+ * Change the queue: read, change, write as one step, so an `add` in one worktree and the running
+ * queue in another never lose each other's entry. (A short mutex — a folder — not the merge lock:
+ * adding to the queue must work while a merge runs.)
+ */
+export function updateQueue(root: string, change: (entries: QueueEntry[]) => QueueEntry[]): QueueEntry[] {
+  const dir = registryDir(root);
+  if (dir === null) throw new Error('The merge queue needs a git repository.');
+  mkdirSync(dir, { recursive: true });
+  const mutex = join(dir, 'queue.write');
+  for (let attempt = 0; ; attempt++) {
+    try {
+      mkdirSync(mutex);
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      // Held for milliseconds; one left by a killed process is cleared after ten seconds.
+      let age = 0;
+      try {
+        age = Date.now() - statSync(mutex).mtimeMs;
+      } catch {
+        continue;
+      }
+      if (age > 10_000) {
+        try {
+          rmdirSync(mutex);
+        } catch {
+          // someone else cleared it
+        }
+        continue;
+      }
+      if (attempt > 400) throw new Error('The merge queue is being written by another command — try again.');
+      Bun.sleepSync(25);
+    }
+  }
+  try {
+    const next = change(readQueue(root));
+    writeQueue(root, next);
+    return next;
+  } finally {
+    try {
+      rmdirSync(mutex);
+    } catch {
+      // cleared as stale by another command
+    }
+  }
 }
 
 /** The order merges run in: the express lane first, then first in, first out. Failed entries keep their place in the list but never run. */
@@ -89,7 +140,9 @@ function alive(pid: number): boolean {
 
 function lockIsDead(lock: QueueLock | null, now: Date): boolean {
   if (lock === null) return true;
-  if (lock.host === hostname() && !alive(lock.pid)) return true;
+  // On this host the process answers for itself, however long its checks run; only a lock from
+  // another host is judged by its age.
+  if (lock.host === hostname()) return !alive(lock.pid);
   const at = Date.parse(lock.at);
   return Number.isNaN(at) || now.getTime() - at > LOCK_STALE_MS;
 }
@@ -120,7 +173,14 @@ export function withQueueLock<T>(root: string, what: string, fn: () => T, now: D
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
       const theirs = readLock(path);
       if (attempt === 0 && lockIsDead(theirs, now)) {
-        rmSync(path, { force: true });
+        // Moved aside, not deleted: of two commands that both see the dead lock, one rename wins.
+        const aside = `${path}.dead.${process.pid}`;
+        try {
+          renameSync(path, aside);
+          rmSync(aside, { force: true });
+        } catch {
+          // the other command took it over
+        }
         continue;
       }
       throw new Error(

@@ -38,7 +38,10 @@
 // doctor.ts import it).
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { ruleRoot } from './claim-policy.ts';
 import { isLead, readLeads } from './lead.ts';
+import { worktreeAt } from './registry.ts';
 import {
   type Feature,
   RECORD_COMPLETED,
@@ -104,7 +107,8 @@ function actors(value: unknown, where: string, errors: string[]): string[] {
 
 /** The project's owners setting. Never throws: what cannot be read is in `errors`, and left out. */
 export function readOwners(nd: string): Owners {
-  const raw = readManifest(nd)?.[OWNERS_SETTING];
+  // The main checkout's rule (claim-policy.ts): a task branch cannot rewrite its own reviewers.
+  const raw = readManifest(novadevDir(ruleRoot(dirname(nd))))?.[OWNERS_SETTING];
   const out: Owners = { configured: false, rules: [], override: [], errors: [] };
   if (raw === undefined || raw === null) return out;
   out.configured = true;
@@ -352,6 +356,21 @@ export function recordCommits(todoDir: string): string {
   return refs.length === 0 ? 'none' : refs.map((ref) => ref.text).join(', ');
 }
 
+/** The files a novadev worktree's branch changed, in the project and its sub-repos, project-relative; [] elsewhere. */
+function branchChanges(root: string): string[] {
+  const wt = worktreeAt(root);
+  if (wt === null) return [];
+  const out: string[] = [];
+  for (const repo of [{ name: '.', rel: '' }, ...wt.repos]) {
+    const base = wt.base[repo.name]?.branch;
+    if (base === undefined) continue;
+    const run = spawnSync('git', ['diff', '--name-only', `${base}...HEAD`], { cwd: join(root, repo.rel), encoding: 'utf8', timeout: 60_000 });
+    if (run.status !== 0) continue;
+    for (const file of (run.stdout ?? '').split('\n').filter(Boolean)) out.push(repo.rel === '' ? file : `${repo.rel}/${file}`);
+  }
+  return out;
+}
+
 /**
  * The rules a finished todo's work falls under: the areas of the features its files link, and the
  * path rules that hold the files its record's commits changed (novadev's own folder aside). When
@@ -365,7 +384,9 @@ export function todoReviewRules(nd: string, todoDir: string, owners: Owners = re
   const features = listFeatures(nd).filter((f) => ids.has(f.id));
   const record = files.find((f) => f.file === RECORD_COMPLETED)?.text ?? '';
   const changes = commitChanges(root, commitRefsIn(readField(record, 'Commits') ?? ''));
-  const changed = [...new Set([...(changes?.values() ?? [])].flat())].filter((file) => !pathWithin(file, ROOT_DIR_NAME));
+  // In a worktree novadev made, the branch's own diff counts too: the record's `**Commits:**` line is
+  // the builder's word, and a line that names no commit (or not all) must not empty the reviewers.
+  const changed = [...new Set([...[...(changes?.values() ?? [])].flat(), ...branchChanges(root)])].filter((file) => !pathWithin(file, ROOT_DIR_NAME));
   return matchRules(root, owners, { features, files: changed, touches: changed.length === 0 });
 }
 
