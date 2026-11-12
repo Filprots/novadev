@@ -16,6 +16,7 @@ The work that built [FEAT-0006 — The human-testing queue (totest)](feature.md)
 ## Todos
 
 - `2026-11-10_2/06-history-totest-queue` — completed · 2026-11-10 · archived
+- `2026-11-12_1/02-totest-skip-scenarios-and-close-round` — completed · 2026-11-12
 
 ## Commits
 
@@ -23,6 +24,7 @@ The work that built [FEAT-0006 — The human-testing queue (totest)](feature.md)
 - `c6b3335` — 2026-11-10_2/06-history-totest-queue
 - `72e0194` — 2026-11-10_2/06-history-totest-queue
 - `fb0170f` — 2026-11-10_2/06-history-totest-queue
+- `d9caccd` — 2026-11-12_1/02-totest-skip-scenarios-and-close-round
 
 _Linked by `**Feature:** FEAT-0006` in each todo's record._
 <!-- novadev:work:end -->

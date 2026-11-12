@@ -15,8 +15,8 @@ superseded-by: []
 conflicts-with: []
 sources:
   - resource: commit:dc73f7e
-generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:18:33+01:00 }
-stale_after: 2027-11-10T15:18:33+01:00
+generated: { by: claude-code/claude-opus-5-5, at: 2026-11-12T08:15:26+01:00 }
+stale_after: 2027-11-12T08:15:26+01:00
 ---
 
 # FEAT-0010 — Recording a person's test results
@@ -30,6 +30,11 @@ stale_after: 2027-11-10T15:18:33+01:00
 - `novadev test-result review <payload.json>` — a whole round (verdict, per-scenario
   notes, change requests, files) appended as a dated block to `test-results/review.md`
   (the `/novadev-test-review` write-up), attachments copied in.
+- `novadev test-result skip <payload.json>` — `{ taskId, scenarios: [n,…] | "rest", by, reason }`:
+  the owner's decision that scenarios will not be tested, appended to `test-results/skipped.md`
+  with who (`by` must be a person) and why; a recorded verdict is never skipped; when nothing is
+  left open it closes the round (FEAT-0006) and replaces each gated todo's `ai_needstest.md` by
+  `ai_testskipped.md`.
 - A second pass **appends**; nothing a person reported is ever overwritten. Task ids are
   checked so nothing can be written outside `totest/`.
 
@@ -44,10 +49,11 @@ which names clashes with `numbered` from `src/todo-filing.ts`.
 ## Progress
 
 - 2026-09-09 — landed in 0.9.0 (commit dc73f7e): the two companion playbooks and `novadev test-result`
+- 2026-11-12 — `test-result skip` (`2026-11-12_1/02-totest-skip-scenarios-and-close-round`); tests/test-skip.test.ts is the first test of `src/test-results.ts`
 
 ## Open questions
 
-- No automated test covers `novadev test-result` or `src/test-results.ts`.
+- Only `test-result skip` has automated tests (tests/test-skip.test.ts); `tasks`, `write` and `review` have none of their own.
 
 ---
 

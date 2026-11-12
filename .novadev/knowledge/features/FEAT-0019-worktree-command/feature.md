@@ -15,8 +15,8 @@ superseded-by: []
 conflicts-with: []
 sources:
   - resource: todo:2026-11-10_1/07-worktree-command
-generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T16:13:07+01:00 }
-stale_after: 2027-11-10T16:13:07+01:00
+generated: { by: claude-code/claude-opus-5-5, at: 2026-11-12T08:15:26+01:00 }
+stale_after: 2027-11-12T08:15:26+01:00
 ---
 
 # FEAT-0019 — novadev worktree: one worktree per task across repositories
@@ -29,10 +29,13 @@ stale_after: 2027-11-10T16:13:07+01:00
   links to the main checkout for the other sub-repos and the `share` folders (excluded in
   `info/exclude`); claims checked against every other worktree and batch in work; registered
   in `<git common dir>/novadev/worktrees/<name>.json`. Rolls back what it made on a failure.
+- `claim <name> <path>… [--allow-overlap]` — more claims for an existing worktree, with create's
+  overlap check (the batches locked in that worktree never block it); a path in a sub-repo the
+  worktree has no worktree of is refused.
 - `list [--json]`, `status <name>` — branches, sub-repos, claims, batches in work; per
   repository: ahead/behind, uncommitted, diffstat.
-- `gate <name>` — per repository: clean tree, `git diff --check`, changes inside the claims
-  (`.novadev/` aside), `novadev sync --check` (the project), and the `gate` commands of
+- `gate <name>` — per repository: clean tree, `git diff --check`, changes inside the claims —
+  the worktree's and those of every batch locked in it (`work claim`) — (`.novadev/` aside), `novadev sync --check` (the project), and the `gate` commands of
   novadev.json (with NOVADEV_WORKTREE/BRANCH/BASE/CHANGED). Exit 1 on a failure.
 - `mr <name>` — the merge request's text: commits per repository (`irrippr@hash`), claims,
   batches still in work, the gate line and the checklist.
@@ -59,6 +62,7 @@ the project's default branch from `src/branch.ts`.
 
 - 2026-11-10 — built: `2026-11-10_1/07-worktree-command`
 - 2026-11-10 — fixes from the independent review of batch 2026-11-10_1, before the 0.16.0 release (`2026-11-10_1/07-worktree-command`)
+- 2026-11-12 — the gate reads the claims of the batches locked in the worktree; `worktree claim` (`2026-11-12_1/01-worktree-gate-reads-batch-claims`, `2026-11-12_1/04-worktree-batch-claims-files-only`)
 
 ## Open questions
 

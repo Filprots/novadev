@@ -12,8 +12,8 @@ sources:
   - resource: repo:src/knowledge.ts
   - resource: repo:src/links.ts
   - resource: repo:src/work.ts
-generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:50:53+01:00 }
-stale_after: 2027-02-08T15:50:53+01:00
+generated: { by: claude-code/claude-opus-5-5, at: 2026-11-12T08:15:26+01:00 }
+stale_after: 2027-02-10T08:15:26+01:00
 ---
 
 # Architecture
@@ -100,7 +100,7 @@ the fixes and reports them as "stale" instead of writing.
 | archive | `.novadev/archive/<year>/{todos,totest}/` | `sync`, `archive` |
 | knowledge | `.novadev/knowledge/` (concepts, derived `index.md`s, `log.md`) | agent + `knowledge log`; `sync` derives |
 | metrics snapshot | `.novadev/metrics/latest.json` | `sync` only |
-| the registry (every worktree's batches in work with their claims; the worktrees novadev made) | `<git common dir>/novadev/locks/<batch>.json`, `…/worktrees/<name>.json` — inside `.git`, never committed | `work`, `worktree` (`src/registry.ts`) |
+| the registry (every worktree's batches in work with their claims; the worktrees novadev made) | `<git common dir>/novadev/locks/<batch>.json` (a lock on part of a batch: `<batch>@<worktree hash>.json`), `…/worktrees/<name>.json` — inside `.git`, never committed | `work`, `worktree` (`src/registry.ts`) |
 
 All of it is meant to be committed, except the registry: it is a mirror of the locks for the
 other worktrees of the same clone. Work files
