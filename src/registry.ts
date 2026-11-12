@@ -1,21 +1,23 @@
 // The registry of work in progress, shared by EVERY worktree of a repository.
 //
-// A batch's lock is `todos/<batch>/working.md` (work.ts): tracked, on the branch it was taken on,
-// so its trail and its pause record travel with the branch and reach any machine. But a worktree
-// on another branch cannot see that file. So every `novadev work` command also writes one small
-// entry here, in the common git folder all worktrees of the repository share:
+// A lock is a `working.md` (work.ts) — in a todo's folder for one todo, at a batch's root for the
+// whole batch: tracked, on the branch it was taken on, so its trail and its pause record travel
+// with the branch and reach any machine. But a worktree on another branch cannot see that file. So
+// every `novadev work` command also writes one small entry here, in the common git folder all
+// worktrees of the repository share:
 //
-//   <common git dir>/novadev/locks/<batch>.json      who holds the batch, in which worktree, on
+//   <common git dir>/novadev/locks/<batch>.<todo>.json   who holds the todo, in which worktree, on
 //                                                    which branch, where the work is, and the
-//                                                    paths the batch claims
+//                                                    paths it claims (`unit: "todo"`)
+//   <common git dir>/novadev/locks/<batch>.json      the same for a lock on the whole batch
 //   <common git dir>/novadev/worktrees/<name>.json   a worktree `novadev worktree create` made
 //                                                    (worktree.ts): its branch, its sub-repos, its
-//                                                    claims, what it linked in
+//                                                    claims, the todos it is for, what it linked in
 //
 // It is never committed (it lives inside .git), and it is only a mirror: the lock that counts in a
-// worktree is that worktree's working.md; the registry answers "is this batch in work ELSEWHERE,
-// and which paths does that work own?". An entry whose worktree is gone is ignored, and removed
-// by the next `novadev work` command.
+// worktree is that worktree's working.md; the registry answers "is this todo, or this batch, in
+// work ELSEWHERE, and which paths does that work own?". An entry whose worktree is gone is ignored,
+// and removed by the next `novadev work` command.
 //
 // Claims — "one owner per file". A batch in work claims the paths it will change: the ones given
 // with `--claim` / `novadev work claim`, and the `touches:` of the features its todos name. A
@@ -27,23 +29,29 @@
 // `--claim`), not its features' folders, and the paths a `novadev work` command adds there become
 // the worktree's too, so the gate sees them after the lock is gone.
 //
-// Part of a batch — `novadev work start <batch> --todo <todo>`: the lock COVERS only the named
-// todos (`covers`), and another worktree may lock other todos of the same batch. A whole-batch
-// entry is `locks/<batch>.json`, as before; a partial one is `locks/<batch>@<worktree hash>.json`,
-// one per worktree. Two entries of one batch collide when either covers the whole batch, or they
-// share a todo.
+// Which todos an entry holds is its `covers`: one todo for a todo's lock, null for the whole batch.
+// Two entries of one batch collide when either covers the whole batch, or they share a todo; so a
+// lock on the whole batch and a lock on one of its todos never coexist, and two todos of one batch
+// are held side by side. 0.17.0 wrote a lock on part of a batch as ONE batch-root lock with a
+// `covers` list, mirrored as `locks/<batch>@<worktree hash>.json` (one per worktree): such entries
+// are read, kept in step and removed as before — novadev no longer makes new ones.
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { commonGitDir, worktreeList } from './git.ts';
-import { BATCH_RE, comparablePath, featureIdsIn, isPlainObject, listDirs, listFeatures, listFiles, pathsOverlap, readField } from './lib.ts';
+import { BATCH_RE, WORK_LOCK_FILE, comparablePath, featureIdsIn, isPlainObject, listDirs, listFeatures, listFiles, pathsOverlap, readField } from './lib.ts';
 import { listSubrepos } from './subrepos.ts';
 
 export const REGISTRY_DIR = 'novadev';
 
-/** One batch in work, as the registry keeps it. */
+/** One lock, as the registry keeps it: a todo in work, or a whole batch. */
 export type RegistryLock = {
   batch: string;
+  /**
+   * What the lock is on: `todo` — one todo, its working.md in the todo's folder (`covers` names it);
+   * `batch` — the batch-root working.md: the whole batch, or (0.17.0) the todos in `covers`.
+   */
+  unit: 'batch' | 'todo';
   /** The worktree it is in work in: its root, absolute. */
   worktree: string;
   branch: string | null;
@@ -58,11 +66,18 @@ export type RegistryLock = {
   phase: number | null;
   /** Project-relative paths, "/" separated. */
   claims: string[];
-  /** The todos the lock covers (`work start --todo`); null: the whole batch. */
+  /** The todos the lock holds: the one todo of a todo's lock; null: the whole batch. */
   covers: string[] | null;
+  /** The first line of the newest waypoint or pause: where the work is, in the holder's words. */
+  note?: string | null;
   /** The registry file it was read from (never written into it). */
   file?: string;
 };
+
+/** How a lock is named to a person: `2026-11-12_2/02-dark-mode` for a todo's, the batch for a batch's. */
+export function lockRef(lock: { batch: string; unit: 'batch' | 'todo'; covers: readonly string[] | null }): string {
+  return lock.unit === 'todo' ? `${lock.batch}/${lock.covers?.[0] ?? '?'}` : lock.batch;
+}
 
 /** `<common git dir>/novadev`, or null outside git. */
 export function registryDir(root: string): string | null {
@@ -91,8 +106,11 @@ function asLock(value: unknown): RegistryLock | null {
   const worktree = text('worktree');
   const state = text('state');
   if (batch === null || !BATCH_RE.test(batch) || worktree === null || (state !== 'working' && state !== 'paused')) return null;
+  const covers = Array.isArray(v.covers) ? v.covers.filter((c): c is string => typeof c === 'string') : null;
   return {
     batch,
+    // An entry without `unit` is a batch-root lock: every entry 0.17.0 and earlier wrote.
+    unit: v.unit === 'todo' && covers !== null && covers.length === 1 ? 'todo' : 'batch',
     worktree,
     branch: text('branch'),
     state,
@@ -105,7 +123,8 @@ function asLock(value: unknown): RegistryLock | null {
     todo: text('todo'),
     phase: typeof v.phase === 'number' ? v.phase : null,
     claims: Array.isArray(v.claims) ? v.claims.filter((c): c is string => typeof c === 'string') : [],
-    covers: Array.isArray(v.covers) ? v.covers.filter((c): c is string => typeof c === 'string') : null,
+    covers,
+    note: text('note'),
   };
 }
 
@@ -114,8 +133,13 @@ export function coversOverlap(a: readonly string[] | null, b: readonly string[] 
   return a === null || b === null || a.some((todo) => b.includes(todo));
 }
 
-/** The registry file of a lock: `<batch>.json` for the whole batch, `<batch>@<hash of the worktree>.json` for a part. */
+/**
+ * The registry file of a lock: `<batch>.<todo>.json` for a todo's lock (one todo has one holder,
+ * so one file); for a batch-root lock `<batch>.json` when it holds the whole batch, and
+ * `<batch>@<hash of the worktree>.json` for a 0.17.0 lock on part of it (one per worktree).
+ */
 function lockFileName(lock: RegistryLock): string {
+  if (lock.unit === 'todo') return `${lock.batch}.${lock.covers?.[0] ?? ''}.json`;
   if (lock.covers === null) return `${lock.batch}.json`;
   return `${lock.batch}@${createHash('sha1').update(real(lock.worktree)).digest('hex').slice(0, 12)}.json`;
 }
@@ -140,19 +164,29 @@ export function registryLocks(root: string): RegistryLock[] {
 }
 
 /**
- * Write (or replace) a batch's entry for the worktree it names, and drop that worktree's other entry
- * of the batch (a lock that went from part of the batch to all of it, or back). Nothing outside git.
- * A whole-batch entry is written exactly as 0.16.0 wrote it (no `covers`).
+ * Write (or replace) a lock's entry for the worktree it names. A batch-root lock also drops that
+ * worktree's other batch-root entry of the batch (a 0.17.0 lock that went from part of the batch to
+ * all of it, or back); a todo's entries in that worktree stay. Nothing outside git. A batch-root
+ * entry is written as 0.17.0 wrote it — no `unit`, and no `covers` for the whole batch — plus
+ * `note` once there is a waypoint (an older novadev ignores it): an older novadev reading the
+ * folder sees what it always saw, and reads a todo's entry as a lock on that part of the batch.
  */
 export function writeRegistryLock(root: string, lock: RegistryLock): void {
   const dir = registryDir(root);
   if (dir === null) return;
   mkdirSync(join(dir, 'locks'), { recursive: true });
   const name = lockFileName(lock);
-  const { file: _file, covers, ...rest } = lock;
-  writeFileSync(join(dir, 'locks', name), `${JSON.stringify(covers === null ? rest : { ...rest, covers }, null, 2)}\n`);
+  const { file: _file, covers, unit, note, ...rest } = lock;
+  const entry = {
+    ...rest,
+    ...(covers === null ? {} : { covers }),
+    ...(unit === 'todo' ? { unit } : {}),
+    ...(note === undefined || note === null ? {} : { note }),
+  };
+  writeFileSync(join(dir, 'locks', name), `${JSON.stringify(entry, null, 2)}\n`);
+  if (unit !== 'batch') return;
   for (const other of registryLocks(root)) {
-    if (other.file !== name && other.batch === lock.batch && samePlace(other.worktree, lock.worktree)) removeRegistryEntry(root, other);
+    if (other.file !== name && other.unit === 'batch' && other.batch === lock.batch && samePlace(other.worktree, lock.worktree)) removeRegistryEntry(root, other);
   }
 }
 
@@ -163,10 +197,14 @@ export function removeRegistryEntry(root: string, lock: RegistryLock): void {
   rmSync(join(dir, 'locks', lock.file ?? lockFileName(lock)), { force: true });
 }
 
-/** Remove a batch's entries — only this worktree's, unless `any` (then every entry of the batch). */
-export function removeRegistryLock(root: string, batch: string, any = false): void {
+/**
+ * Remove THIS worktree's entry of one lock: the todo's (`todo`), or the batch-root lock's (null).
+ * Another worktree's entry of the same todo or batch — it took the work over — is never touched.
+ */
+export function removeRegistryLock(root: string, batch: string, todo: string | null = null): void {
   for (const entry of registryLocks(root)) {
-    if (entry.batch === batch && (any || samePlace(entry.worktree, root))) removeRegistryEntry(root, entry);
+    if (entry.batch !== batch || !samePlace(entry.worktree, root)) continue;
+    if (todo === null ? entry.unit === 'batch' : entry.unit === 'todo' && entry.covers?.[0] === todo) removeRegistryEntry(root, entry);
   }
 }
 
@@ -215,7 +253,7 @@ export function pruneGone(root: string): string[] {
   return gone.map((lock) => lock.batch);
 }
 
-/** The batches in work (or paused) in another worktree that still exists — wholly or in part. */
+/** The batches in work (or paused) in another worktree that still exists — wholly, or any todo of them. */
 export function batchesInWorkElsewhere(root: string): Set<string> {
   return new Set(locksElsewhere(root).filter((lock) => !lock.gone).map((lock) => lock.batch));
 }
@@ -265,6 +303,12 @@ export type RegistryWorktree = {
   /** The sub-repos it has worktrees of (the others are linked to the main checkout's, or absent). */
   repos: { name: string; rel: string }[];
   claims: string[];
+  /**
+   * The todos it is for, as `<batch>/<todo>`: named on `worktree create --todo`, and every todo
+   * `novadev work start` locked in it. They outlive the locks, so the merge request can name them.
+   * An entry 0.17.0 wrote has none.
+   */
+  todos: string[];
   /** The symbolic links it made (shared folders, unchanged sub-repos), absolute. */
   links: string[];
   /** Each repository's default branch and the commit it started from: "." is the project's own. */
@@ -286,6 +330,7 @@ function asWorktree(value: unknown): RegistryWorktree | null {
       ? v.repos.filter((r): r is { name: string; rel: string } => isPlainObject(r) && typeof r.name === 'string' && typeof r.rel === 'string')
       : [],
     claims: strings(v.claims),
+    todos: strings(v.todos),
     links: strings(v.links),
     base: isPlainObject(v.base) ? (v.base as RegistryWorktree['base']) : {},
     created: typeof v.created === 'string' ? v.created : '',
@@ -328,6 +373,13 @@ export function addWorktreeClaims(root: string, entry: RegistryWorktree, claims:
   return added;
 }
 
+/** Add todos (`<batch>/<todo>`) to the ones a worktree is for; returns the ones it did not name yet. */
+export function addWorktreeTodos(root: string, entry: RegistryWorktree, todos: readonly string[]): string[] {
+  const added = todos.filter((todo, i) => !entry.todos.includes(todo) && todos.indexOf(todo) === i);
+  if (added.length > 0) writeRegistryWorktree(root, { ...entry, todos: [...entry.todos, ...added] });
+  return added;
+}
+
 export function removeRegistryWorktree(root: string, name: string): void {
   const dir = registryDir(root);
   if (dir !== null) rmSync(join(dir, 'worktrees', `${name}.json`), { force: true });
@@ -337,8 +389,11 @@ export function removeRegistryWorktree(root: string, name: string): void {
 // Overlaps
 // ---------------------------------------------------------------------------
 
-/** Who holds claims: a batch in work, or a worktree novadev made. */
-export type ClaimHolder = { kind: 'batch' | 'worktree'; id: string; worktree: string; branch: string | null; agent: string | null; claims: string[] };
+/**
+ * Who holds claims: a todo in work (`id` is `<batch>/<todo>`), a batch in work, or a worktree
+ * novadev made. `batch` and `file` say which registry lock a todo's or a batch's claims come from.
+ */
+export type ClaimHolder = { kind: 'batch' | 'todo' | 'worktree'; id: string; worktree: string; branch: string | null; agent: string | null; claims: string[]; batch?: string; file?: string };
 
 /** Every holder of claims in the repository whose worktree still exists, except those in `exceptPlace`. */
 export function claimHolders(root: string, exceptPlace: string | null): ClaimHolder[] {
@@ -347,7 +402,7 @@ export function claimHolders(root: string, exceptPlace: string | null): ClaimHol
   const exists = (path: string) => inLiveWorktree(path, worktrees);
   for (const lock of registryLocks(root)) {
     if (!exists(lock.worktree) || (exceptPlace !== null && samePlace(lock.worktree, exceptPlace))) continue;
-    out.push({ kind: 'batch', id: lock.batch, worktree: lock.worktree, branch: lock.branch, agent: lock.agent, claims: lock.claims });
+    out.push({ kind: lock.unit, id: lockRef(lock), worktree: lock.worktree, branch: lock.branch, agent: lock.agent, claims: lock.claims, batch: lock.batch, file: lock.file });
   }
   for (const w of registryWorktrees(root)) {
     if (!exists(w.path) || (exceptPlace !== null && samePlace(w.path, exceptPlace))) continue;
@@ -363,7 +418,7 @@ export type Overlap = { claim: string; theirs: string; holder: ClaimHolder };
 export function claimOverlaps(root: string, claims: readonly string[], exceptBatch?: string, holders: ClaimHolder[] = claimHolders(root, root)): Overlap[] {
   const out: Overlap[] = [];
   for (const holder of holders) {
-    if (holder.kind === 'batch' && holder.id === exceptBatch) continue;
+    if (holder.kind !== 'worktree' && exceptBatch !== undefined && holder.batch === exceptBatch) continue;
     for (const claim of claims) {
       for (const theirs of holder.claims) {
         if (pathsOverlap(claim, theirs)) out.push({ claim, theirs, holder });
@@ -373,7 +428,7 @@ export function claimOverlaps(root: string, claims: readonly string[], exceptBat
   return out;
 }
 
-/** "src/a.ts overlaps src — claimed by batch 2026-11-10_2 in /wt/x on branch b (claude-code/…)". */
+/** "src/a.ts overlaps src — claimed by todo 2026-11-10_2/01-login in /wt/x on branch b (claude-code/…)". */
 export function overlapText(overlap: Overlap): string {
   const h = overlap.holder;
   const where = `${h.worktree}${h.branch ? ` on branch ${h.branch}` : ''}`;
@@ -398,7 +453,8 @@ export function batchClaims(root: string, nd: string, batch: string, given: read
   for (const todo of listDirs(batchDir)) {
     if (covers !== null && !covers.includes(todo)) continue;
     for (const file of listFiles(join(batchDir, todo))) {
-      if (!file.endsWith('.md') && !file.endsWith('.txt')) continue;
+      // The todo's lock is not one of its records: a waypoint may quote a `**Feature:**` line.
+      if ((!file.endsWith('.md') && !file.endsWith('.txt')) || file === WORK_LOCK_FILE) continue;
       const field = readField(readFileSync(join(batchDir, todo, file), 'utf8'), 'Feature');
       for (const id of featureIdsIn(field ?? '')) ids.add(id);
     }

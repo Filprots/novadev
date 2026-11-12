@@ -6,7 +6,7 @@
 // — is the difference between a filed todo and a `novadev sync` that fails on a quoted record.
 import { copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { BATCH_RE, WORK_LOCK_FILE, listDirs, todayStamp } from './lib.ts';
+import { BATCH_RE, batchLockFiles, listDirs, todayStamp } from './lib.ts';
 import { batchesInWorkElsewhere } from './registry.ts';
 
 const SLUG = /^[a-z0-9][a-z0-9-]*$/;
@@ -61,7 +61,7 @@ export function planBatch(nd: string, today = todayStamp()): BatchPlan {
   for (const batch of reusable) {
     const dir = join(todos, batch);
     if (!existsSync(join(dir, CHAT_MARKER))) break; // a human batch, or one we did not create
-    if (existsSync(join(dir, WORK_LOCK_FILE))) break; // an agent is working it (or paused in it)
+    if (batchLockFiles(dir).length > 0) break; // an agent is working it, or a todo of it (or paused there)
     if (elsewhere.has(batch)) break; // … in another worktree of this repository
     const folders = listDirs(dir);
     if (folders.some((folder) => isTouched(join(dir, folder)))) break;

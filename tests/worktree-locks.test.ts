@@ -169,7 +169,7 @@ describe('claims: one owner per file', () => {
   });
 });
 
-describe('part of a batch: `work start <batch> --todo` (batch 2026-11-12_1, todo 03)', () => {
+describe('`work start <batch> --todo`: the 0.17.0 spelling of a todo\'s lock (batches 2026-11-12_1 todo 03, 2026-11-12_2 todo 02)', () => {
   /** Batch 2026-11-10_3: todo 01-a (FEAT-0002 touches src/x/), todo 02-b (FEAT-0003 touches src/y/); worktree wt holds src/y. */
   function mixedBatch(): { main: string; wt: string; wt2: string } {
     const main = project();
@@ -201,11 +201,15 @@ describe('part of a batch: `work start <batch> --todo` (batch 2026-11-12_1, todo
     expect(started.covers).toEqual(['01-a']);
     expect(started.claims).toEqual(['src/x']);
     expect(started.claimsFrom.features).toEqual({ 'FEAT-0002': ['src/x'] });
-    expect(read(main, '.novadev/todos/2026-11-10_3/working.md')).toContain('covers: 01-a');
-    const entry = JSON.parse(read(main, `.git/novadev/locks/${readdirSync(join(main, '.git/novadev/locks')).find((f) => f.startsWith('2026-11-10_3@'))}`));
-    expect(entry.covers).toEqual(['01-a']);
-    // A whole-batch entry is written as 0.16.0 wrote it: <batch>.json, no "covers".
+    // The lock is the todo's own file now, and its registry entry is named after the todo.
+    expect(started.path).toBe('.novadev/todos/2026-11-10_3/01-a/working.md');
+    expect(existsSync(join(main, '.novadev/todos/2026-11-10_3/working.md'))).toBe(false);
+    expect(read(main, '.novadev/todos/2026-11-10_3/01-a/working.md')).not.toContain('covers:');
+    const entry = JSON.parse(read(main, '.git/novadev/locks/2026-11-10_3.01-a.json'));
+    expect(entry).toMatchObject({ unit: 'todo', covers: ['01-a'] });
+    // A whole-batch entry is written as 0.16.0 wrote it: <batch>.json, no "covers", no "unit".
     expect(registryEntry(main, '2026-11-10_2')!.covers).toBeUndefined();
+    expect(registryEntry(main, '2026-11-10_2')!.unit).toBeUndefined();
   });
 
   test('another worktree starts a different todo of the same batch; the same todo, or the whole batch, is refused', () => {
@@ -217,23 +221,23 @@ describe('part of a batch: `work start <batch> --todo` (batch 2026-11-12_1, todo
     expect(readdirSync(join(main, '.git/novadev/locks')).filter((f) => f.startsWith('2026-11-10_3'))).toHaveLength(2);
 
     const same = json(run(wt2, 'work', 'start', '2026-11-10_3', '--agent', AGENT, '--todo', '1'));
-    expect(same.error).toContain('Batch 2026-11-10_3 (its todos 01-a) is in work in another worktree:');
+    expect(same.error).toContain('Todo 2026-11-10_3/01-a is in work in another worktree:');
     expect(json(run(wt2, 'work', 'start', '2026-11-10_3', '--agent', AGENT)).error).toContain('is in work in another worktree');
 
-    // Every worktree sees both parts; the batch is in work, so it is never complete nor archived.
+    // Every worktree sees both todos; the batch is in work, so it is never complete nor archived.
     const synced = run(wt2, 'sync').stdout;
-    expect(synced).toMatch(/◦ 2026-11-10_3 \(todos 01-a\) — WORKING in another worktree/);
-    expect(synced).toMatch(/◦ 2026-11-10_3 \(todos 02-b\) — WORKING in another worktree/);
-    expect(run(main, 'sync').stdout).toMatch(/● 2026-11-10_3 \(todos 01-a\) — WORKING/);
+    expect(synced).toMatch(/◦ 2026-11-10_3\/01-a — WORKING in another worktree/);
+    expect(synced).toMatch(/◦ 2026-11-10_3\/02-b — WORKING in another worktree/);
+    expect(run(main, 'sync').stdout).toMatch(/● 2026-11-10_3\/01-a — WORKING/);
     expect(run(main, 'archive', '2026-11-10_3').stderr).toContain('is in work in another worktree');
 
-    // A todo of the other part may still get an addendum here; one of this worktree's part may not elsewhere.
+    // A todo held in another worktree gets no addendum here.
     write(wt2, 'add.json', JSON.stringify({ text: 'More.' }));
     expect(run(wt2, 'todo', 'addendum', '2026-11-10_3/02-b', 'add.json').stdout).toContain('is in work right now in another worktree');
 
-    // Stop releases only this worktree's part.
+    // Stop — still by the batch's name — releases only this worktree's todo.
     write(main, '.novadev/todos/2026-11-10_3/01-a/ai_completed.md', completed('01-a'));
-    expect(run(main, 'sync').stdout).toContain('every todo it covers is recorded: `novadev work stop 2026-11-10_3`');
+    expect(run(main, 'sync').stdout).toContain('it is recorded: `novadev work stop 2026-11-10_3/01-a` releases it');
     const stopped = json(run(main, 'work', 'stop', '2026-11-10_3'));
     expect(stopped.covers).toEqual(['01-a']);
     expect(stopped.unfinished).toBeUndefined();
@@ -241,30 +245,32 @@ describe('part of a batch: `work start <batch> --todo` (batch 2026-11-12_1, todo
     expect(json(run(wt, 'work', 'stop', '2026-11-10_3')).unfinished).toEqual(['02-b']);
   });
 
-  test('resuming adds todos to a partial lock; a whole-batch lock cannot be narrowed; an unknown todo is named', () => {
+  test('--todo again takes a second todo beside the first; `work start <batch>` resumes both; a whole-batch lock cannot be narrowed; an unknown todo is named', () => {
     const { main, wt } = mixedBatch();
     run(wt, 'work', 'stop', '2026-11-10_2');
     run(main, 'work', 'start', '2026-11-10_3', '--agent', AGENT, '--todo', '01');
-    const widened = json(run(main, 'work', 'start', '2026-11-10_3', '--agent', AGENT, '--todo', 'b'));
-    expect(widened.covers).toEqual(['01-a', '02-b']);
-    expect(widened.claims).toEqual(['src/x', 'src/y']);
-    expect(json(run(main, 'work', 'start', '2026-11-10_3', '--agent', AGENT)).covers).toEqual(['01-a', '02-b']);
+    const second = json(run(main, 'work', 'start', '2026-11-10_3', '--agent', AGENT, '--todo', 'b'));
+    expect(second.covers).toEqual(['02-b']);
+    expect(second.claims).toEqual(['src/y']);
+    const both = json(run(main, 'work', 'start', '2026-11-10_3', '--agent', AGENT));
+    expect(both.covers).toEqual(['01-a', '02-b']);
+    expect(both.locks.map((l: { ref: string }) => l.ref)).toEqual(['2026-11-10_3/01-a', '2026-11-10_3/02-b']);
     expect(json(run(main, 'work', 'start', '2026-11-10_3', '--agent', AGENT, '--todo', 'zz')).error).toBe('No todo "zz" in batch 2026-11-10_3 — its todos: 01-a, 02-b.');
     run(main, 'work', 'stop', '2026-11-10_3');
     run(main, 'work', 'start', '2026-11-10_3', '--agent', AGENT);
     expect(json(run(main, 'work', 'start', '2026-11-10_3', '--agent', AGENT, '--todo', '01')).error).toContain('is locked here for all its todos — --todo cannot narrow that lock');
   });
 
-  test('two parts of one batch still own their files: an overlapping claim between them is refused', () => {
+  test('two todos of one batch still own their files: an overlapping claim between them is refused', () => {
     const { main, wt } = mixedBatch();
     run(wt, 'work', 'stop', '2026-11-10_2');
     run(wt, 'work', 'start', '2026-11-10_3', '--agent', AGENT, '--todo', '01', '--claim', 'docs/z.md');
-    expect(json(run(main, 'work', 'start', '2026-11-10_3', '--agent', AGENT, '--todo', '02', '--claim', 'docs/')).error).toContain('docs overlaps docs/z.md — claimed by batch 2026-11-10_3 in');
+    expect(json(run(main, 'work', 'start', '2026-11-10_3', '--agent', AGENT, '--todo', '02', '--claim', 'docs/')).error).toContain('docs overlaps docs/z.md — claimed by todo 2026-11-10_3/01-a in');
     run(main, 'work', 'start', '2026-11-10_3', '--agent', AGENT, '--todo', '02');
-    expect(json(run(main, 'work', 'claim', '2026-11-10_3', 'src/x/a.ts')).error).toContain('src/x/a.ts overlaps src/x — claimed by batch 2026-11-10_3 in');
+    expect(json(run(main, 'work', 'claim', '2026-11-10_3', 'src/x/a.ts')).error).toContain('src/x/a.ts overlaps src/x — claimed by todo 2026-11-10_3/01-a in');
   });
 
-  test('--take moves one part from another worktree, and leaves the other part where it is', () => {
+  test('--take moves one todo from another worktree, and leaves the other todo where it is', () => {
     const { main, wt, wt2 } = mixedBatch();
     run(wt, 'work', 'stop', '2026-11-10_2');
     run(wt, 'work', 'start', '2026-11-10_3', '--agent', AGENT, '--todo', '01');

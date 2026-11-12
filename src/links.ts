@@ -24,6 +24,7 @@ import {
   TEST_PLAN_FILE,
   TEST_PLAN_REQUIRED_KEYS,
   TEST_STATUSES,
+  WORK_LOCK_FILE,
   type Feature,
   type Fix,
   type TestRound,
@@ -341,7 +342,8 @@ function readTodoLinks(todo: TodoRef): TodoLinks {
   let testRef = '';
 
   for (const file of listFiles(todo.dir)) {
-    if (!file.endsWith('.md') && !file.endsWith('.txt')) continue;
+    // The todo's lock (work.ts) is not a record: a waypoint may quote a `**Commits:**` line.
+    if ((!file.endsWith('.md') && !file.endsWith('.txt')) || file === WORK_LOCK_FILE) continue;
     const text = readFileSync(join(todo.dir, file), 'utf8');
     const feature = readField(text, 'Feature');
     if (feature !== null) {

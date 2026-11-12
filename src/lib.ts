@@ -84,11 +84,24 @@ export const RECORD_TESTSKIPPED = 'ai_testskipped.md';
 export const WORK_RECORDS = [RECORD_COMPLETED, RECORD_PROGRESS, RECORD_FAILED] as const;
 
 /**
- * The batch's LOCK (work.ts): an agent is working the batch, or paused in it, and the file says who,
- * since when, and where — the trail of waypoints, newest first. While it exists the batch is in
- * work: never complete, never archived, never filed into.
+ * The LOCK of work in progress (work.ts): an agent is working, or paused, and the file says who,
+ * since when, and where — the trail of waypoints, newest first. In a todo's folder it locks that
+ * todo; at a batch's root it locks the whole batch (one developer taking all of it, and every lock
+ * 0.17.0 and earlier wrote). While a batch carries one, anywhere, the batch is in work: never
+ * complete, never archived, never filed into.
  */
 export const WORK_LOCK_FILE = 'working.md';
+
+/** The lock files a batch carries, absolute: the one at its root, then one per locked todo. */
+export function batchLockFiles(batchDir: string): string[] {
+  const out: string[] = [];
+  if (existsSync(join(batchDir, WORK_LOCK_FILE))) out.push(join(batchDir, WORK_LOCK_FILE));
+  for (const todo of listDirs(batchDir)) {
+    const path = join(batchDir, todo, WORK_LOCK_FILE);
+    if (existsSync(path)) out.push(path);
+  }
+  return out;
+}
 
 /** The phases of the loop in skills/novadev-work.md, by number — a waypoint names one. */
 export const LOOP_PHASES = [
@@ -888,10 +901,11 @@ export const TERMINAL_STATES: readonly TodoState[] = ['confirmed', 'completed', 
 
 /**
  * A batch is archivable when every todo folder inside carries a terminal record — and nobody holds
- * its lock: a round that is paused, or still closing out, is not over, whatever the records say.
+ * a lock in it (on the batch, or on one of its todos): work that is paused, or still closing out,
+ * is not over, whatever the records say.
  */
 export function batchIsDone(batchDir: string): boolean {
-  if (existsSync(join(batchDir, WORK_LOCK_FILE))) return false;
+  if (batchLockFiles(batchDir).length > 0) return false;
   const todos = listDirs(batchDir);
   if (todos.length === 0) return false;
   return todos.every((t) => TERMINAL_STATES.includes(todoState(join(batchDir, t))));

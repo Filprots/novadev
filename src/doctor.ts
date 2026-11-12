@@ -15,6 +15,7 @@ import {
   TEST_RESULTS_DIR,
   TEST_ROUND_RE,
   TEST_TASK_RE,
+  WORK_LOCK_FILE,
   compareVersions,
   deployedVersion,
   listDirs,
@@ -60,7 +61,8 @@ export function doctor(): void {
     }
     for (const todo of listDirs(batchDir)) {
       const todoDir = join(batchDir, todo);
-      const files = listFiles(todoDir);
+      // The todo's lock (work.ts) is neither its brief nor a record.
+      const files = listFiles(todoDir).filter((f) => f !== WORK_LOCK_FILE);
       const hasBrief = files.some(
         (f) => (f.endsWith('.txt') || f.endsWith('.md')) && !f.startsWith('ai_'),
       );

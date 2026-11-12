@@ -33,7 +33,7 @@ import {
 import { humanActor } from './knowledge-log.ts';
 import { ACTOR_FORMAT, actorKind } from './okf.ts';
 import { RECORD_REVIEW, REVIEW_HISTORY_DIR, parseReviewPayload, renderReview } from './review.ts';
-import { liveElsewhere, lockLiveness, readWorkLock } from './work.ts';
+import { batchWorkLocks, holderNote, liveElsewhere, lockHolding, lockLiveness, todoHolders } from './work.ts';
 import { copyAttachments } from './todo-filing.ts';
 
 const PROMPT = 'prompt.md';
@@ -92,7 +92,7 @@ export function resolveTodo(nd: string, ref: string): TodoItem {
   throw new Error(`"${ref}" matches ${hits.length} todos: ${hits.slice(0, 8).map((t) => t.ref).join(', ')}${hits.length > 8 ? ' …' : ''}`);
 }
 
-/** One todo: its brief, its state, its records (long ones cut), and whether its batch is in work. */
+/** One todo: its brief, its state, its records (long ones cut), who holds it, and whether its batch is in work. */
 export function showTodo(nd: string, ref: string, now: Date = new Date()): Record<string, unknown> {
   const t = resolveTodo(nd, ref);
   const dir = join(nd, 'todos', t.batch, t.todo);
@@ -103,10 +103,12 @@ export function showTodo(nd: string, ref: string, now: Date = new Date()): Recor
     const text = readFileSync(path, 'utf8');
     records[file] = text.length > MAX_RECORD_CHARS ? `${text.slice(0, MAX_RECORD_CHARS)}\n… (cut: ${text.length} characters)` : text;
   }
-  const lock = readWorkLock(nd, t.batch);
+  // The lock here that holds this todo (its own, or the batch's); else any lock of its batch: the batch is in work.
+  const lock = lockHolding(nd, t.batch, t.todo) ?? batchWorkLocks(nd, t.batch)[0] ?? null;
   const inWork =
     lock === null ? null : lock.state === 'invalid' ? { state: 'unreadable' } : { state: lock.lock.state, live: lockLiveness(lock.lock, now).live, agent: lock.lock.agent, todo: lock.lock.todo, updated: lock.lock.updated };
-  return { ...t, brief: existsSync(join(dir, PROMPT)) ? readFileSync(join(dir, PROMPT), 'utf8') : '', records, batchInWork: inWork, files: listFilesIn(dir) };
+  const holder = todoHolders(nd, now).get(t.ref) ?? null;
+  return { ...t, brief: existsSync(join(dir, PROMPT)) ? readFileSync(join(dir, PROMPT), 'utf8') : '', records, holder, batchInWork: inWork, files: listFilesIn(dir) };
 }
 
 function listFilesIn(dir: string): string[] {
@@ -118,14 +120,14 @@ function writable(nd: string, t: TodoItem, what: string, now: Date): void {
   if (t.state === 'needstest') throw new Error(`${t.ref} is waiting on a human test: ${what} would be new work — file a NEW todo (novadev file-todo) and cross-link it.`);
   if ((TERMINAL_STATES as readonly string[]).includes(t.state)) throw new Error(`${t.ref} already has a terminal record (${t.state}): file a NEW todo for this (novadev file-todo).`);
   if (t.state === 'review' || t.state === 'unmerged') throw new Error(`${t.ref} is finished and waiting for its ${t.state === 'review' ? 'review' : 'merge'}: file a NEW todo for this (novadev file-todo).`);
-  const lock = readWorkLock(nd, t.batch);
-  // A lock on part of the batch (`work start --todo`) holds only the todos it covers.
-  if (lock !== null && lock.state === 'ok' && (lock.lock.covers === null || lock.lock.covers.includes(t.todo)) && lock.lock.state === 'working' && lockLiveness(lock.lock, now).live) {
-    throw new Error(`${t.batch} is in work right now (${lock.lock.agent}): tell that session, or try again when it pauses or stops.`);
+  // Only a lock that holds THIS todo counts: its own, or a batch's lock that covers it.
+  const lock = lockHolding(nd, t.batch, t.todo);
+  if (lock !== null && lock.state === 'ok' && lock.lock.state === 'working' && lockLiveness(lock.lock, now).live) {
+    throw new Error(`${lock.lock.unit === 'todo' ? t.ref : t.batch} is in work right now (${lock.lock.agent}): tell that session, or try again when it pauses or stops.`);
   }
   const there = liveElsewhere(nd, t.batch, now, t.todo);
   if (there !== null) {
-    throw new Error(`${t.batch} is in work right now in another worktree (${there.worktree}, ${there.agent}): tell that session, or try again when it pauses or stops.`);
+    throw new Error(`${there.unit === 'todo' ? t.ref : t.batch} is in work right now in another worktree (${there.worktree}, ${there.agent}): tell that session, or try again when it pauses or stops.`);
   }
 }
 
@@ -324,12 +326,14 @@ export function todoCommand(args: string[]): void {
       const at = args.indexOf('--state');
       const states = at !== -1 ? (args[at + 1] ?? '').split(',').map((s) => s.trim()).filter(Boolean) : [];
       const todos = listTodos(nd).filter((t) => states.length === 0 || states.includes(t.state));
+      // Who holds each todo (work.ts): its own lock or its batch's, here or in another worktree.
+      const holders = todoHolders(nd);
       if (json) {
-        console.log(JSON.stringify({ todos }, null, 2));
+        console.log(JSON.stringify({ todos: todos.map((t) => ({ ...t, holder: holders.get(t.ref) ?? null })) }, null, 2));
         return;
       }
       if (todos.length === 0) console.log('todos — none open');
-      for (const t of todos) console.log(`${t.ref}  (${t.state})${t.title ? `  ${t.title}` : ''}`);
+      for (const t of todos) console.log(`${t.ref}  (${t.state})${t.title ? `  ${t.title}` : ''}${holderNote(holders.get(t.ref))}`);
       return;
     }
     if (ref === undefined) throw new Error(USAGE);

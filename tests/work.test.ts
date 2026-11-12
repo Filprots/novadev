@@ -121,7 +121,7 @@ describe('novadev work start', () => {
 
   test('refuses what is not a batch, a batch that is not there, a finished batch, and a bad actor', () => {
     const root = batchProject();
-    expect(json(run(root, 'work', 'start', 'nope'))).toEqual({ error: '"nope" is not a batch name (YYYY-MM-DD_N).' });
+    expect(json(run(root, 'work', 'start', 'nope'))).toEqual({ error: '"nope" is not a batch name (YYYY-MM-DD_N), and no open todo matches it.' });
     expect(json(run(root, 'work', 'start', '2026-10-01_9'))).toEqual({ error: `No batch todos/2026-10-01_9. Open batches: ${BATCH}.` });
     expect(json(run(root, 'work', 'start'))).toMatchObject({ error: expect.stringContaining('usage: novadev work start <batch>') });
     expect(json(run(root, 'work', 'start', BATCH, '--agent', 'not an actor'))).toMatchObject({ error: expect.stringContaining('"--agent" must be an actor') });
@@ -426,7 +426,7 @@ describe('novadev work stop', () => {
       ],
     });
     expect(exists(root, `.novadev/todos/${BATCH}/working.md`)).toBe(false);
-    expect(run(root, 'status').stdout).toContain('in work — none (no batch is locked;');
+    expect(run(root, 'status').stdout).toContain('in work — none (nothing is locked;');
   });
 
   test('once released, a fully recorded batch is complete again', () => {
