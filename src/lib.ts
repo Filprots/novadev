@@ -154,7 +154,7 @@ export const SKILLS = [
     file: 'novadev-pause.md',
     slug: 'novadev-pause',
     description:
-      'Pause the development loop where it is: record the work that landed, then write into the batch\'s lock (todos/<batch>/working.md) exactly where things stopped — the todo, the step, the state of the working tree, what comes next, how to resume, what is open — so a later `/novadev-work` picks the batch up from that waypoint instead of rediscovering it. Use when they say "/novadev-pause", "pause", "stop here", "let\'s continue tomorrow", "I have to go", or when the session must end with work in flight.',
+      'Pause the development loop where it is: record the work that landed, then write into the todo\'s lock (todos/<batch>/<todo>/working.md) exactly where things stopped — the step, the state of the working tree, what comes next, how to resume, what is open — so a later `/novadev-work` picks the todo up from that waypoint instead of rediscovering it. Use when they say "/novadev-pause", "pause", "stop here", "let\'s continue tomorrow", "I have to go", or when the session must end with work in flight.',
   },
 ] as const;
 

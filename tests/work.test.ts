@@ -554,8 +554,9 @@ describe('the pause playbook', () => {
     expect(read(root, '.novadev/skills/novadev-pause.md')).toContain('# novadev-pause — stop the loop where it is');
     expect(read(root, '.claude/skills/novadev-pause/SKILL.md')).toContain('name: novadev-pause');
     expect(read(root, 'CLAUDE.md')).toContain('`/novadev-pause`');
-    expect(read(root, 'CLAUDE.md')).toContain('**A batch in work is locked.**');
-    expect(read(root, '.cursor/rules/novadev.mdc')).toContain('novadev work start <batch>');
+    expect(read(root, 'CLAUDE.md')).toContain('**A todo in work is locked.**');
+    expect(read(root, 'CLAUDE.md')).toContain('`novadev work start <batch>/<todo>` takes the todo\'s lock');
+    expect(read(root, '.cursor/rules/novadev.mdc')).toContain('novadev work start <batch>/<todo>');
     expect(run(root, 'doctor').stdout.trim()).toBe('doctor: structure is healthy.');
     write(root, '.novadev/skills/novadev-pause.md', 'edited\n');
     expect(run(root, 'doctor').stdout).toContain('skills/novadev-pause.md: differs from installed novadev');

@@ -9,7 +9,7 @@ import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { nowTimestamp } from '../src/okf.ts';
 import { readWorkLock, renderLock, type WorkLock } from '../src/work.ts';
-import { commitAll, completed, exists, feature, git, project, read, run, tempDir, todo, write } from './helpers.ts';
+import { REPO, commitAll, completed, exists, feature, git, project, read, run, tempDir, todo, write } from './helpers.ts';
 
 const BATCH = '2026-11-12_2';
 const AGENT = 'claude-code/test';
@@ -713,5 +713,75 @@ describe('`novadev work start <batch>`: one developer takes the whole batch', ()
     const taken = json(run(main, 'work', 'start', BATCH, '--agent', AGENT, '--take'));
     expect(taken.takenFromWorktree.branch).toBe('task/a');
     expect(readdirSync(join(main, '.git/novadev/locks'))).toEqual([`${BATCH}.json`]);
+  });
+});
+
+describe('the docs teach the todo as the unit of work', () => {
+  test('the playbooks, the folder READMEs, the README, the adapters and the CLI help', () => {
+    const playbook = read(REPO, 'templates/skills/novadev-work.md');
+    for (const phrase of [
+      'The unit of work is the todo: one\ntodo, one owner, one lock',
+      'novadev work start 2026-10-24_1/02-dark-mode',
+      '`todos/<batch>/<todo>/working.md`',
+      '**The whole batch, alone.**',
+      '`todos/<batch>/working.md`',
+      '**The batch\'s name on the other commands.**',
+      '**A lock from an older novadev.**',
+      'novadev work waypoint 2026-10-24_1/02-dark-mode',
+      'novadev work stop <batch>/<todo>',
+      '--todo <batch>/<todo>',
+    ]) {
+      expect(playbook).toContain(phrase);
+    }
+    const pause = read(REPO, 'templates/skills/novadev-pause.md');
+    for (const phrase of ['`.novadev/todos/<batch>/<todo>/working.md`', 'novadev work pause 2026-10-24_1/02-dark-mode', 'Holding a whole batch as one round']) {
+      expect(pause).toContain(phrase);
+    }
+    expect(read(REPO, 'templates/readmes/todos.md')).toContain('`<batch>/<todo>/working.md`');
+    expect(read(REPO, 'templates/readmes/root.md')).toContain('`todos/<batch>/<todo>/working.md`');
+    const readme = read(REPO, 'README.md');
+    for (const phrase of [
+      '**a todo in work carries `todos/<batch>/<todo>/working.md`, its\nlock.**',
+      '**The unit of work is the todo**',
+      '**The whole batch.**',
+      '`<git common dir>/novadev/locks/<batch>.<todo>.json`',
+      '**Two todos of one batch**',
+      '**Locks written by 0.17.0 and earlier keep working, with no migration.**',
+      '`locks/<batch>@<worktree hash>.json`',
+      '`--todo <ref>` (repeatable) says which todo the worktree is for',
+      '`batches[].todos[].holder`',
+    ]) {
+      expect(readme).toContain(phrase);
+    }
+    const help = run(project(), 'help').stdout;
+    for (const phrase of ['the lock of a todo in work (todos/<batch>/<todo>/working.md)', '"start <batch>" with no todo: one developer takes the WHOLE batch', '[--todo <ref>]…']) {
+      expect(help).toContain(phrase);
+    }
+  });
+
+  test('the README\'s sample status block is what the CLI prints for those locks', () => {
+    const root = project();
+    const batch = '2026-10-24_1';
+    todo(root, `${batch}/01-fix-login`, { 'ai_completed.md': completed('01-fix-login') });
+    todo(root, `${batch}/02-dark-mode`);
+    todo(root, `${batch}/03-export`, { 'ai_progress.md': '# ai_progress — 03-export\n\n**Date:** 2026-10-23\n**Feature:** none — test fixture\n' });
+    const lock = (name: string, state: 'working' | 'paused', updated: string, phase: number, heading: string, body: string): void => {
+      const text: WorkLock = {
+        batch, unit: 'todo', path: '', state, agent: 'claude-code/claude-opus-5-5', host: 'fil-desktop', pid: null, session: 's', started: updated, updated,
+        resumed: null, todo: name, phase, claims: [], covers: [name], entries: [{ kind: state === 'paused' ? 'pause' : 'waypoint', number: 1, heading, body }],
+      };
+      write(root, `.novadev/todos/${batch}/${name}/working.md`, renderLock(text));
+    };
+    const now = nowTimestamp(new Date(Date.now() - 5 * 60000));
+    lock('02-dark-mode', 'working', now, 3, `## Waypoint 1 — ${now.slice(0, 16).replace('T', ' ')} · 02-dark-mode · phase 3 WORK`, 'Tokens in src/theme.ts done; wiring the toggle next.');
+    lock('03-export', 'paused', '2026-10-23T22:49:30+02:00', 4, '## PAUSED — waypoint 1 — 2026-10-23 22:49 · 03-export · phase 4 RECORD', '### Stopped at\n\nThe CSV writer is done and tested; ai_completed.md needs its Verification section.\n\n### Next\n\n1. Write it.');
+    const status = run(root, 'status').stdout.split('\n');
+    const readme = read(REPO, 'README.md').split('\n');
+    const at = readme.indexOf('in work — 2 todo(s)');
+    expect(at).toBeGreaterThan(0);
+    // The holder's process is this machine's business: the sample names one, the fixture has none.
+    const sample = readme.slice(at, at + 10).map((line) => line.replace(' (process 3702151, alive)', ''));
+    expect(status.slice(0, 4)).toEqual(sample.slice(0, 4));
+    expect(status.slice(status.indexOf('todos — 1 open batch(es)'), status.indexOf('todos — 1 open batch(es)') + 5)).toEqual(sample.slice(5, 10));
   });
 });

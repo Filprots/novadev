@@ -21,26 +21,29 @@ usage:
                             merge rules (.gitattributes + the merge driver in this clone's git config)
                             (on an older layout, run migrate-repo first)
   novadev new [slug…]       scaffold today's next batch (todos/YYYY-MM-DD_N/), optional todo folders
-  novadev status [--json]   is a work cycle on? the batches in work (who, since when, where, paused
-                            or abandoned), the worktrees and their batches, then open todos + record
-                            states, postponed, knowledge;
+  novadev status [--json]   is a work cycle on? the todos (and whole batches) in work — who, since when,
+                            where, paused or abandoned — the worktrees and their locks, then open todos
+                            + record states with each todo's holder, postponed, knowledge;
                             --json: the same as data (for a tool or a chat bot)
-  novadev todo …            one todo, away from the repo: "list [--state s,…] [--json]", "show <ref>" (JSON:
-                            brief + records), "addendum <ref> <payload.json>" ({text, attachments}: a Chat
+  novadev todo …            one todo, away from the repo: "list [--state s,…] [--json]" (with who holds
+                            each), "show <ref>" (JSON: brief + records + holder), "addendum <ref> <payload.json>" ({text, attachments}: a Chat
                             addendum to an open todo's brief, files copied into its folder), "edit <ref>
                             <payload.json>" ({title, request, context, reason}: the brief changed, the old one
                             kept in .brief-history/), "cancel <ref> <payload.json>" ({reason}: a *cancelled* ai_failed),
                             "review <ref> <payload.json>" ({verdict: APPROVE|CHANGES, by, checks, findings?}: ai_review.md)
-  novadev work …            the lock of a batch in work (todos/<batch>/working.md): "start <batch>"
-                            takes or resumes it, "waypoint <batch> <payload.json>" records where the
-                            work is, "pause <batch> <payload.json>" writes exactly where it stopped
-                            (the command half of /novadev-pause), "stop <batch>" releases it,
-                            "claim <batch> <path>…" adds paths the batch owns (start: --claim);
-                            "start <batch> --todo <nn|slug>" locks only those todos (part of a batch);
+  novadev work …            the lock of a todo in work (todos/<batch>/<todo>/working.md): "start
+                            <batch>/<todo>" takes or resumes it (also <batch>/<nn>, a word of its slug,
+                            or "start <batch> --todo <nn|slug>"), "waypoint <ref> <payload.json>" records
+                            where the work is, "pause <ref> <payload.json>" writes exactly where it
+                            stopped (the command half of /novadev-pause), "stop <ref>" releases it,
+                            "claim <ref> <path>…" adds paths the lock owns (start: --claim); <ref> is
+                            the todo, or its batch (the locks this worktree holds in it);
+                            "start <batch>" with no todo: one developer takes the WHOLE batch (one lock
+                            at the batch root, todos/<batch>/working.md);
                             every worktree sees the locks (a registry in the common git dir), and
                             overlapping claims across worktrees are refused (--allow-overlap)
-  novadev worktree …        one worktree per task across the project and the sub-repos it changes, on
-                            one branch: "create <name> [<sub-repo>…] [--claim <path>]…", "claim <name>
+  novadev worktree …        one worktree per task (a todo) across the project and the sub-repos it changes,
+                            on one branch: "create <name> [<sub-repo>…] [--claim <path>]… [--todo <ref>]…", "claim <name>
                             <path>…" (more claims, same check), "list", "status",
                             "gate" (the checks before a merge request), "mr" (its text), "sync" (merge the
                             default branches in), "merge <name> [--yes]" (the lead: all or nothing, then

@@ -45,7 +45,7 @@ novadev totest                        # what needs YOUR hands-on testing
 novadev status                        # is a work cycle on? then open todos + record states, postponed, health
 novadev status --json                 # the same as data (a tool, a chat bot); totest --json too
 novadev todo list --state open        # open todos with their titles; `todo show <ref>` gives one as JSON
-novadev work start 2026-08-16_1       # take a batch's lock (agents do this; see Work in progress)
+novadev work start 2026-08-16_1/02    # take a todo's lock (agents do this; see Work in progress)
 novadev features --touching src/auth  # which features already own this code (conflict pre-flight)
 novadev features --hubs               # which features lean on each hub (see Placement)
 novadev knowledge                     # what the knowledge bundle holds: types, trust, what is stale
@@ -151,7 +151,7 @@ so the playbooks learn the new commands. It is for more builders at once in one 
     memories/    guardrails, gotchas, decisions and guides, written the moment they cost time
     features/    what the software DOES — FEAT-NNNN/ folders: feature.md + derived work.md/tests.md
   todos/       task batches YYYY-MM-DD_N/<todo>/ — briefs: human-authored (.txt/.md + screenshots) or agent-filed prompt.md (chat-initiated);
-               a batch in work carries working.md, its lock (see Work in progress)
+               a todo in work carries working.md, its lock (see Work in progress)
   archive/     finished work by year — <year>/todos/<batch>/ and <year>/totest/<task>/<round>/
   postponed/   deferred work with do-when / discard-if triggers
   sparks/      raw unshaped ideas
@@ -273,11 +273,11 @@ a single loop the agent runs for every round of work:
 
 ```
 0 ORIENT   load knowledge/index.md, then the wiki, memories and features it maps; the queue —
-           a paused or abandoned batch in it is where the session most likely continues
+           a paused or abandoned todo in it is where the session most likely continues
 1 INTAKE   any chat request that changes the repo becomes a todo, before work starts
 2 PLAN     batch waves + decisions up front; pre-flight new capabilities for duplicates;
            name the unit that will own a change to a hub
-3 WORK     take the batch's lock (`novadev work start`), then do it by the project's own
+3 WORK     take the todo's lock (`novadev work start <batch>/<todo>`), then do it by the project's own
            conventions, writing a waypoint whenever the work moves
 4 RECORD   ai_completed / ai_failed / ai_progress, with **Feature:**, **Commits:** and
            a ## Placement section
@@ -313,25 +313,49 @@ something needs doing and an agent can do it, `sync` says so and the agent does 
 
 ## Work in progress — the lock, waypoints and pauses
 
-Is a work cycle on? Which batch, who is on it, where did they get to — and if the session
+Is a work cycle on? Which todo, who is on it, where did they get to — and if the session
 died, or you said "pause" last night, where exactly does the next one pick up? novadev
-answers that from one file: **a batch in work carries `todos/<batch>/working.md`, its
-lock.** An agent writes it when it starts on the batch, adds a waypoint as the work moves,
-and either releases it when the round is over or pauses it. Like everything in `.novadev/`
+answers that from one file: **a todo in work carries `todos/<batch>/<todo>/working.md`, its
+lock.** An agent writes it when it starts on the todo, adds a waypoint as the work moves,
+and either releases it when the work is over or pauses it. Like everything in `.novadev/`
 it is tracked, so a pause is development history, and a session on another machine finds it
 where it was left.
 
+**The unit of work is the todo**: one todo, one owner, one lock. A batch only groups todos
+(what was asked in one conversation); it is *in work* while any todo of it is locked. The
+lock lives in the todo's own folder, so two developers on two todos of one batch never write
+the same file, on any branch, and their branches merge without meeting.
+
 ```sh
-novadev work start 2026-10-24_1 --agent claude-code/claude-opus-5-5   # take the lock, or resume it
-novadev work waypoint 2026-10-24_1 waypoint.json   # { todo?, phase?, note }: where the work is now
-novadev work pause 2026-10-24_1 pause.json         # { todo?, phase?, stopped, next, done?, resume?, open? }
-novadev work stop 2026-10-24_1                     # the round is over: release it
+novadev work start 2026-10-24_1/02-dark-mode --agent claude-code/claude-opus-5-5   # take the todo's lock, or resume it
+novadev work waypoint 2026-10-24_1/02 waypoint.json   # { phase?, note }: where the work is now
+novadev work pause 2026-10-24_1/02 pause.json         # { phase?, stopped, next, done?, resume?, open? }
+novadev work stop 2026-10-24_1/02                     # the work on it is over: release it
 ```
+
+A todo is named as `novadev todo` names one: `<batch>/<todo folder>`, `<batch>/<number>`
+(`2026-10-24_1/02`), `<batch>/<slug>`, or a word only one open todo has.
+`novadev work start <batch> --todo 02` is the same lock in the spelling of 0.17.0. On
+`waypoint`, `pause`, `stop` and `claim` the batch's name alone means *the lock(s) this
+worktree carries in that batch*, so a session that started one todo may go on naming the
+batch. With several todos locked there, a waypoint and a claim need the todo (in the command,
+or `todo` in the payload), a pause writes its record into every lock still working, and a
+stop releases them all.
+
+**The whole batch.** One developer who takes all of a batch runs
+`novadev work start <batch>` with no todo named. That lock is one file at the batch's root,
+`todos/<batch>/working.md` — one round, one trail of waypoints that moves from todo to todo,
+one pause record — and everything below works on it by the batch's name
+(`novadev work waypoint <batch> …`, with `todo` in the payload saying where the round is). It
+holds every todo of the batch, so it and a todo's lock never coexist: while one todo of a
+batch is locked anywhere, the whole batch cannot be taken, and the other way round. When the
+worktree already carries locks in the batch, `work start <batch>` resumes those instead.
 
 The file is flat frontmatter novadev reads — the state (`working` or `paused`), the holder
 (the agent as an OKF actor, the host, the process, the session), when it was taken, the
 last heartbeat, the todo and loop phase of the last waypoint — and a markdown trail a
-person reads, **newest first**, so the top section is where the work resumes:
+person reads, **newest first**, so the top section is where the work resumes. A todo's lock
+(here `todos/2026-10-24_1/02-dark-mode/working.md`):
 
 ```markdown
 ---
@@ -346,7 +370,7 @@ todo: 02-dark-mode
 phase: 3
 ---
 
-# Working — 2026-10-24_1
+# Working — 2026-10-24_1/02-dark-mode
 
 ## PAUSED — waypoint 4 — 2026-10-24 22:49 · 02-dark-mode · phase 3 WORK
 
@@ -368,15 +392,14 @@ the body class never flips. `bun test` is green except `theme.test.ts` (2 failur
 
 ### Done
 
-01-fix-login: `ai_completed.md`, commit abc1234. Test task FEAT-0003-login revised (rev 2).
+The tokens: commit abc1234. Test task FEAT-0003-theme revised (rev 2).
 
 ### To resume
 
 `bun install && bun dev`; the theme page is /settings.
 
-### Todos at the pause
+### The todo at the pause
 
-- ✓ 01-fix-login — completed
 - · 02-dark-mode — open
 
 ## Waypoint 3 — 2026-10-24 20:10 · 02-dark-mode · phase 3 WORK
@@ -384,13 +407,14 @@ the body class never flips. `bun test` is green except `theme.test.ts` (2 failur
 Tokens in src/theme.ts done; wiring the toggle next.
 ```
 
-**Start** takes the lock and answers in JSON: the batch's todos and their states, and, when
-the lock already existed, its last waypoint. A lock that is paused, or whose holder is gone,
-is RESUMED — the same session (the same session id, or the same process on the same host)
-simply refreshes it. A lock held by a *live* session is refused, naming the holder; `--take`
-takes it over when you know that session is gone. A finished batch (`completed.md`) is
-refused: a new request gets a new batch. `--agent` is the agent's OKF actor (`human` means
-the person git knows); without it the lock says `agent/unknown`.
+**Start** takes the lock and answers in JSON: the lock's file (`path`), the batch's todos
+and their states, and, when the lock already existed, its last waypoint. A lock that is
+paused, or whose holder is gone, is RESUMED — the same session (the same session id, or the
+same process on the same host) simply refreshes it. A lock held by a *live* session is
+refused, naming the holder; `--take` takes it over when you know that session is gone. Several
+todos in one command (`--todo 01 --todo 02`) get a lock each, all or none. A finished batch
+(`completed.md`) is refused: a new request gets a new batch. `--agent` is the agent's OKF
+actor (`human` means the person git knows); without it the lock says `agent/unknown`.
 
 **Liveness.** On the holder's own host the process decides, when the lock names one: alive
 means working, gone means abandoned. Elsewhere the heartbeat decides: a `working` lock
@@ -405,32 +429,52 @@ moves: each todo picked up, each phase entered, each commit. **Pause** is the co
 of `/novadev-pause`: it writes the exhaustive stop — `stopped` (exactly where), `next` (the
 steps, in order), `done`, `resume`, `open` — and adds what it can see on its own: the
 branch, the last commit, every uncommitted path, and each todo's state at that moment, so
-the resumer can tell what moved in between. **Stop** removes the file; it says which todos
+the resumer can tell what moved in between (a todo's lock lists its own todo; a lock on the
+whole batch, every todo of it). **Stop** removes the file; it says which todos
 are not recorded as finished, because a stop drops the resume point and a pause keeps it.
 Payloads are JSON files, never shell arguments, like every other novadev payload.
 
-**A lock is a gate.** While it exists the batch is in work: `novadev sync` never marks it
-complete, nothing archives it (`novadev archive <batch>` says so), and `/novadev-file-a-todo`
-never files into it — a batch somebody is working is not where a phone's bug report lands.
-So the playbook's rule is firm: never end a session on a locked batch without a
-`novadev work stop` (the round is over) or a `/novadev-pause` (work remains).
+**A lock is a gate.** While a batch carries one — on any of its todos, or on the whole
+batch — it is in work: `novadev sync` never marks it complete, nothing archives it
+(`novadev archive <batch>` says so), and `/novadev-file-a-todo` never files into it — a batch
+somebody is working is not where a phone's bug report lands. So the playbook's rule is firm:
+never end a session on a lock without a `novadev work stop` (the work on it is over) or a
+`/novadev-pause` (work remains).
 
-**What you see.** `novadev status` begins with it:
+**What you see.** `novadev status` begins with it, one line per lock, and then says per todo
+who holds it:
 
 ```
-in work — 2 batch(es)
-  ● 2026-10-24_1 — WORKING: claude-code/claude-opus-5-5 on fil-desktop (process 3702151, alive), last waypoint 5 min ago — at 02-dark-mode · phase 3 WORK: "Tokens in src/theme.ts done; wiring the toggle next."
-  ‖ 2026-10-23_2 — PAUSED 2026-10-23 22:49 by claude-code/claude-opus-5-5 — at 03-export · phase 4 RECORD: "The CSV writer is done and tested; ai_completed.md needs its Verification section."
-  → a paused batch resumes with `/novadev-work`; it reads the PAUSED section of working.md first
+in work — 2 todo(s)
+  ● 2026-10-24_1/02-dark-mode — WORKING: claude-code/claude-opus-5-5 on fil-desktop (process 3702151, alive), last waypoint 5 min ago — at phase 3 WORK: "Tokens in src/theme.ts done; wiring the toggle next."
+  ‖ 2026-10-24_1/03-export — PAUSED 2026-10-23 22:49 by claude-code/claude-opus-5-5 — at phase 4 RECORD: "The CSV writer is done and tested; ai_completed.md needs its Verification section."
+  → a paused todo resumes with `/novadev-work`; it reads the PAUSED section of its working.md first
+
+todos — 1 open batch(es)
+  2026-10-24_1  [in work]
+    ✓ 01-fix-login  (completed)
+    · 02-dark-mode  (open) — in work: claude-code/claude-opus-5-5, phase 3 WORK
+    … 03-export  (progress) — paused 2026-10-23 22:49 by claude-code/claude-opus-5-5, phase 4 RECORD
 ```
+
+A lock on a whole batch is one line named after the batch (`● 2026-10-24_1 — WORKING: … — at
+02-dark-mode · phase 3 WORK: "…"`, counted as `1 batch(es)`), and the batch's mark
+(`[in work]`, `[paused]`) stands for all its todos. A todo held in another worktree says
+where (`— in work: … in /wt/irr-12 (branch irr-12)`). `novadev todo list` ends each held
+todo's line the same way, and as data every todo carries its `holder` — in
+`novadev status --json` (`batches[].todos[].holder`, beside `inWork`, one entry per lock with
+its `ref` and `unit`) and in `novadev todo list --json` / `todo show`: the lock, its state,
+whether its session is live, the agent, the worktree and branch when it is elsewhere, the
+phase and the first line of the newest waypoint. `null` means nobody holds it.
 
 A third kind is `✗ … — ABANDONED`: the process is gone, or there has been no waypoint for
-two hours. `novadev sync` prints the same block, lists a paused batch under WAITING ON THE
+two hours. `novadev sync` prints the same block, lists a paused lock under WAITING ON THE
 HUMAN (you stopped it; you say when it goes on) and an abandoned one under NEXT ACTIONS
 (resume it, or release it). A lock novadev cannot read — a merge conflict, a broken header
 — is a problem for `sync`, `sync --check` and `doctor`; `novadev work stop` removes it
-anyway, because releasing it is what you asked for. `doctor` also notes a lock whose last
-waypoint names a todo the batch does not have.
+anyway, because releasing it is what you asked for. `doctor` also notes a batch's lock whose
+last waypoint names a todo the batch does not have, and a todo that two locks hold (its own
+and the batch's, after a merge).
 
 ## Parallel work — branches, worktrees and sub-repos
 
@@ -468,56 +512,64 @@ apart.
 
 ### Locks every worktree sees, and claims: one owner per file
 
-A batch's lock, `todos/<batch>/working.md`, is a file on the branch it was taken on, so a
-worktree on another branch cannot see it. Every `novadev work` command therefore also writes
-a small entry into the folder all worktrees of a repository share:
-`<git common dir>/novadev/locks/<batch>.json`. The entry records where the batch is in work
-(the worktree and its branch), who holds it, its state, its last waypoint and its claims.
-That folder is inside `.git`, so the entry is never committed. `working.md` stays exactly as
-it was: its trail and its pause record travel with the branch.
+A lock is a file on the branch it was taken on, so a worktree on another branch cannot see
+it. Every `novadev work` command therefore also writes a small entry into the folder all
+worktrees of a repository share: `<git common dir>/novadev/locks/<batch>.<todo>.json` for a
+todo's lock, `locks/<batch>.json` for a lock on the whole batch. The entry records where the
+work is (the worktree and its branch), who holds it, its state, its last waypoint (the todo,
+the phase, the first line of the note) and its claims. That folder is inside `.git`, so the
+entry is never committed. `working.md` stays exactly as it was: its trail and its pause
+record travel with the branch.
 
-- `novadev work start` refuses a batch that is in work in another worktree. It says where,
-  and that you resume a paused batch in the worktree where its pause record is; `--take`
-  moves the batch here anyway. A lock elsewhere whose session is gone is taken over, as it
-  would be here, and the answer says where it came from. An entry whose worktree no longer
-  exists is dropped. After a takeover, the old holder's lock is stale: its waypoints, pauses
-  and claims are refused (it can only `stop`), and a `stop --take` there never removes the
-  new holder's entry.
+- `novadev work start` refuses a todo that is in work in another worktree, and a batch any
+  todo of which is. It says where, and that you resume a paused lock in the worktree where its
+  pause record is; `--take` moves it here anyway. A lock elsewhere whose session is gone is
+  taken over, as it would be here, and the answer says where it came from. An entry whose
+  worktree no longer exists is dropped. After a takeover, the old holder's lock is stale: its
+  waypoints, pauses and claims are refused (it can only `stop`), and a `stop --take` there
+  never removes the new holder's entry.
 - `novadev status` lists the repository's worktrees (when there is more than one) with each
-  one's branch and the batches in work there; `status --json` has them as `worktrees`.
-  `novadev sync` prints batches in work elsewhere in its *in work* block (`◦ …`) as
-  information only.
-- A batch in work elsewhere is not complete here: it is not archived, `file-todo` does not
-  file into it, and `todo addendum/edit/cancel` wait while a live session holds it.
+  one's branch and the locks held there; `status --json` has them as `worktrees`.
+  `novadev sync` prints work in other worktrees in its *in work* block (`◦ …`, with the
+  first line of its newest waypoint) as information only.
+- A batch with a lock in another worktree is not complete here: it is not archived,
+  `file-todo` does not file into it, and `todo addendum/edit/cancel` wait while a live
+  session holds that todo.
 
-**Part of a batch.** A batch often mixes unrelated todos, and several people work it in
-parallel. `novadev work start <batch> --todo <nn|slug>` (repeatable; a todo's number, its slug
-or its folder) locks only the named todos: the lock's frontmatter says which
-(`covers: 03-dark-mode`), the batch claims only the `touches:` of THOSE todos' features plus
-`--claim`, and another worktree may start a different todo of the same batch. Two locks of one
-batch collide when either covers the whole batch or they share a todo; the refusal names the
-todos the other lock covers. The registry keeps a whole-batch lock at `locks/<batch>.json`, as
-before, and a partial one at `locks/<batch>@<worktree hash>.json`. `novadev sync` and
-`novadev status` show each part with its todos (`● 2026-11-10_3 (todos 01-a) — WORKING …`); the
-batch is in work, never complete, while any part is locked. `work stop` releases only that
-worktree's part and lists as unfinished only its todos; `todo addendum/edit/cancel` wait only
-for a live lock that covers the todo. Starting again with `--todo` adds todos to the lock; a
-lock on the whole batch is never narrowed (stop it first).
+**Two todos of one batch** are held side by side, each by its own lock in its own folder:
+another worktree may start a different todo of the same batch at any time, and the two
+branches merge without a conflict even when both are paused — each pause record lands in its
+todo's folder, and `novadev status` on the default branch shows both. Two locks of one batch
+collide only when they hold the same todo, or one of them is on the whole batch; the refusal
+names the lock and where it is. `work stop <batch>/<todo>` releases that todo and says
+whether it is recorded as finished; `todo addendum/edit/cancel` wait only for a live lock on
+that todo.
 
-**Claims.** A batch in work claims the paths it will change: the `touches:` of every feature
-a `**Feature:**` line in its files names (in the todos the lock covers), plus the paths given
-with `novadev work start <batch> --claim <path>` (repeatable) or later with
-`novadev work claim <batch> <path>…`. A claim may name a sub-repo's path as
+**Locks written by 0.17.0 and earlier keep working, with no migration.** A lock on a whole
+batch is the same file and the same registry entry as today's. 0.17.0 locked *part* of a
+batch (`work start <batch> --todo`) with one batch-root lock that carried a `covers:` line
+and a registry entry `locks/<batch>@<worktree hash>.json`: such a lock is still read
+(`● 2026-11-10_3 (todos 01-a) — WORKING …`), resumed (`work start <batch>`, or naming a todo
+it covers), given waypoints and claims, paused and stopped as before, and it still collides
+with a lock on a todo it covers. novadev makes no new one: a todo it does not cover gets its
+own lock beside it. Two such parts of one batch share that one file, so
+`novadev worktree merge` refuses the second paused part with the reason; stop it (its todos
+recorded), commit, then merge.
+
+**Claims.** A todo in work claims the paths it will change: the `touches:` of every feature
+a `**Feature:**` line in ITS files names (a lock on a whole batch: in every todo's), plus the
+paths given with `novadev work start <batch>/<todo> --claim <path>` (repeatable) or later with
+`novadev work claim <batch>/<todo> <path>…`. A claim may name a sub-repo's path as
 `irrippr:ps/layouting/`. `work start` and `work claim` refuse a claim that overlaps (the same
-path, or one inside the other) a claim of a batch in work in another worktree, and they name
-that batch, its worktree and its branch. `--allow-overlap` is for when the lead decided the
-two may share. The lock's frontmatter keeps the claims (`claims: src/auth, docs`), and the
-answer says where each came from. A batch that claims nothing is told that no overlap was
-checked. A claim is judged once, when it is added: resuming a lock (`work start` on a paused
+path, or one inside the other) a claim of a lock in another worktree, and they name
+that todo (or batch), its worktree and its branch. `--allow-overlap` is for when the lead
+decided the two may share. The lock's frontmatter keeps the claims (`claims: src/auth, docs`),
+and the answer says where each came from. A lock that claims nothing is told that no overlap
+was checked. A claim is judged once, when it is added: resuming a lock (`work start` on a paused
 or abandoned one) does not judge again the claims it already holds, so `work claim` and
 `work start` never disagree about them.
 
-Inside a worktree `novadev worktree create` made, a batch claims **that worktree's claims**
+Inside a worktree `novadev worktree create` made, a lock claims **that worktree's claims**
 plus `--claim`, never the folders of its features' `touches:` (`claimsFrom.worktree` in the
 answer): the worktree's claims were checked when they were given, and a feature's folder would
 collide with every neighbour working another file in it. The paths `--claim` and `work claim`
@@ -595,14 +647,15 @@ commits). So derived files leave it out: a feature's `work.md` shows an approved
 
 ### `novadev worktree` — one worktree per task, across repositories
 
-The whole flow, generalised from the IRRIS company's `irris-worktree`:
+The task is a todo: one todo, one owner, one worktree, one merge request. The whole flow,
+generalised from the IRRIS company's `irris-worktree`:
 
 ```sh
-novadev worktree create irr-12-layout irrippr --claim irrippr:ps/layouting/   # the builder
-novadev worktree list [--json]          # every worktree novadev made: branch, sub-repos, claims, batches in work
+novadev worktree create irr-12-layout irrippr --claim irrippr:ps/layouting/ --todo 2026-11-12_2/03   # the builder
+novadev worktree list [--json]          # every worktree novadev made: branch, sub-repos, claims, its todos, the locks held there
 novadev worktree status irr-12-layout   # per repository: commits ahead, behind, uncommitted, diffstat
 novadev worktree gate irr-12-layout     # the checks that must pass before a merge request
-novadev worktree mr irr-12-layout       # the merge request's text: commits per repository (irrippr@hash), claims
+novadev worktree mr irr-12-layout       # the merge request's text: its todo(s), commits per repository (irrippr@hash), claims
 novadev worktree sync irr-12-layout     # merge the default branches into the worktree (then sync --after-merge)
 novadev worktree merge irr-12-layout    # the lead: a dry run; --yes merges, all or nothing
 novadev worktree remove irr-12-layout   # after the merge: worktrees, links, merged branches (--force: unmerged too)
@@ -615,18 +668,26 @@ sub-repo you do not name is a link to the main checkout's, so checks still find 
 siblings; read it, never write it. The git-ignored folders `share` names (`node_modules`) are
 links to the main checkout's too. The links are kept out of `git status` through the
 repository's `info/exclude`. `--claim` paths belong to the worktree: one that overlaps a
-claim of another worktree, or of a batch in work elsewhere, is refused (`--allow-overlap`
+claim of another worktree, or of work locked elsewhere, is refused (`--allow-overlap`
 when the lead decided). The worktree is recorded in the registry,
 `<git common dir>/novadev/worktrees/<name>.json`.
 `novadev worktree claim <name> <path>… [--allow-overlap]` adds paths to an existing worktree's
-claims, with the same check (a batch locked in that worktree is its own work and never blocks
+claims, with the same check (a lock held in that worktree is its own work and never blocks
 it), and refuses a path in a sub-repo the worktree has no worktree of.
+
+`--todo <ref>` (repeatable) says which todo the worktree is for; a todo that does not exist
+is refused before anything is made, and a todo that is another worktree's task, or locked
+elsewhere, is said, not refused — the todo's lock is the gate. The builder then takes that
+lock inside the worktree (`novadev work start <batch>/<todo>`), and every todo locked in a
+worktree is recorded as the worktree's too. `list` and `status` name them, and `mr` opens
+with one `Todo:` line each — its ref, title and state — for those todos and for every todo
+whose record the branch wrote, also after the locks are released.
 
 `gate` fails on any of these, per repository:
 
 - uncommitted changes;
 - whitespace errors (`git diff --check`);
-- a changed file outside the worktree's claims and the claims of the batches locked in it
+- a changed file outside the worktree's claims and the claims of the locks held in it
   (`.novadev/` aside) — checked when the worktree has claims at all;
 - `novadev sync --check` failing in the worktree;
 - a failing command from the project's `gate` setting.
@@ -638,8 +699,12 @@ Each gate command runs in that repository's worktree with `NOVADEV_WORKTREE`,
 branch with no uncommitted change. It also refuses:
 
 - an untracked file there that the branch would write;
-- a branch on which a batch is still in work, meaning a `working` lock the branch added or
-  changed. Stop it first. A paused lock may go: its pause record is meant to travel with the branch.
+- a branch on which a todo (or a batch) is still in work, meaning a `working` lock the branch
+  added or changed. Stop it first. A paused lock may go: its pause record is meant to travel
+  with the branch, and a todo's lock lands in that todo's folder, beside the locks of the
+  batch's other todos;
+- a second paused lock on *part* of one batch as 0.17.0 wrote them (they share the batch-root
+  file): stop that part, commit, then merge.
 
 It tries every merge with `git merge-tree` (git 2.38 or newer) and merges nothing unless all
 of them would go through. Then it merges the sub-repos first and the project last, `--no-ff`,
@@ -1104,7 +1169,7 @@ start the conversation — or end it — and each deploys as a slash command of 
 | "file this", a bug from your phone, "we should…" | **`/novadev-file-a-todo`** | turns what you just said into real todo folders — your words verbatim, your screenshots copied in — shows you the split, and waits for a yes before writing |
 | "what should I test?" | **`/novadev-what-to-test`** | shows the queue, helps you pick, walks you through one scenario, and writes the verdict down |
 | "I tested the selection thing — 3 broke, here is a shot" | **`/novadev-test-review`** | takes a whole round of testing you already did, in any order and any words, and files it as a formed review in that task's `test-results/` with every file attached |
-| "pause", "stop here", "let's continue tomorrow" | **`/novadev-pause`** | records the work that landed, then writes into the batch's lock exactly where things stopped — the step, the state of the tree, what is next, how to resume — and offers a commit of the work in progress; the next `/novadev-work` resumes from it |
+| "pause", "stop here", "let's continue tomorrow" | **`/novadev-pause`** | records the work that landed, then writes into the todo's lock exactly where things stopped — the step, the state of the tree, what is next, how to resume — and offers a commit of the work in progress; the next `/novadev-work` resumes from it |
 
 They share the loop's mechanics rather than re-deriving them, through three commands
 that exist for exactly this:
@@ -1118,7 +1183,7 @@ novadev test-result write payload.json  # one scenario's verdict → scenario-<N
 novadev test-result review payload.json # a whole round → review.md                   (APPENDS)
 novadev test-result skip payload.json   # the owner skips scenarios / the rest → skipped.md; closes the round (ai_testskipped.md)
 
-novadev work pause <batch> payload.json # the pause record, newest entry of the batch's lock
+novadev work pause <batch>/<todo> payload.json # the pause record, newest entry of the todo's lock
 
 novadev todo addendum <ref> payload.json # {text, attachments}: a Chat addendum to an open todo's brief (files copied in)
 novadev todo edit <ref> payload.json     # {title, request, context, reason}: the brief changed, the old one in .brief-history/
