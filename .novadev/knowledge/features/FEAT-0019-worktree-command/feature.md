@@ -15,20 +15,23 @@ superseded-by: []
 conflicts-with: []
 sources:
   - resource: todo:2026-11-10_1/07-worktree-command
-generated: { by: claude-code/claude-opus-5-5, at: 2026-11-12T08:15:26+01:00 }
-stale_after: 2027-11-12T08:15:26+01:00
+generated: { by: claude-code/claude-fable-5-2, at: 2026-11-12T15:39:48+01:00 }
+stale_after: 2027-11-12T15:39:48+01:00
 ---
 
 # FEAT-0019 — novadev worktree: one worktree per task across repositories
 
 ## What it does
 
-- `create <name> [<sub-repo>…] [--claim <path>]… [--allow-overlap]` — a worktree of the
+- `create <name> [<sub-repo>…] [--todo <batch>/<todo>]… [--claim <path>]… [--allow-overlap]` — a worktree of the
   project at `<dir>/<name>` on branch `<branchPrefix><name>` (from the default branch), a
   worktree of each named sub-repo inside it on the same branch (from its default branch),
   links to the main checkout for the other sub-repos and the `share` folders (excluded in
   `info/exclude`); claims checked against every other worktree and batch in work; registered
   in `<git common dir>/novadev/worktrees/<name>.json`. Rolls back what it made on a failure.
+- **The worktree's todos**: `create --todo` names them (a todo that is already another worktree's
+  task is a notice, not a refusal — the todo's lock is the gate), `work start` inside the worktree
+  adds the todos it locks; `list`/`status` show them and `mr` opens with `Todo:` lines.
 - `claim <name> <path>… [--allow-overlap]` — more claims for an existing worktree, with create's
   overlap check (the batches locked in that worktree never block it); a path in a sub-repo the
   worktree has no worktree of is refused.
@@ -41,7 +44,8 @@ stale_after: 2027-11-12T08:15:26+01:00
   batches still in work, the gate line and the checklist.
 - `sync <name>` — merge each default branch into the worktree, then always `sync --after-merge`
   (a run stopped by a sub-repo conflict regenerates on the next).
-- `merge <name> [--yes]` — the lead, on the main checkout: refuses dirt, a main checkout off
+- `merge <name> [--yes]` — the lead, on the main checkout; with `--yes` it first brings the branch onto the newest
+  default branches in its worktree and runs the gate on that merged result (FEAT-0022), one merge at a time. It refuses dirt, a main checkout off
   its default branch, an untracked file there the branch would write, and a batch still WORKING
   on the branch (a lock it added or changed; a paused one may go); `git merge-tree` pre-checks
   every repository and merges nothing unless all would go; sub-repos first, the project last,
@@ -63,6 +67,8 @@ the project's default branch from `src/branch.ts`.
 - 2026-11-10 — built: `2026-11-10_1/07-worktree-command`
 - 2026-11-10 — fixes from the independent review of batch 2026-11-10_1, before the 0.16.0 release (`2026-11-10_1/07-worktree-command`)
 - 2026-11-12 — the gate reads the claims of the batches locked in the worktree; `worktree claim` (`2026-11-12_1/01-worktree-gate-reads-batch-claims`, `2026-11-12_1/04-worktree-batch-claims-files-only`)
+- 2026-11-12 — a worktree knows its todos: `create --todo`, `Todo:` lines in the merge request (`2026-11-12_2/02-todo-is-the-unit-of-work`)
+- 2026-11-12 — the gate under `"claims": "notice"` (fails only on an unheld protected file, lists shared files; `2026-11-12_2/03-claims-warn-protected-paths-lock`); `merge --yes` checks the merged result first and the merge queue (FEAT-0022, `2026-11-12_2/04-merge-queue`); the reason for a second paused 0.17.0 part-lock (`2026-11-12_2/01-merge-refuses-second-paused-part`); *Required reviewers* in `mr` (FEAT-0021)
 
 ## Open questions
 

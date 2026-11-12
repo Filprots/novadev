@@ -12,6 +12,20 @@
 * **Verification**: [Conventions](wiki/conventions.md) — Re-checked after the batch: the new `test-result skip` and `worktree claim` follow the payload/JSON and fail() conventions it describes. (claude-code/claude-opus-5-5 · 2026-11-12_1/02-totest-skip-scenarios-and-close-round)
 * **Verification**: [Overview](wiki/overview.md) — Re-checked: README changes of the batch add commands, nothing that changes the overview. (claude-code/claude-opus-5-5 · 2026-11-12_1/03-work-start-one-todo-claims)
 * **Verification**: [Stack](wiki/stack.md) — Re-checked: still zero dependencies (node:crypto is built in), no tsconfig/linter. (claude-code/claude-opus-5-5 · 2026-11-12_1/03-work-start-one-todo-claims)
+* **Update**: [The work lock: waypoints, pause and resume](features/FEAT-0014-work-lock/feature.md) — The todo is the unit of work: a lock per todo in the todo's folder, the whole batch as one batch-root lock for a solo round, 0.17.0 locks read unchanged. (claude-code/claude-fable-5-2 · 2026-11-12_2/02-todo-is-the-unit-of-work)
+* **Update**: [novadev worktree: one worktree per task across repositories](features/FEAT-0019-worktree-command/feature.md) — A worktree knows its todos: create --todo, todos added by work start, Todo: lines in the merge request. (claude-code/claude-fable-5-2 · 2026-11-12_2/02-todo-is-the-unit-of-work)
+* **Update**: [Glossary](wiki/glossary.md) — Lock, registry and covers now describe the todo's lock beside the batch-root one. (claude-code/claude-fable-5-2 · 2026-11-12_2/02-todo-is-the-unit-of-work)
+* **Update**: [Architecture](wiki/architecture.md) — Where locks and their registry entries live, per todo and per batch. (claude-code/claude-fable-5-2 · 2026-11-12_2/02-todo-is-the-unit-of-work)
+* **Update**: [Workflows](wiki/workflows.md) — Test count checked: 625 tests in 33 files on branch robust-work. (claude-code/claude-fable-5-2 · 2026-11-12_2/02-todo-is-the-unit-of-work)
+* **Creation**: [Todo priority and order](features/FEAT-0020-todo-priority-and-order/feature.md) — Priority per todo, 'do after' links, the lead and the priority-change report. (claude-code/claude-fable-5-2 · 2026-11-12_2/05-todo-priority)
+* **Creation**: [Area owners](features/FEAT-0021-area-owners/feature.md) — Area owners: suggested owner, required reviewers, PARTIAL approvals, recorded override. (claude-code/claude-fable-5-2 · 2026-11-12_2/08-area-owners)
+* **Creation**: [Merge queue](features/FEAT-0022-merge-queue/feature.md) — The merge queue: each branch on the newest default branches, checked there, then landed; one merge at a time. (claude-code/claude-fable-5-2 · 2026-11-12_2/04-merge-queue)
+* **Creation**: [Wip limit and express lane](features/FEAT-0023-wip-limit-and-express-lane/feature.md) — The work-in-progress limit per holder and the express lane for an urgent todo. (claude-code/claude-fable-5-2 · 2026-11-12_2/09-work-in-progress-limit)
+* **Update**: [The work lock: waypoints, pause and resume](features/FEAT-0014-work-lock/feature.md) — Claims as notices with protected paths; work start also judges links and the limit. (claude-code/claude-fable-5-2 · 2026-11-12_2/03-claims-warn-protected-paths-lock)
+* **Update**: [novadev worktree: one worktree per task across repositories](features/FEAT-0019-worktree-command/feature.md) — The gate under notice claims; merge --yes checks the merged result; the queue; required reviewers in mr. (claude-code/claude-fable-5-2 · 2026-11-12_2/04-merge-queue)
+* **Update**: [Architecture](wiki/architecture.md) — New modules: claim-policy, queue, todo-meta, todo-links, lead, owners, wip; queue.json and queue.lock in the registry folder. (claude-code/claude-fable-5-2 · 2026-11-12_2/04-merge-queue)
+* **Update**: [Workflows](wiki/workflows.md) — Test count checked: 717 tests in 38 files on branch robust-work. (claude-code/claude-fable-5-2 · 2026-11-12_2/09-work-in-progress-limit)
+* **Update**: [Workflows](wiki/workflows.md) — Test count checked after the review fixes: 724 tests in 39 files. (claude-code/claude-fable-5-2 · 2026-11-12_2/04-merge-queue)
 
 ## 2026-11-10
 

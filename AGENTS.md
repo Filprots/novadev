@@ -18,12 +18,14 @@ features — as one Open Knowledge Format bundle in `.novadev/knowledge/`.
   included), `/novadev-what-to-test` (show the testing queue and walk one scenario
   with them), `/novadev-test-review` (write up a round of testing they already did),
   `/novadev-pause` (stop the loop where it is, writing exactly where things stopped).
-- **A batch in work is locked.** `novadev work start <batch>` takes the lock
-  (`todos/<batch>/working.md`) before the first change, `novadev work waypoint` records
-  where the work is as it moves, and a round ends with `novadev work stop` — or with
-  `/novadev-pause` when work remains. Never end a session on a locked batch without one
-  of the two. A paused or abandoned batch is where the next session starts: `novadev sync`
-  and `novadev status` list it, and the lock's top section says where to resume.
+- **A todo in work is locked.** `novadev work start <batch>/<todo>` takes the todo's lock
+  (`todos/<batch>/<todo>/working.md`) before the first change, `novadev work waypoint`
+  records where the work is as it moves, and the work on it ends with `novadev work stop` —
+  or with `/novadev-pause` when work remains. Never end a session on a lock without one of
+  the two. A paused or abandoned todo is where the next session starts: `novadev sync` and
+  `novadev status` list it, and the lock's top section says where to resume. One developer
+  who takes a whole batch locks it with `novadev work start <batch>`
+  (`todos/<batch>/working.md`).
 - **The human writes todo briefs; you do everything else.** Never leave the human to
   remember a novadev command, an archive step, or which check to run. That is about
   CHORES: still tell them what you did and what you are about to do, and still ask when

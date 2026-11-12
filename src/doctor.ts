@@ -15,6 +15,7 @@ import {
   TEST_RESULTS_DIR,
   TEST_ROUND_RE,
   TEST_TASK_RE,
+  WORK_LOCK_FILE,
   compareVersions,
   deployedVersion,
   listDirs,
@@ -28,6 +29,12 @@ import { auditKnowledge } from './knowledge.ts';
 import { auditLinks } from './links.ts';
 import { auditMetrics } from './metrics-audit.ts';
 import { auditPlacement } from './placement.ts';
+import { auditTodoLinks } from './todo-links.ts';
+import { auditTodoMeta } from './todo-meta.ts';
+import { auditLead } from './lead.ts';
+import { auditClaimPolicy } from './claim-policy.ts';
+import { auditWip } from './wip.ts';
+import { auditOwners } from './owners.ts';
 import { auditWork } from './work.ts';
 
 export function doctor(): void {
@@ -60,7 +67,8 @@ export function doctor(): void {
     }
     for (const todo of listDirs(batchDir)) {
       const todoDir = join(batchDir, todo);
-      const files = listFiles(todoDir);
+      // The todo's lock (work.ts) is neither its brief nor a record.
+      const files = listFiles(todoDir).filter((f) => f !== WORK_LOCK_FILE);
       const hasBrief = files.some(
         (f) => (f.endsWith('.txt') || f.endsWith('.md')) && !f.startsWith('ai_'),
       );
@@ -112,6 +120,19 @@ export function doctor(): void {
       }
     }
   }
+
+  // --- todos: their own settings (todo.json — priority, "do after" links) ---
+  problems.push(...auditTodoMeta(nd).problems);
+  // … and who may decide them besides a person ("lead" in novadev.json).
+  problems.push(...auditLead(nd).problems);
+  problems.push(...auditClaimPolicy(nd).problems, ...auditWip(nd).problems);
+  // --- owners: who builds and who reviews each area ("owners" in novadev.json) ---
+  const owners = auditOwners(nd);
+  problems.push(...owners.problems);
+  notes.push(...owners.notes);
+  const todoLinks = auditTodoLinks(nd);
+  problems.push(...todoLinks.problems);
+  notes.push(...todoLinks.actions);
 
   // --- archive: year grouping + naming ---
   const archiveDir = join(nd, 'archive');

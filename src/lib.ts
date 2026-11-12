@@ -6,7 +6,7 @@ import { readFrontmatterText } from './okf.ts';
 import { reviewGate } from './review.ts';
 
 export const ROOT_DIR_NAME = '.novadev';
-export const NOVADEV_VERSION = '0.17.0';
+export const NOVADEV_VERSION = '0.18.0';
 
 /**
  * The project's knowledge — wiki, memories, features — is one Open Knowledge Format bundle under
@@ -84,11 +84,24 @@ export const RECORD_TESTSKIPPED = 'ai_testskipped.md';
 export const WORK_RECORDS = [RECORD_COMPLETED, RECORD_PROGRESS, RECORD_FAILED] as const;
 
 /**
- * The batch's LOCK (work.ts): an agent is working the batch, or paused in it, and the file says who,
- * since when, and where — the trail of waypoints, newest first. While it exists the batch is in
- * work: never complete, never archived, never filed into.
+ * The LOCK of work in progress (work.ts): an agent is working, or paused, and the file says who,
+ * since when, and where — the trail of waypoints, newest first. In a todo's folder it locks that
+ * todo; at a batch's root it locks the whole batch (one developer taking all of it, and every lock
+ * 0.17.0 and earlier wrote). While a batch carries one, anywhere, the batch is in work: never
+ * complete, never archived, never filed into.
  */
 export const WORK_LOCK_FILE = 'working.md';
+
+/** The lock files a batch carries, absolute: the one at its root, then one per locked todo. */
+export function batchLockFiles(batchDir: string): string[] {
+  const out: string[] = [];
+  if (existsSync(join(batchDir, WORK_LOCK_FILE))) out.push(join(batchDir, WORK_LOCK_FILE));
+  for (const todo of listDirs(batchDir)) {
+    const path = join(batchDir, todo, WORK_LOCK_FILE);
+    if (existsSync(path)) out.push(path);
+  }
+  return out;
+}
 
 /** The phases of the loop in skills/novadev-work.md, by number — a waypoint names one. */
 export const LOOP_PHASES = [
@@ -141,7 +154,7 @@ export const SKILLS = [
     file: 'novadev-pause.md',
     slug: 'novadev-pause',
     description:
-      'Pause the development loop where it is: record the work that landed, then write into the batch\'s lock (todos/<batch>/working.md) exactly where things stopped — the todo, the step, the state of the working tree, what comes next, how to resume, what is open — so a later `/novadev-work` picks the batch up from that waypoint instead of rediscovering it. Use when they say "/novadev-pause", "pause", "stop here", "let\'s continue tomorrow", "I have to go", or when the session must end with work in flight.',
+      'Pause the development loop where it is: record the work that landed, then write into the todo\'s lock (todos/<batch>/<todo>/working.md) exactly where things stopped — the step, the state of the working tree, what comes next, how to resume, what is open — so a later `/novadev-work` picks the todo up from that waypoint instead of rediscovering it. Use when they say "/novadev-pause", "pause", "stop here", "let\'s continue tomorrow", "I have to go", or when the session must end with work in flight.',
   },
 ] as const;
 
@@ -888,10 +901,11 @@ export const TERMINAL_STATES: readonly TodoState[] = ['confirmed', 'completed', 
 
 /**
  * A batch is archivable when every todo folder inside carries a terminal record — and nobody holds
- * its lock: a round that is paused, or still closing out, is not over, whatever the records say.
+ * a lock in it (on the batch, or on one of its todos): work that is paused, or still closing out,
+ * is not over, whatever the records say.
  */
 export function batchIsDone(batchDir: string): boolean {
-  if (existsSync(join(batchDir, WORK_LOCK_FILE))) return false;
+  if (batchLockFiles(batchDir).length > 0) return false;
   const todos = listDirs(batchDir);
   if (todos.length === 0) return false;
   return todos.every((t) => TERMINAL_STATES.includes(todoState(join(batchDir, t))));

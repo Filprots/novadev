@@ -12,6 +12,7 @@ import {
   BATCH_RE,
   WORK_LOCK_FILE,
   addDays,
+  batchLockFiles,
   applyFix,
   archiveGraceDays,
   batchCompletedOn,
@@ -207,7 +208,7 @@ export function archive(args: string[]): void {
     if (batchesInWorkElsewhere(root).has(batch)) {
       fail(`batch ${batch} is in work in another worktree — the round on it is not over (run \`novadev status\` to see where).`);
     }
-    if (existsSync(join(src, WORK_LOCK_FILE))) {
+    if (batchLockFiles(src).length > 0) {
       fail(
         `batch ${batch} is in work (${WORK_LOCK_FILE}) — the round on it is not over. Release the lock first: \`novadev work stop ${batch}\` (run \`novadev status\` to see who holds it).`,
       );

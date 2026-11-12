@@ -308,7 +308,7 @@ describe('the docs', () => {
 
   test('the CLI help names the new commands and flags', () => {
     const help = run(tempDir(), 'help').stdout;
-    for (const words of ['novadev worktree', '--after-merge', '"claim <batch> <path>…"', '"review <ref> <payload.json>"', 'on the default branch only', '"claim <name>', '--todo <nn|slug>']) {
+    for (const words of ['novadev worktree', '--after-merge', '"claim <ref> <path>…"', '"review <ref> <payload.json>"', 'on the default branch only', '"claim <name>', '--todo <nn|slug>', '[--todo <ref>]…']) {
       expect(help).toContain(words);
     }
   });

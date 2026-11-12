@@ -16,6 +16,13 @@ Inside a todo folder:
   still in flight. Every record says where its new code went, in a `## Placement`
   section.
 
+- **`todo.json`** — only when the todo has a priority other than normal (`urgent`,
+  `high`, `normal` or `later`) or waits for other todos (`after`: their refs), with who
+  changed it, when and why. Written by `novadev file-todo`, `novadev todo priority` (a
+  person's decision, or the lead's) and `novadev todo after`; never edit it by hand. A todo without the
+  file is `normal` and waits for nothing. Every list orders by priority and says which
+  todos are ready and which wait; `novadev work start` refuses a todo that still waits.
+
 What a todo teaches is not kept here: the agent records it in `../knowledge/` (a memory, a
 wiki page, a feature), citing the todo as its source, so it outlives the archive move.
 
@@ -41,13 +48,16 @@ stops you from hand-creating a `_1` whose name the archive already took.
 A batch carrying `completed.md` is **done, not pending**: agents will not re-run it or
 add work to it. `novadev archive <batch>` archives one early if you want it gone.
 
-**A batch in work carries `working.md`** — its lock. An agent writes it when it starts on
-the batch (`novadev work start`), adds a waypoint as the work moves (which todo, which
-phase of the loop, what is done and what is next), and either releases it when the round
-is over (`novadev work stop`) or pauses it (`/novadev-pause`), which writes exactly where
-things stopped: the step, the state of the working tree, what comes next, how to resume.
-The newest entry is at the top: that is where the next session picks up. While the lock
-exists the batch is in work — `novadev sync` does not mark it complete, nothing archives
-it, and `/novadev-file-a-todo` does not file into it. `novadev status` shows every lock:
-who holds it, whether that session is still there, and where the work is. Never edit it
+**A todo in work carries `working.md`** — its lock, in the todo's own folder
+(`<batch>/<todo>/working.md`). An agent writes it when it starts on the todo
+(`novadev work start <batch>/<todo>`), adds a waypoint as the work moves (which phase of
+the loop, what is done and what is next), and either releases it when the work is over
+(`novadev work stop`) or pauses it (`/novadev-pause`), which writes exactly where things
+stopped: the step, the state of the working tree, what comes next, how to resume. The
+newest entry is at the top: that is where the next session picks up. One developer who
+takes a whole batch (`novadev work start <batch>`) gets one lock at the batch's root
+instead, `<batch>/working.md`. While a batch carries a lock — on any todo, or on all of it
+— the batch is in work: `novadev sync` does not mark it complete, nothing archives it, and
+`/novadev-file-a-todo` does not file into it. `novadev status` shows every lock, and per
+todo who holds it, whether that session is still there, and where the work is. Never edit it
 by hand.

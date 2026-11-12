@@ -121,7 +121,7 @@ describe('novadev work start', () => {
 
   test('refuses what is not a batch, a batch that is not there, a finished batch, and a bad actor', () => {
     const root = batchProject();
-    expect(json(run(root, 'work', 'start', 'nope'))).toEqual({ error: '"nope" is not a batch name (YYYY-MM-DD_N).' });
+    expect(json(run(root, 'work', 'start', 'nope'))).toEqual({ error: '"nope" is not a batch name (YYYY-MM-DD_N), and no open todo matches it.' });
     expect(json(run(root, 'work', 'start', '2026-10-01_9'))).toEqual({ error: `No batch todos/2026-10-01_9. Open batches: ${BATCH}.` });
     expect(json(run(root, 'work', 'start'))).toMatchObject({ error: expect.stringContaining('usage: novadev work start <batch>') });
     expect(json(run(root, 'work', 'start', BATCH, '--agent', 'not an actor'))).toMatchObject({ error: expect.stringContaining('"--agent" must be an actor') });
@@ -426,7 +426,7 @@ describe('novadev work stop', () => {
       ],
     });
     expect(exists(root, `.novadev/todos/${BATCH}/working.md`)).toBe(false);
-    expect(run(root, 'status').stdout).toContain('in work — none (no batch is locked;');
+    expect(run(root, 'status').stdout).toContain('in work — none (nothing is locked;');
   });
 
   test('once released, a fully recorded batch is complete again', () => {
@@ -554,8 +554,9 @@ describe('the pause playbook', () => {
     expect(read(root, '.novadev/skills/novadev-pause.md')).toContain('# novadev-pause — stop the loop where it is');
     expect(read(root, '.claude/skills/novadev-pause/SKILL.md')).toContain('name: novadev-pause');
     expect(read(root, 'CLAUDE.md')).toContain('`/novadev-pause`');
-    expect(read(root, 'CLAUDE.md')).toContain('**A batch in work is locked.**');
-    expect(read(root, '.cursor/rules/novadev.mdc')).toContain('novadev work start <batch>');
+    expect(read(root, 'CLAUDE.md')).toContain('**A todo in work is locked.**');
+    expect(read(root, 'CLAUDE.md')).toContain('`novadev work start <batch>/<todo>` takes the todo\'s lock');
+    expect(read(root, '.cursor/rules/novadev.mdc')).toContain('novadev work start <batch>/<todo>');
     expect(run(root, 'doctor').stdout.trim()).toBe('doctor: structure is healthy.');
     write(root, '.novadev/skills/novadev-pause.md', 'edited\n');
     expect(run(root, 'doctor').stdout).toContain('skills/novadev-pause.md: differs from installed novadev');
