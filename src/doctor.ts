@@ -30,6 +30,7 @@ import { auditMetrics } from './metrics-audit.ts';
 import { auditPlacement } from './placement.ts';
 import { auditTodoLinks } from './todo-links.ts';
 import { auditTodoMeta } from './todo-meta.ts';
+import { auditLead } from './lead.ts';
 import { auditWork } from './work.ts';
 
 export function doctor(): void {
@@ -117,6 +118,8 @@ export function doctor(): void {
 
   // --- todos: their own settings (todo.json — priority, "do after" links) ---
   problems.push(...auditTodoMeta(nd).problems);
+  // … and who may decide them besides a person ("lead" in novadev.json).
+  problems.push(...auditLead(nd).problems);
   const todoLinks = auditTodoLinks(nd);
   problems.push(...todoLinks.problems);
   notes.push(...todoLinks.actions);

@@ -101,7 +101,9 @@ For each part write:
   (step 3). The payload's `by` is the person who asked: `"human"` (the command takes their
   id from git) or `human:<id>`. It is recorded with the priority, in the todo's `todo.json`.
   To change the priority of a todo that already exists, when they ask for that:
-  `novadev todo priority <ref> <level> <payload.json>` with `{ "by", "reason" }`.
+  `novadev todo priority <ref> <level> <payload.json>` with `{ "by", "reason" }` — `by` is
+  them, never you (only the project's lead, named by `"lead"` in `novadev.json`, may give
+  its own actor, with a reason).
 - `after` — a list of what the part waits for, when they stated an order (step 3):
   `"after": ["new-table"]` (another part of this payload, by its slug) or
   `"after": ["2026-09-08_4/02"]` (an existing todo). Work on the part cannot start until

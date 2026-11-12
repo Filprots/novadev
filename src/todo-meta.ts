@@ -20,12 +20,15 @@
 //
 // Priority orders every queue: `novadev todo list`, `novadev status` (and `--json`), sync's NEXT ACTIONS —
 // urgent first, then high, normal, later, and inside one level the filing order (batch, then todo). A
-// change of priority is a person's decision: `novadev todo priority` records who made it and when.
+// change of priority is a person's decision, or the lead's (`"lead"` in novadev.json, lead.ts) — no other
+// agent's: `novadev todo priority` records who made it, when and why, and `novadev todo priority
+// --changed-since <date>` lists the changes, saying which ones an agent made (`priorityChanges`).
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { humanActor } from './knowledge-log.ts';
-import { type TodoState, isPlainObject, listDirs } from './lib.ts';
-import { actorKind, nowTimestamp } from './okf.ts';
+import { isLead, leadText } from './lead.ts';
+import { ROOT_DIR_NAME, type TodoState, isPlainObject, listAllTodos, listDirs } from './lib.ts';
+import { actorKind, isTimestamp, nowTimestamp } from './okf.ts';
 
 export const TODO_META_FILE = 'todo.json';
 /** Highest first: the order every queue uses. */
@@ -34,8 +37,11 @@ export type Priority = (typeof PRIORITIES)[number];
 export const DEFAULT_PRIORITY: Priority = 'normal';
 const MAX_REASON_CHARS = 2000;
 
-/** One recorded change of a todo's settings. `by` is null only for a filing that named nobody. */
-export type MetaChange = { at: string; by: string | null; change: string; from?: unknown; to?: unknown; reason?: string };
+/**
+ * One recorded change of a todo's settings. `by` is null only for a filing that named nobody; `as` is
+ * `lead` when an agent decided it as the project's lead (a person's own decision carries none).
+ */
+export type MetaChange = { at: string; by: string | null; change: string; from?: unknown; to?: unknown; reason?: string; as?: string };
 
 export type TodoMeta = {
   priority: Priority;
@@ -126,12 +132,13 @@ export function writeTodoMeta(todoDir: string, meta: Pick<TodoMeta, 'priority' |
 /**
  * Who decided something, from a payload's `by` or a `--by` option: an actor as it is, or `human` for the
  * person git knows. `personOnly` refuses an agent: the decision is a person's, and an agent acting for them
- * names them.
+ * names them. `orLead` (with `personOnly`) lets one agent through — an actor the project names as its lead.
  */
-export function resolveActor(root: string, raw: unknown, opts: { personOnly: boolean; what: string }): string {
+export function resolveActor(root: string, raw: unknown, opts: { personOnly: boolean; orLead?: boolean; what: string }): string {
   const by = typeof raw === 'string' ? raw.trim() : '';
+  const nd = join(root, ROOT_DIR_NAME);
   const form = 'human:<id>, or "human" for git\'s user.name';
-  if (by === '') throw new Error(`Say who ${opts.what}: "by" in the payload, or --by <actor> — ${opts.personOnly ? form : `${form}, or an agent's actor (claude-code/<model>)`}.`);
+  if (by === '') throw new Error(`Say who ${opts.what}: "by" in the payload, or --by <actor> — ${opts.personOnly ? `${form}${opts.orLead === true ? ', or the lead\'s actor' : ''}` : `${form}, or an agent's actor (claude-code/<model>)`}.`);
   if (by === 'human') {
     const human = humanActor(root);
     if (human === null) throw new Error('"human" needs git\'s user.name — set it, or write human:<id>.');
@@ -140,9 +147,19 @@ export function resolveActor(root: string, raw: unknown, opts: { personOnly: boo
   const kind = actorKind(by);
   if (kind === null) throw new Error(`"${by}" is not an actor — write ${form}${opts.personOnly ? '' : ", or an agent's actor (claude-code/<model>)"}.`);
   if (opts.personOnly && kind !== 'human') {
-    throw new Error(`"${by}" is not a person. Name the person who ${opts.what} (${form}) and quote what they said in "reason": this is a person's decision, never an agent's own.`);
+    if (opts.orLead !== true) throw new Error(`"${by}" is not a person. Name the person who ${opts.what} (${form}) and quote what they said in "reason": this is a person's decision, never an agent's own.`);
+    if (!isLead(nd, by)) {
+      throw new Error(
+        `"${by}" is neither a person nor the project's lead (${leadText(nd)}). Name the person who ${opts.what} (${form}) and quote what they said in "reason": this is a person's decision or the lead's, never another agent's own.`,
+      );
+    }
   }
   return by;
+}
+
+/** How a decision was made, for its record: `lead` when an agent made it as the project's lead; nothing for a person. */
+export function decidedAs(root: string, by: string): 'lead' | undefined {
+  return actorKind(by) !== 'human' && isLead(join(root, ROOT_DIR_NAME), by) ? 'lead' : undefined;
 }
 
 /** A reason as it is recorded: one line, or absent. */
@@ -158,13 +175,15 @@ export function reasonText(raw: unknown): string | undefined {
 const OVER: readonly TodoState[] = ['confirmed', 'completed', 'failed'];
 
 /**
- * Change a todo's priority, on a person's decision: the new level in todo.json, and who decided, when and
- * why in its history. A level it already has changes nothing. Refused on a finished todo.
+ * Change a todo's priority, on a person's decision or the lead's: the new level in todo.json, and who
+ * decided, when and why in its history. A level it already has changes nothing. Refused on a finished todo,
+ * and for an agent (the lead) that gives no reason: a person may read their reason off the request they
+ * made, an agent's decision has no other record than this one.
  */
 export function changePriority(
   todo: { ref: string; dir: string; state: TodoState },
   level: unknown,
-  who: { by: string; reason?: string },
+  who: { by: string; reason?: string; as?: 'lead' },
   now: Date = new Date(),
 ): Record<string, unknown> {
   const to = parsePriority(level);
@@ -174,9 +193,88 @@ export function changePriority(
   if (meta.error !== null && meta.raw === null) throw new Error(`todos/${todo.ref}/${TODO_META_FILE} cannot be read: ${meta.error} — fix it, or delete it, then set the priority again.`);
   const from = meta.priority;
   if (from === to) return { ref: todo.ref, priority: to, changed: false, written: null };
-  meta.history.push({ at: nowTimestamp(now), by: who.by, change: 'priority', from, to, ...(who.reason !== undefined ? { reason: who.reason } : {}) });
+  if (actorKind(who.by) !== 'human' && who.reason === undefined) {
+    throw new Error(`Say why: a priority changed by ${who.as === 'lead' ? 'the lead' : 'an agent'} needs a "reason" in the payload ({ "by", "reason" }) — it is what the board reads in the list of changes (novadev todo priority --changed-since <date>).`);
+  }
+  meta.history.push({ at: nowTimestamp(now), by: who.by, ...(who.as !== undefined ? { as: who.as } : {}), change: 'priority', from, to, ...(who.reason !== undefined ? { reason: who.reason } : {}) });
   writeTodoMeta(todo.dir, { ...meta, priority: to });
-  return { ref: todo.ref, priority: to, from, changed: true, by: who.by, written: `todos/${todo.ref}/${TODO_META_FILE}` };
+  return { ref: todo.ref, priority: to, from, changed: true, by: who.by, ...(who.as !== undefined ? { as: who.as } : {}), written: `todos/${todo.ref}/${TODO_META_FILE}` };
+}
+
+/** One change of a todo's priority, as the report lists it. */
+export type PriorityChange = {
+  ref: string;
+  /** True when the todo's batch is in the archive by now. */
+  archived: boolean;
+  /** `priority`: changed with `novadev todo priority`; `filed`: filed with a priority other than normal. */
+  change: 'priority' | 'filed';
+  from: Priority | null;
+  to: Priority;
+  by: string | null;
+  /** Who that is: a person, an agent (a tool or a process), or `unknown` for a filing that named nobody. */
+  byKind: 'person' | 'agent' | 'unknown';
+  /** `lead` when an agent decided it as the project's lead. */
+  as?: string;
+  at: string;
+  reason?: string;
+};
+
+/** A `--changed-since` value: a day (`2026-11-12`, from its local midnight) or a full timestamp with an offset. */
+export function parseSince(value: string): Date {
+  const text = value.trim();
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(text) ? new Date(`${text}T00:00:00`) : null;
+  if (day !== null && !Number.isNaN(day.getTime())) return day;
+  if (isTimestamp(text)) return new Date(text);
+  throw new Error(`"${value}" is not a date — write a day (2026-11-12) or a timestamp with an offset (2026-11-12T07:00:00+01:00).`);
+}
+
+/**
+ * Every recorded change of a priority since `since` (all of them when null), oldest first, over the open
+ * and the archived todos alike: what a morning digest lists. `byKind` tells an agent's change from a
+ * person's.
+ */
+export function priorityChanges(nd: string, since: Date | null = null): PriorityChange[] {
+  const out: PriorityChange[] = [];
+  for (const todo of listAllTodos(nd)) {
+    for (const entry of readTodoMeta(todo.dir).history) {
+      const at = Date.parse(entry.at);
+      if (Number.isNaN(at) || (since !== null && at < since.getTime())) continue;
+      let from: Priority | null = null;
+      let to: Priority | null = null;
+      if (entry.change === 'priority') {
+        from = parsePriority(entry.from);
+        to = parsePriority(entry.to);
+      } else if (entry.change === 'filed' && isPlainObject(entry.to)) {
+        to = parsePriority(entry.to.priority);
+      } else continue;
+      if (to === null) continue;
+      const by = typeof entry.by === 'string' ? entry.by : null;
+      const kind = actorKind(by);
+      out.push({
+        ref: todo.ref,
+        archived: todo.archived,
+        change: entry.change as 'priority' | 'filed',
+        from,
+        to,
+        by,
+        byKind: kind === 'human' ? 'person' : kind === null ? 'unknown' : 'agent',
+        ...(typeof entry.as === 'string' ? { as: entry.as } : {}),
+        at: entry.at,
+        ...(typeof entry.reason === 'string' ? { reason: entry.reason } : {}),
+      });
+    }
+  }
+  return out
+    .map((change, index) => ({ change, index, time: Date.parse(change.at) }))
+    .sort((a, b) => a.time - b.time || a.index - b.index)
+    .map((entry) => entry.change);
+}
+
+/** One line of the report: `2026-10-02_1/01-login  normal → urgent  paperclip/minifil (agent, lead)  2026-…  — why`. */
+export function priorityChangeLine(c: PriorityChange): string {
+  const who = c.by === null ? 'nobody named' : c.byKind === 'person' ? c.by : `${c.by} (agent${c.as !== undefined ? `, ${c.as}` : ''})`;
+  const what = c.change === 'filed' ? `filed ${c.to}` : `${c.from ?? '?'} → ${c.to}`;
+  return `${c.ref}${c.archived ? ' (archived)' : ''}  ${what}  ${who}  ${c.at}${c.reason !== undefined ? `  — ${c.reason}` : ''}`;
 }
 
 /** What a filing writes: the part's priority and links, with one history entry saying it was filed so. */

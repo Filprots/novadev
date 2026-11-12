@@ -19,7 +19,7 @@ Inside a todo folder:
 - **`todo.json`** — only when the todo has a priority other than normal (`urgent`,
   `high`, `normal` or `later`) or waits for other todos (`after`: their refs), with who
   changed it, when and why. Written by `novadev file-todo`, `novadev todo priority` (a
-  person's decision) and `novadev todo after`; never edit it by hand. A todo without the
+  person's decision, or the lead's) and `novadev todo after`; never edit it by hand. A todo without the
   file is `normal` and waits for nothing. Every list orders by priority and says which
   todos are ready and which wait; `novadev work start` refuses a todo that still waits.
 

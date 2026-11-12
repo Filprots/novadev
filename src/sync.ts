@@ -43,6 +43,7 @@ import { auditPlacement } from './placement.ts';
 import { afterMergeRefusal, commitAfterMerge, MERGE_DRIVER, hasMergeRules, mergeDriverConfigured, repairLogFile } from './merge-rules.ts';
 import { merged } from './review.ts';
 import { auditTodoLinks, depName, linkReader } from './todo-links.ts';
+import { auditLead } from './lead.ts';
 import { auditTodoMeta, orderByPriority, priorityLabel, todoPriority } from './todo-meta.ts';
 import { auditWork } from './work.ts';
 
@@ -137,7 +138,7 @@ export async function sync(args: string[]): Promise<void> {
   const inWork = auditWork(nd);
   // The todos' own settings (todo.json: priority, "do after" links): a file novadev cannot read.
   // … and a link to a todo nobody has, or todos that wait for each other (todo-links.ts).
-  const todoMeta = auditTodoMeta(nd);
+  const todoMeta = { problems: [...auditTodoMeta(nd).problems, ...auditLead(nd).problems] };
   const todoLinks = auditTodoLinks(nd);
   const problems = [...inWork.problems, ...audit.problems, ...todoMeta.problems, ...todoLinks.problems, ...metricsAudit.problems, ...placement.problems, ...knowledge.problems];
   if (problems.length > 0) {

@@ -10,8 +10,12 @@
 //   novadev todo review <ref> <payload.json>                 {verdict, by, checks, findings?, notes?}: ai_review.md, a
 //                                                            reviewer's APPROVE or CHANGES on a finished todo (review.ts)
 //   novadev todo priority <ref> <level> [<payload.json>] [--by <actor>]
-//                                                            urgent|high|normal|later, on a person's decision: {by, reason}
-//                                                            — who and when go into the todo's todo.json (todo-meta.ts)
+//                                                            urgent|high|normal|later, on a person's decision or the
+//                                                            lead's ("lead" in novadev.json): {by, reason} — who, when
+//                                                            and why go into the todo's todo.json (todo-meta.ts)
+//   novadev todo priority --changed-since <date> [--by-agent] [--json]
+//                                                            the recorded changes of priority since a day or a
+//                                                            timestamp, saying which ones an agent made
 //   novadev todo after <ref> [<ref>…] [--clear] [--by <actor>]
 //                                                            the todos it waits for ("do after" links, todo-links.ts):
 //                                                            refs add links, --clear removes them all (with refs:
@@ -35,18 +39,33 @@ import {
   RECORD_PROGRESS,
   TERMINAL_STATES,
   type TodoState,
+  listAllTodos,
   listDirs,
   novadevDir,
   requireProjectRoot,
   todoState,
 } from './lib.ts';
 import { humanActor } from './knowledge-log.ts';
-import { ACTOR_FORMAT, actorKind } from './okf.ts';
+import { ACTOR_FORMAT, actorKind, nowTimestamp } from './okf.ts';
 import { RECORD_REVIEW, REVIEW_HISTORY_DIR, parseReviewPayload, renderReview } from './review.ts';
 import { liveElsewhere, lockLiveness, readWorkLock } from './work.ts';
 import { copyAttachments } from './todo-filing.ts';
 import { type LinkFacts, changeAfter, linkReader, linkTag } from './todo-links.ts';
-import { PRIORITIES, type Priority, changePriority, orderByPriority, priorityTag, readTodoMeta, reasonText, resolveActor } from './todo-meta.ts';
+import {
+  PRIORITIES,
+  type Priority,
+  type PriorityChange,
+  changePriority,
+  decidedAs,
+  orderByPriority,
+  parseSince,
+  priorityChangeLine,
+  priorityChanges,
+  priorityTag,
+  readTodoMeta,
+  reasonText,
+  resolveActor,
+} from './todo-meta.ts';
 
 const PROMPT = 'prompt.md';
 const RECORDS = [RECORD_NEEDSTEST, RECORD_CONFIRMED, RECORD_TESTSKIPPED, RECORD_REVIEW, RECORD_COMPLETED, RECORD_FAILED, RECORD_PROGRESS] as const;
@@ -59,7 +78,8 @@ const USAGE =
   '       novadev todo edit <ref> <payload.json>       ({ "title"?, "request"?, "context"?, "reason"? })\n' +
   '       novadev todo cancel <ref> <payload.json>     ({ "reason": … })\n' +
   '       novadev todo review <ref> <payload.json>     ({ "verdict": "APPROVE"|"CHANGES", "by", "checks": […], "findings"?, "notes"? })\n' +
-  `       novadev todo priority <ref> <${PRIORITIES.join('|')}> [<payload.json>] [--by <actor>]   ({ "by": "human:<id>", "reason"? })\n` +
+  `       novadev todo priority <ref> <${PRIORITIES.join('|')}> [<payload.json>] [--by <actor>]   ({ "by": "human:<id>" or the lead, "reason"? })\n` +
+  '       novadev todo priority --changed-since <YYYY-MM-DD|timestamp> [--by-agent] [--json]   (who changed which priority, when and why)\n' +
   '       novadev todo after <ref> [<ref>…] [--clear] [--by <actor>]   (the todos it waits for; --clear removes them)';
 
 /** One open todo: where it is, what it is called, its state, its priority, and what its "do after" links say now. */
@@ -350,14 +370,36 @@ export function reviewTodo(nd: string, ref: string, payload: Record<string, unkn
 }
 
 /**
- * A person changed a todo's priority (they said so; an agent or a chat bot runs this for them): the level,
- * and who decided, when and why, go into the todo's todo.json. Not refused behind a lock: an urgent todo is
- * often one somebody is already working on.
+ * A person changed a todo's priority (they said so; an agent or a chat bot runs this for them), or the
+ * project's lead did ("lead" in novadev.json — it gives its own actor and a reason): the level, and who
+ * decided, when and why, go into the todo's todo.json. Any other agent is refused. Not refused behind a
+ * lock: an urgent todo is often one somebody is already working on.
  */
 export function priorityTodo(nd: string, ref: string, level: string | undefined, who: { by?: unknown; reason?: unknown }, now: Date = new Date()): Record<string, unknown> {
   const t = resolveTodo(nd, ref);
-  const by = resolveActor(dirname(nd), who.by, { personOnly: true, what: 'decided the priority' });
-  return changePriority({ ref: t.ref, dir: join(nd, 'todos', t.batch, t.todo), state: t.state }, level, { by, reason: reasonText(who.reason) }, now);
+  const root = dirname(nd);
+  const by = resolveActor(root, who.by, { personOnly: true, orLead: true, what: 'decided the priority' });
+  return changePriority({ ref: t.ref, dir: join(nd, 'todos', t.batch, t.todo), state: t.state }, level, { by, reason: reasonText(who.reason), as: decidedAs(root, by) }, now);
+}
+
+/**
+ * The recorded changes of priority since a day or a timestamp, oldest first, each with the todo's title —
+ * what the lead's morning digest to the board lists. `byAgent` keeps only the ones an agent made.
+ */
+export function priorityReport(nd: string, since: string, opts: { byAgent?: boolean } = {}): { since: string; byAgents: number; changes: (PriorityChange & { title: string })[] } {
+  const from = parseSince(since);
+  const titles = new Map<string, string>();
+  const title = (c: PriorityChange): string => {
+    if (!titles.has(c.ref)) {
+      const open = join(nd, 'todos', c.ref, PROMPT);
+      const path = existsSync(open) ? open : (listAllTodos(nd).find((t) => t.ref === c.ref)?.dir ?? '') + `/${PROMPT}`;
+      titles.set(c.ref, existsSync(path) ? briefTitle(readFileSync(path, 'utf8')) : '');
+    }
+    return titles.get(c.ref)!;
+  };
+  const all = priorityChanges(nd, from);
+  const changes = all.filter((c) => opts.byAgent !== true || c.byKind === 'agent').map((c) => ({ ...c, title: title(c) }));
+  return { since: nowTimestamp(from), byAgents: all.filter((c) => c.byKind === 'agent').length, changes };
 }
 
 /**
@@ -381,18 +423,21 @@ function readPayload(argument: string | undefined): Record<string, unknown> {
 }
 
 /** The arguments of a `novadev todo` call: what is positional, and the options that take a value. */
-function parseArgs(args: string[]): { positional: string[]; by?: string; state?: string; json: boolean; clear: boolean } {
-  const out: { positional: string[]; by?: string; state?: string; json: boolean; clear: boolean } = { positional: [], json: false, clear: false };
+type TodoArgs = { positional: string[]; by?: string; state?: string; changedSince?: string; json: boolean; clear: boolean; byAgent: boolean };
+function parseArgs(args: string[]): TodoArgs {
+  const out: TodoArgs = { positional: [], json: false, clear: false, byAgent: false };
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
-    if (arg === '--by' || arg === '--state') {
+    if (arg === '--by' || arg === '--state' || arg === '--changed-since') {
       const value = args[i + 1];
       if (value === undefined || value.startsWith('--')) throw new Error(`${arg} needs a value.\n${USAGE}`);
       if (arg === '--by') out.by = value;
-      else out.state = value;
+      else if (arg === '--state') out.state = value;
+      else out.changedSince = value;
       i++;
     } else if (arg === '--json') out.json = true;
     else if (arg === '--clear') out.clear = true;
+    else if (arg === '--by-agent') out.byAgent = true;
     else out.positional.push(arg);
   }
   return out;
@@ -413,6 +458,15 @@ export function todoCommand(args: string[]): void {
       if (todos.length === 0) console.log('todos — none open');
       const showReady = usesLinks(todos);
       for (const t of todos) console.log(listLine(t, showReady));
+      return;
+    }
+    if (command === 'priority' && opts.changedSince !== undefined) {
+      if (ref !== undefined) throw new Error(`--changed-since lists the changes of every todo: leave the todo out.\n${USAGE}`);
+      const report = priorityReport(nd, opts.changedSince, { byAgent: opts.byAgent });
+      if (opts.json) return void console.log(JSON.stringify(report, null, 2));
+      const count = report.changes.length;
+      console.log(`priority changes since ${report.since} — ${count === 0 ? 'none' : count}${opts.byAgent ? ' by an agent' : count > 0 ? ` (${report.byAgents} by an agent)` : ''}`);
+      for (const c of report.changes) console.log(`  ${priorityChangeLine(c)}${c.title ? `  · ${c.title}` : ''}`);
       return;
     }
     if (ref === undefined) throw new Error(USAGE);

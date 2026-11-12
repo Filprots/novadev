@@ -32,8 +32,10 @@ usage:
                             kept in .brief-history/), "cancel <ref> <payload.json>" ({reason}: a *cancelled* ai_failed),
                             "review <ref> <payload.json>" ({verdict: APPROVE|CHANGES, by, checks, findings?}: ai_review.md),
                             "priority <ref> <urgent|high|normal|later> [<payload.json>] [--by <actor>]" (a person's
-                            decision: {by, reason} — who and when are kept in the todo's todo.json; every list
-                            orders by priority, then by filing order), "after <ref> [<ref>…] [--clear] [--by <actor>]"
+                            decision, or the lead's — "lead" in novadev.json: {by, reason} — who, when and why are
+                            kept in the todo's todo.json; every list orders by priority, then by filing order),
+                            "priority --changed-since <date> [--by-agent] [--json]" (the recorded changes, and
+                            which ones an agent made), "after <ref> [<ref>…] [--clear] [--by <actor>]"
                             (the todos it waits for: "work start" refuses it until they are completed; the lists
                             say ready / waits for; sync and doctor flag a link to no todo and a cycle)
   novadev work …            the lock of a batch in work (todos/<batch>/working.md): "start <batch>"

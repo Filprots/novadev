@@ -45,7 +45,8 @@ novadev totest                        # what needs YOUR hands-on testing
 novadev status                        # is a work cycle on? then open todos + record states, postponed, health
 novadev status --json                 # the same as data (a tool, a chat bot); totest --json too
 novadev todo list --state open        # open todos with their titles, by priority; `todo show <ref>` gives one as JSON
-novadev todo priority <ref> urgent --by human:<id>   # a person's decision: urgent | high | normal | later
+novadev todo priority <ref> urgent --by human:<id>   # a person's decision (or the lead's): urgent | high | normal | later
+novadev todo priority --changed-since <date>         # who changed which priority, when and why (--by-agent, --json)
 novadev todo after <ref> <ref…>       # the todos it waits for; `work start` refuses it until they are completed
 novadev work start 2026-08-16_1       # take a batch's lock (agents do this; see Work in progress)
 novadev features --touching src/auth  # which features already own this code (conflict pre-flight)
@@ -338,13 +339,41 @@ nothing has to be migrated.
   "whenever there is time"): it never invents one.
 - **Later**, `novadev todo priority <ref> <urgent|high|normal|later>` changes it. This is a
   person's decision, so the command needs the person: `--by human:<id>`, or a payload file
-  `{ "by": "human:<id>", "reason": "their words" }`. An agent as `by` is refused. Who decided,
-  when, from which level to which, and why are appended to `history`; `novadev todo show`
-  gives it back. A finished todo takes no priority.
+  `{ "by": "human:<id>", "reason": "their words" }`. Who decided, when, from which level to
+  which, and why are appended to `history`; `novadev todo show` gives it back. A finished
+  todo takes no priority.
+- **The lead may decide it too.** `"lead"` in `.novadev/novadev.json` names the project's
+  lead — one actor (`"lead": "paperclip/minifil"`) or a list. It works with team mode on or
+  off: `"team": true` says a lead approves and merges, `"lead"` says who that is. The lead
+  runs the same command with its own actor as `by`, and a `reason` is then required; the
+  history entry carries `"as": "lead"`. An agent as `by` is refused unless it is the lead; a
+  project that names no lead keeps the decision with people. novadev does not check who is
+  calling — an actor is what the caller says — so the rule holds through the record, and
+  the record is listed:
 
 ```sh
 novadev todo priority 2026-10-02_1/01 urgent --by human:filipp
 novadev todo priority login later reason.json      # { "by": "human", "reason": "After the release." }
+novadev todo priority login urgent lead.json       # { "by": "paperclip/minifil", "reason": "Three customers cannot log in." }
+novadev todo priority --changed-since 2026-11-12   # every change since that day (or a timestamp with an offset)
+novadev todo priority --changed-since 2026-11-12 --by-agent --json
+```
+
+`--changed-since` reads the histories of the open and the archived todos and lists every
+change of priority from that moment on, oldest first — and every todo filed with a priority
+(`"change": "filed"`). It is what a lead's morning digest to the owner is built from: each
+entry says who (`by`), whether that is a person or an agent (`byKind`), when and why.
+
+```json
+{
+  "since": "2026-11-12T00:00:00+01:00",
+  "byAgents": 1,
+  "changes": [
+    { "ref": "2026-10-02_1/01-login", "archived": false, "change": "priority",
+      "from": "normal", "to": "urgent", "by": "paperclip/minifil", "byKind": "agent", "as": "lead",
+      "at": "2026-11-12T06:30:00+01:00", "reason": "Three customers cannot log in.", "title": "Magic link" }
+  ]
+}
 ```
 
 **Every queue is ordered by priority, then by filing order** (batch, then todo number):
@@ -1230,7 +1259,8 @@ novadev work pause <batch> payload.json # the pause record, newest entry of the 
 novadev todo addendum <ref> payload.json # {text, attachments}: a Chat addendum to an open todo's brief (files copied in)
 novadev todo edit <ref> payload.json     # {title, request, context, reason}: the brief changed, the old one in .brief-history/
 novadev todo cancel <ref> payload.json   # {reason}: the person decided against it → ai_failed.md (cancelled)
-novadev todo priority <ref> <level> payload.json   # {by, reason}: the person changed its priority → todo.json (who, when, why)
+novadev todo priority <ref> <level> payload.json   # {by, reason}: the person (or the lead) changed its priority → todo.json (who, when, why)
+novadev todo priority --changed-since <date> [--by-agent] [--json]   # the recorded changes: who, person or agent, when, why
 ```
 
 All take a JSON **file**, because the content is a person's own multi-line words and

@@ -107,8 +107,9 @@ Phase 1 below routes to the first; phases 5 and 6 sit either side of the next tw
 - **Priority** — `urgent`, `high`, `normal` (the default) or `later`, per todo, kept in the
   todo folder's `todo.json` by `novadev file-todo` and `novadev todo priority`. Every list
   (`novadev todo list`, `novadev status`, sync's NEXT ACTIONS) is ordered by it, then by
-  filing order. A todo without the file is `normal`. It is a PERSON's decision: never set
-  or change one on your own, and never edit `todo.json` by hand.
+  filing order. A todo without the file is `normal`. It is a PERSON's decision — or the
+  LEAD's, when `"lead"` in `novadev.json` names you: never set or change one on your own
+  otherwise, and never edit `todo.json` by hand.
 - **"Do after" link** — a todo names the todos it WAITS FOR (`after` in its `todo.json`,
   set by `novadev file-todo` or `novadev todo after <ref> <ref>…`). A dependency is
   satisfied once it is completed (in team mode: approved and merged; an archived completed
@@ -255,6 +256,11 @@ novadev todo priority 2026-10-24_1/02 urgent "$payload"   # urgent | high | norm
 
    A brief a person wrote by hand that says how urgent it is ("URGENT", "no hurry") is such
    a decision too: record it the same way before you plan.
+   Only if you are the project's lead (`"lead"` in `.novadev/novadev.json` names your
+   actor) may you decide a priority yourself: `by` is then your own actor and `reason` is
+   required. Every such change is listed for the owner by `novadev todo priority
+   --changed-since <date>` (`--by-agent` keeps the agents' changes, `--json` gives data) —
+   when you report to them, include that list. Any other agent is refused.
    A part carries `"after"` when the order between todos matters ("the import needs the new
    table first"): the slug of another part of the same payload, or the ref of an existing
    todo. For todos that already exist, `novadev todo after <ref> <ref>…` adds links and

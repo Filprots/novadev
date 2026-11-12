@@ -481,7 +481,7 @@ describe('priority in the docs', () => {
 
   test('the README names the four levels, the command, who may decide, and its todo.json example is one novadev reads', () => {
     for (const level of PRIORITIES) expect(section).toContain(`\`${level}\``);
-    for (const text of ['novadev todo priority <ref> <urgent|high|normal|later>', '`--by human:<id>`', 'An agent as `by` is refused', 'A todo without the file is `normal`', '`history`']) {
+    for (const text of ['novadev todo priority <ref> <urgent|high|normal|later>', '`--by human:<id>`', 'An agent as `by` is refused unless it is the lead', '`"lead"` in `.novadev/novadev.json`', 'novadev todo priority --changed-since 2026-11-12', '`byKind`', 'A todo without the file is `normal`', '`history`']) {
       expect(section).toContain(text);
     }
     const example = fences(section, 'json').find((body) => body.includes('"priority"'))!;
@@ -489,6 +489,14 @@ describe('priority in the docs', () => {
     todo(root, '2026-10-01_1/01-login');
     write(root, '.novadev/todos/2026-10-01_1/01-login/todo.json', example);
     expect(readTodoMeta(join(root, '.novadev/todos/2026-10-01_1/01-login'))).toMatchObject({ priority: 'urgent', error: null, history: [{ by: 'human:filipp', from: 'normal', to: 'urgent' }] });
+    // … and its report example carries exactly the keys the command gives for a lead's change.
+    const report = JSON.parse(fences(section, 'json').find((body) => body.includes('"byAgents"'))!);
+    setManifest(root, { lead: 'paperclip/minifil' });
+    write(root, '.novadev/todos/2026-10-01_1/01-login/todo.json', '{}');
+    priorityTodo(join(root, '.novadev'), 'login', 'urgent', { by: 'paperclip/minifil', reason: 'Three customers cannot log in.' });
+    const real = JSON.parse(run(root, 'todo', 'priority', '--changed-since', '2026-01-01', '--json').stdout);
+    expect(Object.keys(real).sort()).toEqual(Object.keys(report).sort());
+    expect(Object.keys(real.changes[0]).sort()).toEqual(Object.keys(report.changes[0]).sort());
   });
 
   test('its sample list is what `novadev todo list` prints, line for line', () => {
@@ -513,11 +521,14 @@ describe('priority in the docs', () => {
     expect(playbook.split('## Vocabulary')[1]!.split('\n---')[0]!).toContain('**Priority**');
     expect(playbook).toContain('**Take the highest priority first.**');
     expect(playbook).toContain('novadev todo priority 2026-10-24_1/02 urgent "$payload"');
+    expect(playbook).toContain('Only if you are the project\'s lead');
+    expect(playbook).toContain('--changed-since <date>');
     expect(todosReadme).toContain('**`todo.json`**');
   });
 
   test('the CLI help names the command', () => {
     expect(run(tempDir(), 'help').stdout).toContain('"priority <ref> <urgent|high|normal|later> [<payload.json>] [--by <actor>]"');
+    expect(run(tempDir(), 'help').stdout).toContain('"priority --changed-since <date> [--by-agent] [--json]"');
   });
 });
 

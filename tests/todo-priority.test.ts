@@ -4,9 +4,10 @@
 import { describe, expect, test } from 'bun:test';
 import { statusData } from '../src/status.ts';
 import { listTodos, priorityTodo, showTodo, todosInOrder } from '../src/todo.ts';
-import { batchesByPriority, comparePriority, orderByPriority, parsePriority, readTodoMeta, todoPriority } from '../src/todo-meta.ts';
+import { batchesByPriority, comparePriority, orderByPriority, parsePriority, parseSince, priorityChanges, readTodoMeta, todoPriority } from '../src/todo-meta.ts';
+import { readLeads } from '../src/lead.ts';
 import { todoState } from '../src/lib.ts';
-import { completed, exists, project, read, readJson, run, todo, write } from './helpers.ts';
+import { completed, exists, project, read, readJson, run, setManifest, todo, write } from './helpers.ts';
 
 const BRIEF = (title: string) => `# prompt — x\n\n**Source:** chat-initiated — 2026-10-01\n\n## ${title}\nThe words.\n`;
 const NOW = new Date('2026-10-25T12:00:00Z');
@@ -132,9 +133,9 @@ describe('novadev todo priority', () => {
     todo(root, '2026-10-03_1/01-done', { 'prompt.md': BRIEF('Done'), 'ai_completed.md': completed('01-done') });
     const nobody = run(root, 'todo', 'priority', 'login', 'urgent');
     expect(nobody.code).toBe(1);
-    expect(json(nobody).error).toBe('Say who decided the priority: "by" in the payload, or --by <actor> — human:<id>, or "human" for git\'s user.name.');
+    expect(json(nobody).error).toBe('Say who decided the priority: "by" in the payload, or --by <actor> — human:<id>, or "human" for git\'s user.name, or the lead\'s actor.');
     expect(json(run(root, 'todo', 'priority', 'login', 'urgent', '--by', 'claude-code/claude-opus-5-5')).error).toBe(
-      '"claude-code/claude-opus-5-5" is not a person. Name the person who decided the priority (human:<id>, or "human" for git\'s user.name) and quote what they said in "reason": this is a person\'s decision, never an agent\'s own.',
+      '"claude-code/claude-opus-5-5" is neither a person nor the project\'s lead (none named — "lead" in .novadev/novadev.json names one). Name the person who decided the priority (human:<id>, or "human" for git\'s user.name) and quote what they said in "reason": this is a person\'s decision or the lead\'s, never another agent\'s own.',
     );
     expect(json(run(root, 'todo', 'priority', 'login', 'critical', '--by', 'human:filipp')).error).toBe('A priority is one of urgent, high, normal, later — not "critical".');
     expect(json(run(root, 'todo', 'priority', 'login', '--by', 'human:filipp')).error).toBe('A priority is one of urgent, high, normal, later — not "".');
@@ -148,6 +149,111 @@ describe('novadev todo priority', () => {
     const root = three();
     expect(run(root, 'work', 'start', '2026-10-02_1', '--agent', 'claude-code/test').code).toBe(0);
     expect(json(run(root, 'todo', 'priority', 'login', 'urgent', '--by', 'human:filipp'))).toMatchObject({ priority: 'urgent', changed: true });
+  });
+});
+
+describe('the lead may change a priority ("lead" in novadev.json); any other agent may not', () => {
+  const LEAD = 'paperclip/minifil';
+
+  test('the lead\'s change is recorded with who, when, why and "as": "lead"; a reason is required', () => {
+    const root = three();
+    setManifest(root, { lead: LEAD });
+    const nd = `${root}/.novadev`;
+    const silent = run(root, 'todo', 'priority', 'login', 'urgent', '--by', LEAD);
+    expect(silent.code).toBe(1);
+    expect(json(silent).error).toBe(
+      'Say why: a priority changed by the lead needs a "reason" in the payload ({ "by", "reason" }) — it is what the board reads in the list of changes (novadev todo priority --changed-since <date>).',
+    );
+    expect(exists(root, '.novadev/todos/2026-10-02_1/01-login/todo.json')).toBe(false);
+    const r = json(run(root, 'todo', 'priority', 'login', 'urgent', payload(root, 'p.json', { by: LEAD, reason: 'Support chat: three customers cannot log in.' })));
+    expect(r).toMatchObject({ ref: '2026-10-02_1/01-login', priority: 'urgent', from: 'normal', changed: true, by: LEAD, as: 'lead' });
+    const entry = readJson(root, '.novadev/todos/2026-10-02_1/01-login/todo.json').history[0];
+    expect(entry).toMatchObject({ by: LEAD, as: 'lead', change: 'priority', from: 'normal', to: 'urgent', reason: 'Support chat: three customers cannot log in.' });
+    expect(entry.at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/);
+    // a person's change in the same project carries no "as", and still needs no reason
+    expect(priorityTodo(nd, 'login', 'high', { by: 'human:filipp' }, NOW)).not.toHaveProperty('as');
+    expect(Object.keys(readJson(root, '.novadev/todos/2026-10-02_1/01-login/todo.json').history[1]).sort()).toEqual(['at', 'by', 'change', 'from', 'to']);
+  });
+
+  test('another agent is refused, with the lead named; several leads may be named; team mode is not needed', () => {
+    const root = three();
+    setManifest(root, { lead: [LEAD, 'claude-code/lead'] });
+    expect(json(run(root, 'todo', 'priority', 'login', 'urgent', payload(root, 'p.json', { by: 'claude-code/claude-opus-5-5', reason: 'I think so.' }))).error).toBe(
+      '"claude-code/claude-opus-5-5" is neither a person nor the project\'s lead (paperclip/minifil, claude-code/lead). Name the person who decided the priority (human:<id>, or "human" for git\'s user.name) and quote what they said in "reason": this is a person\'s decision or the lead\'s, never another agent\'s own.',
+    );
+    expect(json(run(root, 'todo', 'priority', 'login', 'urgent', payload(root, 'q.json', { by: 'claude-code/lead', reason: 'Board asked for it first.' })))).toMatchObject({ changed: true, as: 'lead' });
+    expect(readLeads(`${root}/.novadev`)).toEqual({ leads: [LEAD, 'claude-code/lead'], error: null });
+  });
+
+  test('a "lead" novadev cannot read names nobody, and sync and doctor say so', () => {
+    const root = three();
+    setManifest(root, { lead: ['the boss', LEAD] });
+    expect(readLeads(`${root}/.novadev`).leads).toEqual([LEAD]);
+    const line = '.novadev/novadev.json: "lead" — "the boss" is not an actor';
+    expect(run(root, 'sync').stdout).toContain(line);
+    expect(run(root, 'doctor').stdout).toContain(line);
+    setManifest(root, { lead: LEAD });
+    expect(run(root, 'doctor').stdout).not.toContain('"lead"');
+  });
+});
+
+describe('novadev todo priority --changed-since — what the morning digest lists', () => {
+  function changed(): string {
+    const root = three();
+    setManifest(root, { lead: 'paperclip/minifil' });
+    const nd = `${root}/.novadev`;
+    priorityTodo(nd, 'dark', 'later', { by: 'human:filipp', reason: 'After the release.' }, new Date('2026-10-24T09:00:00Z'));
+    priorityTodo(nd, 'login', 'urgent', { by: 'paperclip/minifil', reason: 'Nobody can log in.' }, new Date('2026-10-25T06:30:00Z'));
+    priorityTodo(nd, 'export', 'high', { by: 'human:filipp' }, new Date('2026-10-25T08:00:00Z'));
+    return root;
+  }
+
+  test('--json: ref, title, from, to, by, byKind, at, reason — oldest first, from the given moment on', () => {
+    const root = changed();
+    const all = json(run(root, 'todo', 'priority', '--changed-since', '2026-10-01', '--json'));
+    expect(all.byAgents).toBe(1);
+    expect(all.changes.map((c: any) => [c.ref, c.from, c.to, c.by, c.byKind])).toEqual([
+      ['2026-10-01_1/01-dark-mode', 'normal', 'later', 'human:filipp', 'person'],
+      ['2026-10-02_1/01-login', 'normal', 'urgent', 'paperclip/minifil', 'agent'],
+      ['2026-10-01_1/02-export', 'normal', 'high', 'human:filipp', 'person'],
+    ]);
+    expect(all.changes[1]).toMatchObject({ change: 'priority', archived: false, as: 'lead', title: 'Magic link', reason: 'Nobody can log in.' });
+    expect(Date.parse(all.changes[1].at)).toBe(Date.parse('2026-10-25T06:30:00Z'));
+    expect(all.changes[2]).not.toHaveProperty('reason');
+    const late = json(run(root, 'todo', 'priority', '--changed-since', '2026-10-25T07:00:00Z', '--json'));
+    expect(late.changes.map((c: any) => c.ref)).toEqual(['2026-10-01_1/02-export']);
+    expect(late.byAgents).toBe(0);
+  });
+
+  test('--by-agent keeps only an agent\'s changes; the text form says who, and marks the agent', () => {
+    const root = changed();
+    const agents = json(run(root, 'todo', 'priority', '--changed-since', '2026-10-01', '--by-agent', '--json'));
+    expect(agents.changes.map((c: any) => c.by)).toEqual(['paperclip/minifil']);
+    const text = run(root, 'todo', 'priority', '--changed-since', '2026-10-01T00:00:00Z').stdout.split('\n');
+    expect(text[0]).toMatch(/^priority changes since 2026-10-01T\S+ — 3 \(1 by an agent\)$/);
+    expect(text[2]).toMatch(/^  2026-10-02_1\/01-login  normal → urgent  paperclip\/minifil \(agent, lead\)  \S+  — Nobody can log in\.  · Magic link$/);
+    expect(text[1]).toMatch(/^  2026-10-01_1\/01-dark-mode  normal → later  human:filipp  \S+  — After the release\.  · Dark mode$/);
+    expect(run(root, 'todo', 'priority', '--changed-since', '2027-01-01').stdout).toMatch(/^priority changes since \S+ — none\n$/);
+  });
+
+  test('a filing with a priority is listed as "filed"; an archived todo keeps its changes; no todo.json anywhere is an empty list', () => {
+    const root = project();
+    expect(json(run(root, 'todo', 'priority', '--changed-since', '2026-01-01', '--json')).changes).toEqual([]);
+    const filed = json(run(root, 'file-todo', 'file', payload(root, 'f.json', { by: 'claude-code/claude-opus-5-5', parts: [{ slug: 'crash', title: 'Crash', request: 'fix', priority: 'urgent' }] }))).filed[0].ref as string;
+    write(root, '.novadev/archive/2026/todos/2026-09-01_1/01-old/todo.json', JSON.stringify({ priority: 'high', history: [{ at: '2026-09-02T10:00:00+02:00', by: 'human:anna', change: 'priority', from: 'normal', to: 'high' }, { at: '2026-09-03T10:00:00+02:00', by: 'human:anna', change: 'after', to: [] }] }));
+    const changes = priorityChanges(`${root}/.novadev`);
+    expect(changes.map((c) => [c.ref, c.archived, c.change, c.from, c.to, c.byKind])).toEqual([
+      ['2026-09-01_1/01-old', true, 'priority', 'normal', 'high', 'person'],
+      [filed, false, 'filed', null, 'urgent', 'agent'],
+    ]);
+    expect(run(root, 'todo', 'priority', '--changed-since', '2026-01-01').stdout).toContain(`  ${filed}  filed urgent  claude-code/claude-opus-5-5 (agent)  `);
+  });
+
+  test('refused: a value that is no date, a todo named beside it', () => {
+    const root = three();
+    expect(json(run(root, 'todo', 'priority', '--changed-since', 'yesterday')).error).toBe('"yesterday" is not a date — write a day (2026-11-12) or a timestamp with an offset (2026-11-12T07:00:00+01:00).');
+    expect(json(run(root, 'todo', 'priority', 'login', '--changed-since', '2026-10-01')).error).toContain('--changed-since lists the changes of every todo: leave the todo out.');
+    expect(parseSince('2026-10-25T07:00:00+01:00').getTime()).toBe(Date.parse('2026-10-25T06:00:00Z'));
   });
 });
 
