@@ -8,15 +8,15 @@ status: stable
 area: work
 created: 2026-11-10
 tags: [work, lock, covers, partial-lock, todo-lock, working-md, waypoint, pause, resume, abandoned, heartbeat, session, novadev-pause, worktree, registry, claims, overlap, one-owner-per-file]
-touches: [src/work.ts, src/registry.ts, tests/work.test.ts, tests/worktree-locks.test.ts, tests/todo-locks.test.ts, tests/old-locks.test.ts, templates/skills/novadev-pause.md]
+touches: [src/work.ts, src/registry.ts, src/claim-policy.ts, tests/work.test.ts, tests/worktree-locks.test.ts, tests/todo-locks.test.ts, tests/old-locks.test.ts, templates/skills/novadev-pause.md]
 depends-on: []
 supersedes: []
 superseded-by: []
 conflicts-with: []
 sources:
   - resource: commit:6655fee
-generated: { by: claude-code/claude-fable-5-2, at: 2026-11-12T14:42:34+01:00 }
-stale_after: 2027-11-12T14:42:34+01:00
+generated: { by: claude-code/claude-fable-5-2, at: 2026-11-12T15:39:48+01:00 }
+stale_after: 2027-11-12T15:39:48+01:00
 ---
 
 # FEAT-0014 — The work lock: waypoints, pause and resume
@@ -63,6 +63,9 @@ stale_after: 2027-11-12T14:42:34+01:00
   an overlap with a batch in work in another worktree is refused unless `--allow-overlap`.
   A claim is judged once, when it is added: resuming a lock does not re-judge the claims it
   holds, so `work claim` on a paused lock and `work start` agree.
+- **Claims as notices** (opt-in, `"claims": "notice"` in the main checkout's novadev.json): an overlap goes on and
+  is said (`shared` in the answer); only under `"protectedPaths"` (paths, globs, `<sub-repo>:<path>`) is it refused as
+  before. `status` and `worktree list` name every path two worktrees both claim (`sharedClaims`). Absent = locks, as ever.
 - **Part of a batch, as 0.17.0 wrote it**: one lock at the batch root that holds only some todos
   (`covers:` in working.md, `covers` in the registry entry `locks/<batch>@<worktree hash>.json`) —
   still read, resumed, paused, claimed for and stopped, never made new (`--todo` takes todo locks now);
@@ -91,6 +94,7 @@ and the claims (`normalizeClaim`, `claimOverlaps`); `writeLock` in work.ts mirro
 - 2026-11-10 — fixes from the independent review of batch 2026-11-10_1, before the 0.16.0 release (`2026-11-10_1/07-worktree-command`)
 - 2026-11-12 — part of a batch (`work start --todo`), worktree-only claims inside a novadev worktree, claims judged once (`2026-11-12_1/03-work-start-one-todo-claims`, `2026-11-12_1/04-worktree-batch-claims-files-only`)
 - 2026-11-12 — the todo is the unit of work: a lock per todo, the whole batch as one lock for a solo round, 0.17.0 locks unchanged (`2026-11-12_2/02-todo-is-the-unit-of-work`)
+- 2026-11-12 — claims as notices with protected paths (`"claims": "notice"`, `"protectedPaths"`, src/claim-policy.ts): an overlap outside a protected path is said, not refused (`2026-11-12_2/03-claims-warn-protected-paths-lock`); `work start` also judges "do after" links (FEAT-0020) and the work-in-progress limit (FEAT-0023)
 
 ---
 

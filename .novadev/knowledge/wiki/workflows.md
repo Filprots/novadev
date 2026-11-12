@@ -1,7 +1,7 @@
 ---
 type: Wiki Page
 title: Workflows
-description: "Exact commands to install (bun link), run (bun bin/novadev.ts vs the linked novadev, which is this working tree), test (bun test, ~55 s, 625 tests), and release a version (the bump places, migrations, migrate-repo + deploy here and in consumer projects); no CI, no hooks, no secrets."
+description: "Exact commands to install (bun link), run (bun bin/novadev.ts vs the linked novadev, which is this working tree), test (bun test, ~75 s, 717 tests), and release a version (the bump places, migrations, migrate-repo + deploy here and in consumer projects); no CI, no hooks, no secrets."
 tags: [workflows, install, run, test, release, version, deploy, dogfooding]
 sources:
   - resource: repo:package.json
@@ -12,8 +12,8 @@ sources:
   - resource: repo:src/sync.ts
   - resource: repo:src/deploy.ts
   - resource: repo:README.md
-generated: { by: claude-code/claude-fable-5-2, at: 2026-11-12T14:42:34+01:00 }
-stale_after: 2027-02-10T14:42:34+01:00
+generated: { by: claude-code/claude-fable-5-2, at: 2026-11-12T15:39:48+01:00 }
+stale_after: 2027-02-10T15:39:48+01:00
 ---
 
 # Workflows
@@ -41,7 +41,7 @@ No build step, no install step: there are no dependencies. Bun >= 1.4 is require
 ## Test
 
 ```sh
-bun test                     # the whole suite: 625 tests in 33 files, ~55 s (verified 2026-11-12, branch robust-work)
+bun test                     # the whole suite: 717 tests in 38 files, ~75 s (verified 2026-11-12, branch robust-work)
 bun test tests/work.test.ts  # one file
 bun test -t "novadev work stop"   # by test name
 ```

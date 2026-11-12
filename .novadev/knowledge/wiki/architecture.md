@@ -12,8 +12,8 @@ sources:
   - resource: repo:src/knowledge.ts
   - resource: repo:src/links.ts
   - resource: repo:src/work.ts
-generated: { by: claude-code/claude-fable-5-2, at: 2026-11-12T14:42:34+01:00 }
-stale_after: 2027-02-10T14:42:34+01:00
+generated: { by: claude-code/claude-fable-5-2, at: 2026-11-12T15:39:48+01:00 }
+stale_after: 2027-02-10T15:39:48+01:00
 ---
 
 # Architecture
@@ -51,7 +51,11 @@ walking up from the cwd to the folder that contains `.novadev/` (`requireProject
 | sub-repos (`"subrepos"`, `repo@hash` commits, `**Repos:**`) | `src/subrepos.ts` — used by links and placement |
 | merge rules (`.gitattributes` block, driver) and `sync --after-merge` | `src/merge-rules.ts` |
 | the review record and team mode (`todoState`'s review gate) | `src/review.ts` — imported by `lib.ts` |
-| `worktree …` (one worktree per task across repositories) | `src/worktree.ts` |
+| `worktree …` (one worktree per task across repositories; `queue …`, the merge queue) | `src/worktree.ts`; the queue's state and its one-at-a-time lock: `src/queue.ts` |
+| what an overlapping claim means (`"claims"`, `"protectedPaths"`), who shares what | `src/claim-policy.ts` |
+| a todo's priority, its "do after" links, the lead | `src/todo-meta.ts`, `src/todo-links.ts`, `src/lead.ts` — none imports `todo.ts` |
+| area owners and required reviewers (`"owners"`, `owners …`) | `src/owners.ts` |
+| the work-in-progress limit (`"wipLimit"`) | `src/wip.ts` (counts; `work.ts` refuses) |
 | git (read-only questions) | `src/git.ts` — but see *The git boundary* |
 
 Dependency direction: command modules → audits/mechanics → `lib.ts` → `okf.ts`. `okf.ts`
@@ -100,7 +104,7 @@ the fixes and reports them as "stale" instead of writing.
 | archive | `.novadev/archive/<year>/{todos,totest}/` | `sync`, `archive` |
 | knowledge | `.novadev/knowledge/` (concepts, derived `index.md`s, `log.md`) | agent + `knowledge log`; `sync` derives |
 | metrics snapshot | `.novadev/metrics/latest.json` | `sync` only |
-| the registry (every worktree's batches in work with their claims; the worktrees novadev made) | `<git common dir>/novadev/locks/<batch>.<todo>.json` (a todo), `<batch>.json` (the whole batch; a 0.17.0 lock on part of a batch: `<batch>@<worktree hash>.json`), `…/worktrees/<name>.json` — inside `.git`, never committed | `work`, `worktree` (`src/registry.ts`) |
+| the registry (every worktree's batches in work with their claims; the worktrees novadev made) | `<git common dir>/novadev/locks/<batch>.<todo>.json` (a todo), `<batch>.json` (the whole batch; a 0.17.0 lock on part of a batch: `<batch>@<worktree hash>.json`), `…/worktrees/<name>.json`, `queue.json` and `queue.lock` (the merge queue) — inside `.git`, never committed | `work`, `worktree` (`src/registry.ts`) |
 
 All of it is meant to be committed, except the registry: it is a mirror of the locks for the
 other worktrees of the same clone. Work files
