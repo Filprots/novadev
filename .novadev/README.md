@@ -41,8 +41,8 @@ them first — `novadev sync` says so.
 
 **Agents:** the rule of the house is `skills/novadev-work.md` — the always-applied
 playbook. It defines the loop; start every substantive task by loading `knowledge/index.md`
-(build the wiki per the playbook if it is missing), take the batch's lock before the first
-change (`novadev work start`), record every knowledge change with `novadev knowledge log`,
+(build the wiki per the playbook if it is missing), take the todo's lock before the first
+change (`novadev work start <batch>/<todo>`), record every knowledge change with `novadev knowledge log`,
 and close every round with `novadev sync` and `novadev work stop` — or `/novadev-pause`
 when work remains. Four companion playbooks sit beside it: `novadev-file-a-todo.md`,
 `novadev-what-to-test.md`, `novadev-test-review.md` for the human's own entry points, and
@@ -54,8 +54,8 @@ files it (`/novadev-file-a-todo`); say you want to test and it shows you the que
 (`/novadev-test-review`); say "pause" and it writes down exactly where things stopped
 (`/novadev-pause`), so the next `/novadev-work` picks up from there. By hand if you
 prefer: drop task briefs into `todos/` (`novadev new` scaffolds a batch), see whether a
-work cycle is on and where it is with `novadev status` (a batch in work carries
-`todos/<batch>/working.md`, its lock), see what needs your own testing with
+work cycle is on and where it is with `novadev status` (a todo in work carries
+`todos/<batch>/<todo>/working.md`, its lock), see what needs your own testing with
 `novadev totest`, search capabilities with `novadev features` and everything the project
 knows with `novadev knowledge`, and validate structure and links with `novadev doctor` /
 `novadev links`.

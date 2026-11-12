@@ -20,11 +20,12 @@ Four companion playbooks sit beside it:
 `novadev-test-review.md` (write up testing they already did) and
 `novadev-pause.md` (stop the loop where it is, so the next session resumes from there).
 
-A batch you work is LOCKED while you work it: `novadev work start <batch>` takes its
-lock (`todos/<batch>/working.md`), `novadev work waypoint` records where you are, and the
-round ends with `novadev work stop` — or with `/novadev-pause` when work remains, which
-writes exactly where things stopped. A paused or abandoned batch is where the next
-session starts: `novadev sync` lists it.
+A todo you work is LOCKED while you work it: `novadev work start <batch>/<todo>` takes its
+lock (`todos/<batch>/<todo>/working.md`), `novadev work waypoint` records where you are, and
+the work on it ends with `novadev work stop` — or with `/novadev-pause` when work remains,
+which writes exactly where things stopped. A paused or abandoned todo is where the next
+session starts: `novadev sync` lists it. (`novadev work start <batch>` takes a whole batch,
+for one developer who works all of it.)
 
 The human writes todo briefs; you do the bookkeeping — but keep them informed and ask
 when a decision is theirs. A chat request to implement/fix/change anything no open todo

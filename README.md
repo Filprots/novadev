@@ -144,6 +144,29 @@ so the playbooks learn the new commands. It is for more builders at once in one 
 - `novadev test-result skip <payload>`: the person skips scenarios (or the rest of a round), the
   round closes without a confirmation, and its todos get `ai_testskipped.md`.
 
+0.18.0 changes no layout: `migrate-repo` only stamps the version; run `novadev deploy` after it
+so the playbooks learn the new commands. It is for a team working in parallel: the todo is the
+unit of work, conflicts are caught at the merge, and todos carry priority and order. Two things
+change for everyone:
+
+- **The unit of work is the todo.** `novadev work start <batch>/<todo>` locks one todo, in
+  `todos/<batch>/<todo>/working.md` (registry `locks/<batch>.<todo>.json`);
+  `work start <batch> --todo <nn>` is now that same lock, one per todo. `work start <batch>` alone
+  still locks the whole batch for one developer. Locks and registry entries written by 0.17.0 and
+  earlier — whole-batch and `covers:` — keep working until they are stopped. `status`,
+  `status --json`, `todo list` and `todo show` say per todo who holds it.
+- **`novadev worktree merge <name> --yes` checks the merged result first.** It merges the default
+  branches into the branch, in the worktree, runs the gate there, and only then lands it; one
+  merge at a time per clone. `novadev worktree queue add|list|run|remove` lines approved
+  worktrees up and lands them one after another the same way.
+
+Everything else is new and off, or empty, until you use it: a todo's priority
+(`novadev todo priority`) and "do after" links (`novadev todo after`), kept in the todo's
+`todo.json`; and the settings `"lead"`, `"owners"`, `"claims": "notice"` with `"protectedPaths"`,
+`"wipLimit"` and `"wipCountsPaused"` — all read from the main checkout's `novadev.json`. Give
+every developer or agent its own actor id (`--agent`, `by`) before turning on the limit, the
+owners or the lead: those rules tell people apart by it. The JSON outputs only gain keys.
+
 ## The system
 
 ```
