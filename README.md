@@ -46,6 +46,7 @@ novadev status                        # is a work cycle on? then open todos + re
 novadev status --json                 # the same as data (a tool, a chat bot); totest --json too
 novadev todo list --state open        # open todos with their titles, by priority; `todo show <ref>` gives one as JSON
 novadev todo priority <ref> urgent --by human:<id>   # a person's decision: urgent | high | normal | later
+novadev todo after <ref> <ref…>       # the todos it waits for; `work start` refuses it until they are completed
 novadev work start 2026-08-16_1       # take a batch's lock (agents do this; see Work in progress)
 novadev features --touching src/auth  # which features already own this code (conflict pre-flight)
 novadev features --hubs               # which features lean on each hub (see Placement)
@@ -153,7 +154,7 @@ so the playbooks learn the new commands. It is for more builders at once in one 
     features/    what the software DOES — FEAT-NNNN/ folders: feature.md + derived work.md/tests.md
   todos/       task batches YYYY-MM-DD_N/<todo>/ — briefs: human-authored (.txt/.md + screenshots) or agent-filed prompt.md (chat-initiated);
                a batch in work carries working.md, its lock (see Work in progress);
-               a todo's todo.json holds its priority (see Priority and order)
+               a todo's todo.json holds its priority and the todos it waits for (see Priority and order)
   archive/     finished work by year — <year>/todos/<batch>/ and <year>/totest/<task>/<round>/
   postponed/   deferred work with do-when / discard-if triggers
   sparks/      raw unshaped ideas
@@ -362,6 +363,60 @@ $ novadev todo list
 A `todo.json` novadev cannot read (a merge conflict, a level that is none of the four) is a
 problem `novadev sync` and `novadev doctor` name; until it is fixed the todo reads as
 `normal`.
+
+### "Do after" links — a todo that waits for another
+
+A todo can name the todos it **waits for**. The links are kept in the same `todo.json`, as
+full refs, so they still resolve after a batch is archived:
+
+```json
+{
+  "after": ["2026-10-01_1/01-schema"],
+  "history": [
+    { "at": "2026-11-12T15:10:40+01:00", "by": "claude-code/claude-opus-5-5", "change": "after",
+      "from": [], "to": ["2026-10-01_1/01-schema"] }
+  ]
+}
+```
+
+```sh
+novadev todo after 2026-10-01_1/02 2026-10-01_1/01   # 02 waits for 01 (adds a link); refs as `novadev todo` takes them
+novadev todo after api --clear                       # remove its links; `--clear <ref>…` replaces them
+novadev todo after api                               # show them: after, waitsFor, ready
+```
+
+`--by <actor>` records who set them. When filing, a part's `"after"` lists what it waits for:
+refs of existing todos, or the `slug` of another part of the same payload. A link to itself,
+to a todo that does not exist, or one that would close a cycle is refused, and so are links on
+a finished todo.
+
+**A dependency is satisfied when it is completed** (`completed` or `confirmed`). In team mode
+that means approved and merged. An archived completed todo is satisfied. A todo is **ready**
+when it can be started and nothing it waits for is unsatisfied.
+
+- **`novadev work start` refuses a todo that still waits**, and names what it waits for. A
+  start that covers several todos — a whole batch, or `--todo 01 --todo 02` — judges each todo
+  it covers that is still to be worked. A dependency inside the same start is fine: one holder
+  works them, in the order the links give. A dependency outside it must be completed. The way
+  to start early is to remove the link, which is recorded.
+- **The lists say it.** Once any open todo has a link, `novadev todo list` and `novadev status`
+  print `ready` or `waits for …` beside each open todo; their JSON (and `todo show`) carries
+  `after`, `waitsFor` (each with its state) and `ready` for every todo. In sync's NEXT ACTIONS
+  a todo that waits says "do that first" in place of "do the work".
+- **sync and doctor check the links** of the todos that are not finished. A link to a todo that
+  does not exist, and todos that wait for each other in a cycle, are PROBLEMS: nothing in
+  them can ever start. A link to a todo that did not land (`ai_failed.md`: cancelled,
+  deferred) is a NEXT ACTION (a note in doctor): somebody decides whether the link goes.
+
+```
+$ novadev todo list
+2026-10-02_1/01-docs  (open, high, waits for 2026-10-01_1/02-api)  The docs
+2026-10-01_1/01-schema  (open, ready)  The schema
+2026-10-01_1/02-api  (open, waits for 01-schema)  The API
+```
+
+(The `high` todo is listed first and still waits: priority orders the list, the links say what
+can be started.)
 
 ## Work in progress — the lock, waypoints and pauses
 
@@ -1163,7 +1218,7 @@ that exist for exactly this:
 
 ```sh
 novadev file-todo plan                  # which batch a chat request lands in, and the next number
-novadev file-todo file payload.json     # write the folders, the briefs, and the attachments (a part's "priority" → its todo.json)
+novadev file-todo file payload.json     # write the folders, the briefs, and the attachments (a part's "priority" and "after" → its todo.json)
 
 novadev test-result tasks [query]       # resolve "16" / "the selection one" against the real queue
 novadev test-result write payload.json  # one scenario's verdict → scenario-<N>.txt   (APPENDS)

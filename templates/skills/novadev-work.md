@@ -109,6 +109,11 @@ Phase 1 below routes to the first; phases 5 and 6 sit either side of the next tw
   (`novadev todo list`, `novadev status`, sync's NEXT ACTIONS) is ordered by it, then by
   filing order. A todo without the file is `normal`. It is a PERSON's decision: never set
   or change one on your own, and never edit `todo.json` by hand.
+- **"Do after" link** — a todo names the todos it WAITS FOR (`after` in its `todo.json`,
+  set by `novadev file-todo` or `novadev todo after <ref> <ref>…`). A dependency is
+  satisfied once it is completed (in team mode: approved and merged; an archived completed
+  todo counts). A todo is **ready** when nothing it waits for is unsatisfied; the lists say
+  `ready` or `waits for …`, and `novadev work start` refuses a todo that still waits.
 - **Feature** — one capability, `knowledge/features/FEAT-NNNN-<slug>/`: you write
   `feature.md`; `work.md` and `tests.md` beside it are generated.
 - **Concept** — one file of the knowledge bundle: a wiki page, a memory, a feature. It opens
@@ -230,7 +235,7 @@ continues normally.
 ```sh
 novadev file-todo plan                 # which batch, and the next number
 payload=$(mktemp -t novadev-todo.XXXXXX.json)   # or your session's own scratch dir
-novadev file-todo file "$payload"      # { "parts": [ { slug, title, request, context?, attachments?, priority? } ], "by"? }
+novadev file-todo file "$payload"      # { "parts": [ { slug, title, request, context?, attachments?, priority?, after? } ], "by"? }
 ```
 
    It reuses the batch a conversation opened earlier while nobody has started work in
@@ -250,6 +255,11 @@ novadev todo priority 2026-10-24_1/02 urgent "$payload"   # urgent | high | norm
 
    A brief a person wrote by hand that says how urgent it is ("URGENT", "no hurry") is such
    a decision too: record it the same way before you plan.
+   A part carries `"after"` when the order between todos matters ("the import needs the new
+   table first"): the slug of another part of the same payload, or the ref of an existing
+   todo. For todos that already exist, `novadev todo after <ref> <ref>…` adds links and
+   `--clear` removes them (`--by <actor>` records who). An order that lives only in a
+   brief's prose ("stage 3 after stage 2") is not enforced: write the link.
 3. **What goes in the brief.** `request` is THEIR words — verbatim where short, tightly
    faithful where long. `context` is what you know that their words do not say:
    constraints, clarifications and decisions stated in chat. The command renders:
@@ -278,6 +288,16 @@ novadev todo priority 2026-10-24_1/02 urgent "$payload"   # urgent | high | norm
 ACTIONS) are ordered: `urgent`, then `high`, `normal`, `later`, and inside one level the
 filing order. Work in that order unless the human names a todo. An `urgent` todo goes before
 everything else you have not started; it skips no check.
+
+**Take only what is ready.** A todo that `waits for …` another is not yours to start yet:
+`novadev work start` refuses it until every todo it waits for is completed (in team mode:
+approved and merged), and names them. Do the todos it waits for first, or take another
+ready todo. In a round that covers several todos of one batch (a whole-batch start, or
+`--todo a --todo b`), the links between THOSE todos do not refuse the start: work them in
+the order the links give. Never remove a link to get past the refusal on your own
+judgement: `novadev todo after <ref> --clear` is for when the human or the lead decided the
+order no longer holds. When sync says a todo waits for one that did not land (cancelled,
+deferred), or names a cycle, ask whoever decides the order; do not guess.
 
 **Multi-todo batches**: read EVERY brief first, then group the todos into waves (quick
 fixes ship while the big ones are still being designed), spot cross-todo overlaps (two
@@ -348,6 +368,8 @@ first (phase 1), then its batch is locked.
 - **A finished batch** (`completed.md`) → refused: a new request gets a new batch.
 - **In work in another worktree** → refused, with where. A paused one resumes in ITS worktree,
   where its pause record is; never `--take` it from here unless the human says so.
+- **A todo that still waits for another** ("do after" link, phase 2) → refused, naming what
+  it waits for. Start the ready todos only (`--todo`), or wait.
 
 **Part of a batch.** When you were given only some todos of a batch (the others are someone
 else's, or wait), lock just those: `novadev work start <batch> --todo 03 [--todo …]` (a todo's

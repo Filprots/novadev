@@ -11,7 +11,7 @@ import { WIKI_PAGES, auditKnowledge, parseKnowledgeSettings } from '../src/knowl
 import { parseEvents } from '../src/knowledge-log.ts';
 import { readFrontmatterText } from '../src/okf.ts';
 import { placementState } from '../src/placement.ts';
-import { priorityTodo } from '../src/todo.ts';
+import { afterTodo, priorityTodo } from '../src/todo.ts';
 import { PRIORITIES, readTodoMeta } from '../src/todo-meta.ts';
 import {
   REPO,
@@ -518,5 +518,62 @@ describe('priority in the docs', () => {
 
   test('the CLI help names the command', () => {
     expect(run(tempDir(), 'help').stdout).toContain('"priority <ref> <urgent|high|normal|later> [<payload.json>] [--by <actor>]"');
+  });
+});
+
+describe('"do after" links in the docs', () => {
+  const section = readme.split('### "Do after" links — a todo that waits for another')[1]!.split('\n## ')[0]!;
+
+  test('the README states the rules the code enforces, and its todo.json example is one novadev reads', () => {
+    for (const text of [
+      'novadev todo after 2026-10-01_1/02 2026-10-01_1/01',
+      '`--clear <ref>…` replaces them',
+      '**A dependency is satisfied when it is completed**',
+      'In team mode\nthat means approved and merged',
+      'An archived completed todo is satisfied',
+      '**`novadev work start` refuses a todo that still waits**',
+      'A dependency inside the same start is fine',
+      '`after`, `waitsFor` (each with its state) and `ready`',
+      'are PROBLEMS',
+      'is a NEXT ACTION (a note in doctor)',
+    ]) {
+      expect(section).toContain(text);
+    }
+    const example = fences(section, 'json').find((body) => body.includes('"after"'))!;
+    const root = project();
+    todo(root, '2026-10-01_1/02-api');
+    write(root, '.novadev/todos/2026-10-01_1/02-api/todo.json', example);
+    expect(readTodoMeta(join(root, '.novadev/todos/2026-10-01_1/02-api'))).toMatchObject({ priority: 'normal', after: ['2026-10-01_1/01-schema'], error: null });
+  });
+
+  test('its sample list is what `novadev todo list` prints, line for line', () => {
+    const sample = fences(section, '').find((body) => body.includes('$ novadev todo list'))!;
+    const root = project();
+    const brief = (title: string) => `# prompt — x\n\n## ${title}\nThe words.\n`;
+    todo(root, '2026-10-01_1/01-schema', { 'prompt.md': brief('The schema') });
+    todo(root, '2026-10-01_1/02-api', { 'prompt.md': brief('The API') });
+    todo(root, '2026-10-02_1/01-docs', { 'prompt.md': brief('The docs') });
+    const nd = join(root, '.novadev');
+    afterTodo(nd, 'api', ['schema']);
+    afterTodo(nd, 'docs', ['2026-10-01_1/02']);
+    priorityTodo(nd, 'docs', 'high', { by: 'human:filipp' });
+    expect(run(root, 'todo', 'list').stdout).toBe(sample.split('\n').slice(1).join('\n'));
+  });
+
+  test('the playbooks teach it: links only for an order the person stated, take only what is ready, never clear a link to get past the refusal', () => {
+    expect(filingPlaybook).toContain('what it must wait for (`after`) — **only when they said an order**');
+    expect(filingPlaybook).toContain('`"after": ["new-table"]`');
+    expect(filingPlaybook).toContain('novadev todo after <ref> <ref>…');
+    expect(playbook.split('## Vocabulary')[1]!.split('\n---')[0]!).toContain('**"Do after" link**');
+    expect(playbook).toContain('**Take only what is ready.**');
+    expect(playbook).toContain('Never remove a link to get past the refusal on your own\njudgement');
+    expect(playbook).toContain('- **A todo that still waits for another** ("do after" link, phase 2) → refused');
+    expect(todosReadme).toContain('`novadev work start` refuses a todo that still waits');
+  });
+
+  test('the CLI help names the command', () => {
+    const help = run(tempDir(), 'help').stdout;
+    expect(help).toContain('"after <ref> [<ref>…] [--clear] [--by <actor>]"');
+    expect(help).toContain('"after": the todos it waits for');
   });
 });

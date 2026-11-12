@@ -57,11 +57,15 @@ actually described; never invent work they did not ask for. Give each part:
   "whenever", "no hurry", "someday" → `later`. Said nothing about when → leave it out (it is
   `normal`), and do not ask. Signalled urgency but you cannot tell how much → ask them one
   short question ("urgent, or high?"). The priority decides what is worked first, so it is
-  theirs to give, never yours to guess.
+  theirs to give, never yours to guess;
+- what it must wait for (`after`) — **only when they said an order** ("first the table, then
+  the import", "after the login fix is in"): the slug of the other part of this filing, or
+  the ref of an existing todo (`novadev todo list` shows them). Never invent an order they
+  did not state.
 
 **4. Show the plan and WAIT.** Answer with the batch name and a numbered list: for each
-part, its title, one line of what it will say, which files go in it, and its priority when
-it is not normal. Then ask plainly
+part, its title, one line of what it will say, which files go in it, its priority when
+it is not normal, and what it waits for when they gave an order. Then ask plainly
 whether to file it. **Do not run the `file` command until they say yes.** If they change
 the split, redo this step. "Just file it" or "go ahead" is the yes.
 
@@ -98,6 +102,10 @@ For each part write:
   id from git) or `human:<id>`. It is recorded with the priority, in the todo's `todo.json`.
   To change the priority of a todo that already exists, when they ask for that:
   `novadev todo priority <ref> <level> <payload.json>` with `{ "by", "reason" }`.
+- `after` — a list of what the part waits for, when they stated an order (step 3):
+  `"after": ["new-table"]` (another part of this payload, by its slug) or
+  `"after": ["2026-09-08_4/02"]` (an existing todo). Work on the part cannot start until
+  those are completed. For a todo that already exists: `novadev todo after <ref> <ref>…`.
 - **A standing rule is knowledge, not only a todo.** When they state something that must
   hold beyond this one change — "never…", "always…", "from now on…", "we decided…" — keep
   their exact words in `request` and add one line to `context`: *Standing rule — record it
