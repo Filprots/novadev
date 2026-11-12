@@ -19,8 +19,8 @@ import {
 import { worktreeList } from './git.ts';
 import { metricsStatusLine } from './metrics-audit.ts';
 import { insideWorktree, registryLocks } from './registry.ts';
-import { todosInOrder } from './todo.ts';
-import { batchesByPriority, priorityTag, todoPriority, todosByPriority } from './todo-meta.ts';
+import { stateText, todosInOrder, usesLinks } from './todo.ts';
+import { batchesByPriority } from './todo-meta.ts';
 import { auditWork, latestLine, listWorkLocks, lockLiveness, phaseLabel, readWorkLock } from './work.ts';
 
 const STATE_MARK = {
@@ -85,7 +85,7 @@ export function statusData(nd: string, now: Date = new Date()): Record<string, u
       batch,
       readyToArchive: batchIsDone(join(nd, 'todos', batch)),
       inWork: lock === null ? null : lock.state === 'invalid' ? 'unreadable' : lock.lock.state,
-      todos: todos.filter((t) => t.batch === batch).map(({ todo, title, state, priority }) => ({ todo, title, state, priority })),
+      todos: todos.filter((t) => t.batch === batch).map(({ todo, title, state, priority, after, waitsFor, ready }) => ({ todo, title, state, priority, after, waitsFor, ready })),
     };
   });
   const counts: Record<string, number> = {};
@@ -140,7 +140,10 @@ export function status(args: string[] = []): void {
   }
 
   // Open batches — by priority (todo-meta.ts): a batch with an urgent todo to do first, and in a batch the urgent todo first.
+  // Each todo says what it waits for ("do after" links, todo-links.ts), or that it is ready, once any todo has a link.
   const batches = batchesByPriority(join(nd, 'todos'), todoState);
+  const listed = todosInOrder(nd);
+  const showReady = usesLinks(listed);
   console.log(`\ntodos — ${batches.length} open batch(es)`);
   for (const batch of batches) {
     const batchDir = join(nd, 'todos', batch);
@@ -149,10 +152,7 @@ export function status(args: string[] = []): void {
       lock === null ? '' : lock.state === 'invalid' ? '  [lock unreadable]' : lock.lock.state === 'paused' ? '  [paused]' : '  [in work]';
     const done = batchIsDone(batchDir) ? '  [ready to archive]' : mark;
     console.log(`  ${batch}${done}`);
-    for (const todo of todosByPriority(batchDir)) {
-      const state = todoState(join(batchDir, todo));
-      console.log(`    ${STATE_MARK[state]} ${todo}  (${state}${priorityTag(todoPriority(join(batchDir, todo)))})`);
-    }
+    for (const t of listed.filter((item) => item.batch === batch)) console.log(`    ${STATE_MARK[t.state]} ${t.todo}  ${stateText(t, showReady)}`);
   }
   if (batches.length === 0) console.log('  (none)');
 

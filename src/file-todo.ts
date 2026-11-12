@@ -3,11 +3,13 @@
 //   novadev file-todo plan               which batch the todos would land in, and the next number
 //   novadev file-todo file <payload>     create the folders, write the briefs, copy the files in
 //
-// The payload is a JSON FILE — `{ "parts": [ { slug, title, request, context?, attachments?, priority? } ], "by"? }`
+// The payload is a JSON FILE — `{ "parts": [ { slug, title, request, context?, attachments?, priority?, after? } ], "by"? }`
 // — because a request is multi-line prose written by a person, and quoting that through a shell is
 // how it gets mangled. `attachments` are absolute paths to files already on disk. `priority` is
 // urgent | high | normal | later, named only when the person signalled one (it goes into the todo's
-// todo.json, todo-meta.ts); `by` is the person who asked (`human:<id>`, or `human` for git's user.name).
+// todo.json, todo-meta.ts); `after` lists the todos the part waits for — refs, or the slug of another part
+// of the same payload (todo-links.ts); `by` is the person who asked (`human:<id>`, or `human` for git's
+// user.name).
 //
 // Both commands answer in JSON on stdout, and errors as `{ "error": … }` with a non-zero exit, so
 // the agent driving them can read the outcome instead of guessing from prose.

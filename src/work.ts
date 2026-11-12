@@ -86,6 +86,7 @@ import {
   type TodoState,
 } from './lib.ts';
 import { ACTOR_FORMAT, actorKind, isTimestamp, nowTimestamp } from './okf.ts';
+import { refuseWaitingTodos } from './todo-links.ts';
 
 export const LOCK_STATES = ['working', 'paused'] as const;
 export type LockState = (typeof LOCK_STATES)[number];
@@ -759,6 +760,9 @@ export function startWork(root: string, nd: string, batch: string, opts: StartOp
     throw new Error(`Batch ${batch} is locked here for all its todos — --todo cannot narrow that lock. Stop it first (\`novadev work stop ${batch}\`), then start the todos you want.`);
   }
   const covers: string[] | null = kept !== null && kept.covers !== null ? [...kept.covers, ...named.filter((t) => !kept.covers!.includes(t))] : named.length > 0 ? named : null;
+
+  // "Do after" links (todo-links.ts): a todo that still waits for another is not started.
+  refuseWaitingTodos(nd, batch, covers);
 
   // In work in another worktree? That worktree's working.md is on its own branch, invisible here;
   // the registry says so. A live or paused one is refused (resume it where it is); an abandoned one

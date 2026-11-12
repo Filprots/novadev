@@ -199,11 +199,6 @@ export function orderByPriority<T>(items: readonly T[], priorityOf: (item: T) =>
     .map((entry) => entry.item);
 }
 
-/** The todo folders of a batch, the highest priority first, then by folder name. */
-export function todosByPriority(batchDir: string): string[] {
-  return orderByPriority(listDirs(batchDir), (todo) => todoPriority(join(batchDir, todo)));
-}
-
 /**
  * The open batches in the order `novadev status` shows them, by the best priority among their unfinished
  * todos: a batch with an urgent todo to do comes first, one with only `later` work left comes last, and

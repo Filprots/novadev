@@ -12,8 +12,13 @@
 //   novadev todo priority <ref> <level> [<payload.json>] [--by <actor>]
 //                                                            urgent|high|normal|later, on a person's decision: {by, reason}
 //                                                            — who and when go into the todo's todo.json (todo-meta.ts)
+//   novadev todo after <ref> [<ref>…] [--clear] [--by <actor>]
+//                                                            the todos it waits for ("do after" links, todo-links.ts):
+//                                                            refs add links, --clear removes them all (with refs:
+//                                                            replaces them), no refs shows them
 //
-// `list` and the JSON views order the todos by priority (urgent first), then by filing order.
+// `list` and the JSON views order the todos by priority (urgent first), then by filing order, and say for
+// each todo whether it is ready or which todos it waits for.
 //
 // A <ref> is how people name a todo: `2026-10-16_2/02-router-…`, `2026-10-16_2/02`, or a word of its slug that only one
 // open todo has. The two writes follow the playbook's intake rules: a todo with a terminal record, or one waiting on a
@@ -40,6 +45,7 @@ import { ACTOR_FORMAT, actorKind } from './okf.ts';
 import { RECORD_REVIEW, REVIEW_HISTORY_DIR, parseReviewPayload, renderReview } from './review.ts';
 import { liveElsewhere, lockLiveness, readWorkLock } from './work.ts';
 import { copyAttachments } from './todo-filing.ts';
+import { type LinkFacts, changeAfter, linkReader, linkTag } from './todo-links.ts';
 import { PRIORITIES, type Priority, changePriority, orderByPriority, priorityTag, readTodoMeta, reasonText, resolveActor } from './todo-meta.ts';
 
 const PROMPT = 'prompt.md';
@@ -53,9 +59,11 @@ const USAGE =
   '       novadev todo edit <ref> <payload.json>       ({ "title"?, "request"?, "context"?, "reason"? })\n' +
   '       novadev todo cancel <ref> <payload.json>     ({ "reason": … })\n' +
   '       novadev todo review <ref> <payload.json>     ({ "verdict": "APPROVE"|"CHANGES", "by", "checks": […], "findings"?, "notes"? })\n' +
-  `       novadev todo priority <ref> <${PRIORITIES.join('|')}> [<payload.json>] [--by <actor>]   ({ "by": "human:<id>", "reason"? })`;
+  `       novadev todo priority <ref> <${PRIORITIES.join('|')}> [<payload.json>] [--by <actor>]   ({ "by": "human:<id>", "reason"? })\n` +
+  '       novadev todo after <ref> [<ref>…] [--clear] [--by <actor>]   (the todos it waits for; --clear removes them)';
 
-export type TodoItem = { ref: string; batch: string; todo: string; title: string; state: TodoState; priority: Priority };
+/** One open todo: where it is, what it is called, its state, its priority, and what its "do after" links say now. */
+export type TodoItem = { ref: string; batch: string; todo: string; title: string; state: TodoState; priority: Priority } & LinkFacts;
 
 /** The brief's title: its first `## ` heading (the filed form), else the first line that says something. */
 export function briefTitle(text: string): string {
@@ -71,11 +79,13 @@ export function briefTitle(text: string): string {
 /** Every todo of the open batches, oldest batch first. */
 export function listTodos(nd: string): TodoItem[] {
   const out: TodoItem[] = [];
+  const links = linkReader(nd);
   for (const batch of listDirs(join(nd, 'todos'))) {
     for (const todo of listDirs(join(nd, 'todos', batch))) {
       const dir = join(nd, 'todos', batch, todo);
       const prompt = join(dir, PROMPT);
-      out.push({ ref: `${batch}/${todo}`, batch, todo, title: existsSync(prompt) ? briefTitle(readFileSync(prompt, 'utf8')) : '', state: todoState(dir), priority: readTodoMeta(dir).priority });
+      const state = todoState(dir);
+      out.push({ ref: `${batch}/${todo}`, batch, todo, title: existsSync(prompt) ? briefTitle(readFileSync(prompt, 'utf8')) : '', state, priority: readTodoMeta(dir).priority, ...links(dir, state) });
     }
   }
   return out;
@@ -86,9 +96,23 @@ export function todosInOrder(nd: string): TodoItem[] {
   return orderByPriority(listTodos(nd), (t) => t.priority);
 }
 
-/** One line of `novadev todo list`: the ref, its state (and its priority, when it is not normal), its title. */
-export function listLine(t: TodoItem): string {
-  return `${t.ref}  (${t.state}${priorityTag(t.priority)})${t.title ? `  ${t.title}` : ''}`;
+/**
+ * A todo's state as the lists print it: `(open)`, `(open, urgent)`, `(open, waits for 05-todo-priority)`,
+ * `(open, ready)`. `ready` is said only in a project that uses "do after" links (`showReady`), so a
+ * project without them prints as it always did.
+ */
+export function stateText(t: TodoItem, showReady: boolean): string {
+  return `(${t.state}${priorityTag(t.priority)}${linkTag(t, showReady)})`;
+}
+
+/** Does any of these todos wait for another? Then the lists say `ready` on the ones that do not. */
+export function usesLinks(todos: readonly TodoItem[]): boolean {
+  return todos.some((t) => t.after.length > 0);
+}
+
+/** One line of `novadev todo list`: the ref, its state (with its priority and what it waits for), its title. */
+export function listLine(t: TodoItem, showReady = false): string {
+  return `${t.ref}  ${stateText(t, showReady)}${t.title ? `  ${t.title}` : ''}`;
 }
 
 /** The one open todo a person means; an error that lists the candidates when it is not one. */
@@ -336,6 +360,17 @@ export function priorityTodo(nd: string, ref: string, level: string | undefined,
   return changePriority({ ref: t.ref, dir: join(nd, 'todos', t.batch, t.todo), state: t.state }, level, { by, reason: reasonText(who.reason) }, now);
 }
 
+/**
+ * The todos a todo waits for: add links (`deps`), replace or remove them (`clear`), or — with neither —
+ * only say what they are. Who set them is recorded when `by` is given (any actor: the lead, an agent, a person).
+ */
+export function afterTodo(nd: string, ref: string, deps: readonly string[], opts: { clear?: boolean; by?: unknown } = {}, now: Date = new Date()): Record<string, unknown> {
+  const t = resolveTodo(nd, ref);
+  if (deps.length === 0 && opts.clear !== true) return { ref: t.ref, after: t.after, waitsFor: t.waitsFor, ready: t.ready };
+  const by = opts.by === undefined || opts.by === null ? null : resolveActor(dirname(nd), opts.by, { personOnly: false, what: 'set the links' });
+  return changeAfter(nd, { ref: t.ref, batch: t.batch, dir: join(nd, 'todos', t.batch, t.todo), state: t.state }, deps, { clear: opts.clear === true, by }, now);
+}
+
 function readPayload(argument: string | undefined): Record<string, unknown> {
   if (argument === undefined) throw new Error(USAGE);
   const path = isAbsolute(argument) ? argument : resolve(process.cwd(), argument);
@@ -346,8 +381,8 @@ function readPayload(argument: string | undefined): Record<string, unknown> {
 }
 
 /** The arguments of a `novadev todo` call: what is positional, and the options that take a value. */
-function parseArgs(args: string[]): { positional: string[]; by?: string; state?: string; json: boolean } {
-  const out: { positional: string[]; by?: string; state?: string; json: boolean } = { positional: [], json: false };
+function parseArgs(args: string[]): { positional: string[]; by?: string; state?: string; json: boolean; clear: boolean } {
+  const out: { positional: string[]; by?: string; state?: string; json: boolean; clear: boolean } = { positional: [], json: false, clear: false };
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
     if (arg === '--by' || arg === '--state') {
@@ -357,6 +392,7 @@ function parseArgs(args: string[]): { positional: string[]; by?: string; state?:
       else out.state = value;
       i++;
     } else if (arg === '--json') out.json = true;
+    else if (arg === '--clear') out.clear = true;
     else out.positional.push(arg);
   }
   return out;
@@ -375,7 +411,8 @@ export function todoCommand(args: string[]): void {
         return;
       }
       if (todos.length === 0) console.log('todos — none open');
-      for (const t of todos) console.log(listLine(t));
+      const showReady = usesLinks(todos);
+      for (const t of todos) console.log(listLine(t, showReady));
       return;
     }
     if (ref === undefined) throw new Error(USAGE);
@@ -389,6 +426,7 @@ export function todoCommand(args: string[]): void {
       const payload = second === undefined ? {} : readPayload(second);
       return void console.log(JSON.stringify(priorityTodo(nd, ref, argument, { by: opts.by ?? payload['by'], reason: payload['reason'] }), null, 2));
     }
+    if (command === 'after') return void console.log(JSON.stringify(afterTodo(nd, ref, opts.positional.slice(2), { clear: opts.clear, by: opts.by }), null, 2));
     throw new Error(USAGE);
   } catch (error) {
     console.log(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }, null, 2));

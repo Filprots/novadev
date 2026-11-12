@@ -42,6 +42,7 @@ import { auditMetrics } from './metrics-audit.ts';
 import { auditPlacement } from './placement.ts';
 import { afterMergeRefusal, commitAfterMerge, MERGE_DRIVER, hasMergeRules, mergeDriverConfigured, repairLogFile } from './merge-rules.ts';
 import { merged } from './review.ts';
+import { auditTodoLinks, depName, linkReader } from './todo-links.ts';
 import { auditTodoMeta, orderByPriority, priorityLabel, todoPriority } from './todo-meta.ts';
 import { auditWork } from './work.ts';
 
@@ -135,8 +136,10 @@ export async function sync(args: string[]): Promise<void> {
   // The batches in work: who holds each lock, and whether they are still there.
   const inWork = auditWork(nd);
   // The todos' own settings (todo.json: priority, "do after" links): a file novadev cannot read.
+  // … and a link to a todo nobody has, or todos that wait for each other (todo-links.ts).
   const todoMeta = auditTodoMeta(nd);
-  const problems = [...inWork.problems, ...audit.problems, ...todoMeta.problems, ...metricsAudit.problems, ...placement.problems, ...knowledge.problems];
+  const todoLinks = auditTodoLinks(nd);
+  const problems = [...inWork.problems, ...audit.problems, ...todoMeta.problems, ...todoLinks.problems, ...metricsAudit.problems, ...placement.problems, ...knowledge.problems];
   if (problems.length > 0) {
     console.log(`\nPROBLEMS (${problems.length}):`);
     for (const p of problems) console.log(`  ✗ ${p}`);
@@ -165,7 +168,7 @@ export async function sync(args: string[]): Promise<void> {
   // 4. What still needs doing, split by who has to do it. An abandoned lock comes first: a session
   // died mid-work, and its last waypoint is where this one should pick up. A paused batch waits on
   // the human — they stopped it, they say when it goes on.
-  const agent = [...inWork.actions, ...knowledge.actions, ...agentActions(root, nd, audit.notes), ...metrics.actions, ...placement.actions];
+  const agent = [...inWork.actions, ...knowledge.actions, ...agentActions(root, nd, audit.notes), ...todoLinks.actions, ...metrics.actions, ...placement.actions];
   const human = [...inWork.waiting, ...humanActions(nd)];
   const gated = reviewWaiting(root, nd);
 
@@ -255,10 +258,14 @@ function agentActions(root: string, nd: string, notes: string[]): string[] {
   // The open todos, the highest priority first (todo-meta.ts), then in filing order; a priority other
   // than normal is named, so the list says what to take first.
   const open = orderByPriority(listAllTodos(nd).filter((todo) => !todo.archived), (todo) => todoPriority(todo.dir));
+  const links = linkReader(nd);
   for (const todo of open) {
     const state = todoState(todo.dir);
     const name = `${todo.ref}${priorityLabel(todoPriority(todo.dir))}`;
-    if (state === 'open') out.push(`${name} has no record yet — do the work, then record it`);
+    // A todo that waits for others ("do after" links, todo-links.ts) is not to be started yet: say what for.
+    const waits = state === 'open' ? links(todo.dir, state).waitsFor : [];
+    if (state === 'open' && waits.length > 0) out.push(`${name} has no record yet — it waits for ${waits.map((dep) => `${depName(dep.ref, todo.batch)} (${dep.state})`).join(', ')}: do ${waits.length === 1 ? 'that' : 'those'} first`);
+    else if (state === 'open') out.push(`${name} has no record yet — do the work, then record it`);
     if (state === 'progress') out.push(`${name} is mid-flight — finish it or update ai_progress.md`);
     if (state === 'changes') out.push(`${name}: its review asked for CHANGES (ai_review.md) — make them, update ai_completed.md, then ask for a new review`);
   }

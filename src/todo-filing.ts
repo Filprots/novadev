@@ -8,6 +8,7 @@ import { copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { BATCH_RE, WORK_LOCK_FILE, listDirs, todayStamp } from './lib.ts';
 import { batchesInWorkElsewhere } from './registry.ts';
+import { resolveFiledLinks } from './todo-links.ts';
 import { DEFAULT_PRIORITY, PRIORITIES, type Priority, parsePriority, writeFiledMeta } from './todo-meta.ts';
 
 const SLUG = /^[a-z0-9][a-z0-9-]*$/;
@@ -38,6 +39,8 @@ export type TodoPart = {
   readonly attachments?: readonly string[];
   /** urgent | high | normal | later — absent means normal (todo-meta.ts). */
   readonly priority?: Priority;
+  /** The todos this one waits for (todo-links.ts): refs, or the slug of another part of the same filing. */
+  readonly after?: readonly string[];
 };
 
 export type FiledTodo = {
@@ -46,6 +49,8 @@ export type FiledTodo = {
   readonly attachments: readonly string[];
   /** Named only when the part set one other than normal. */
   readonly priority?: Priority;
+  /** The refs it waits for — named only when the part had any. */
+  readonly after?: readonly string[];
 };
 
 /** Who asked for the filing (`by` in the payload): recorded in each todo.json the filing writes. */
@@ -86,15 +91,17 @@ export function fileTodos(nd: string, parts: readonly TodoPart[], opts: FilingOp
   // (a stray empty batch is litter novadev then reports forever).
   const slugs = parts.map((part) => normalizeSlug(part.slug));
   const target = planBatch(nd);
+  const folders = slugs.map((slug, index) => `${String(target.nextNumber + index).padStart(2, '0')}-${slug}`);
+  // … and every "do after" link: a part that waits for a todo nobody has must not be filed half-linked.
+  const links = resolveFiledLinks(nd, parts.map((part, index) => ({ ref: `${target.batch}/${folders[index]!}`, slug: slugs[index]!, after: part.after ?? [] })));
   const batchDir = join(nd, 'todos', target.batch);
   mkdirSync(batchDir, { recursive: true });
   if (!existsSync(join(batchDir, CHAT_MARKER))) {
     writeFileSync(join(batchDir, CHAT_MARKER), `${todayStamp()}\n`);
   }
   const filed: FiledTodo[] = [];
-  let number = target.nextNumber;
   for (const [index, part] of parts.entries()) {
-    const folder = `${String(number).padStart(2, '0')}-${slugs[index]!}`;
+    const folder = folders[index]!;
     const dir = join(batchDir, folder);
     if (existsSync(dir)) throw new Error(`${target.batch}/${folder} already exists.`);
     mkdirSync(dir, { recursive: true });
@@ -103,14 +110,15 @@ export function fileTodos(nd: string, parts: readonly TodoPart[], opts: FilingOp
     // name has already been moved out of its way.
     writeFileSync(join(dir, 'prompt.md'), renderBrief(slugs[index]!, part, attachments));
     const priority = part.priority ?? DEFAULT_PRIORITY;
-    writeFiledMeta(dir, { priority, after: [] }, opts.by ?? null);
+    const after = links[index]!;
+    writeFiledMeta(dir, { priority, after }, opts.by ?? null);
     filed.push({
       ref: `${target.batch}/${folder}`,
       path: `.novadev/todos/${target.batch}/${folder}`,
       attachments,
       ...(priority !== DEFAULT_PRIORITY ? { priority } : {}),
+      ...(after.length > 0 ? { after } : {}),
     });
-    number += 1;
   }
   return filed;
 }
@@ -245,6 +253,11 @@ export function parseParts(raw: unknown): readonly TodoPart[] {
     // rather than filed as normal — the person would believe it was urgent.
     const priority = record['priority'] === undefined || record['priority'] === null ? undefined : parsePriority(record['priority']);
     if (priority === null) throw new Error(`A part's 'priority' must be one of ${PRIORITIES.join(', ')} — not "${String(record['priority'])}".`);
+    const rawAfter = record['after'];
+    if (rawAfter !== undefined && rawAfter !== null && (!Array.isArray(rawAfter) || rawAfter.some((ref) => typeof ref !== 'string' || ref.trim() === ''))) {
+      throw new Error("A part's 'after' must be a list of todos it waits for: refs (\"2026-11-12_2/05\"), or the slug of another part of this filing.");
+    }
+    const after = Array.isArray(rawAfter) ? (rawAfter as string[]) : undefined;
     return {
       slug,
       title,
@@ -252,6 +265,7 @@ export function parseParts(raw: unknown): readonly TodoPart[] {
       ...(context !== undefined ? { context } : {}),
       ...(files !== undefined ? { attachments: files } : {}),
       ...(priority !== undefined ? { priority } : {}),
+      ...(after !== undefined && after.length > 0 ? { after } : {}),
     };
   });
 }
