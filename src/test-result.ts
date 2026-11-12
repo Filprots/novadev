@@ -3,6 +3,9 @@
 //   novadev test-result tasks [query]     the open queue as JSON, with each task's scenarios
 //   novadev test-result write <payload>   one scenario's verdict, appended to scenario-<N>.txt
 //   novadev test-result review <payload>  a whole round, appended to review.md
+//   novadev test-result skip <payload>    the owner skips scenarios (or the rest of the round):
+//                                         recorded as skipped, and the round closed when nothing
+//                                         is left — never as a confirmation
 //
 // Payloads are JSON FILES because the content is a person's own multi-line words, and quoting that
 // through a shell is how it gets mangled. Answers are JSON on stdout; errors are `{ "error": … }`
@@ -19,19 +22,36 @@ import {
   requireProjectRoot,
   totestDir,
 } from './lib.ts';
-import { writeResult, writeReview, type ReviewScenario } from './test-results.ts';
+import { type ReviewScenario, scenariosIn, skipScenarios, writeResult, writeReview } from './test-results.ts';
 
 const USAGE =
   'usage: novadev test-result tasks [query]\n' +
   '       novadev test-result write <payload.json>\n' +
-  '       novadev test-result review <payload.json>';
+  '       novadev test-result review <payload.json>\n' +
+  '       novadev test-result skip <payload.json>     ({ taskId, scenarios: [n,…] | "rest", by: human:<id> | "human", reason })';
 
 export function testResult(args: string[]): void {
   const [command, argument] = args;
-  const nd = novadevDir(requireProjectRoot());
+  const root = requireProjectRoot();
+  const nd = novadevDir(root);
   try {
     if (command === 'tasks') {
       console.log(JSON.stringify({ tasks: describeTasks(nd, argument) }, null, 2));
+      return;
+    }
+    if (command === 'skip') {
+      if (argument === undefined) throw new Error(USAGE);
+      const payload = readPayload(argument);
+      const raw = payload['scenarios'] ?? 'rest';
+      if (raw !== 'rest' && !(Array.isArray(raw) && raw.length > 0 && raw.every((n) => Number.isInteger(n) && (n as number) > 0))) {
+        throw new Error("'scenarios' must be a list of scenario numbers, or \"rest\" for every scenario without a result.");
+      }
+      console.log(JSON.stringify(skipScenarios(nd, root, {
+        taskId: requireString(payload, 'taskId'),
+        scenarios: raw === 'rest' ? 'rest' : (raw as number[]),
+        by: requireString(payload, 'by'),
+        reason: requireString(payload, 'reason'),
+      }), null, 2));
       return;
     }
     if (command === 'write' || command === 'review') {
@@ -125,23 +145,6 @@ function describeTasks(nd: string, query: string | undefined): unknown[] {
       // "16" pull in FEAT-0160, FEAT-0161 and FEAT-0163 — the opposite of naming one task.
       return padded !== '' ? haystack.includes(padded) : haystack.includes(wanted);
     });
-}
-
-/** `## Scenario 2 — Expired magic link is refused` → `{ scenario: 2, title, priority }`. */
-function scenariosIn(plan: string): { scenario: number; title: string; priority: string }[] {
-  const out: { scenario: number; title: string; priority: string }[] = [];
-  const blocks = plan.split(/^##\s+/m).slice(1);
-  for (const block of blocks) {
-    const head = block.split('\n', 1)[0] ?? '';
-    const m = head.match(/^Scenario\s+(\d+)\s*(?:[—:-]\s*(.*))?$/i);
-    if (!m) continue;
-    out.push({
-      scenario: Number(m[1]),
-      title: (m[2] ?? '').trim(),
-      priority: (block.match(/^\*\*Priority:\*\*\s*(.*)$/mi)?.[1] ?? '').trim(),
-    });
-  }
-  return out;
 }
 
 function readPayload(argument: string): Record<string, unknown> {

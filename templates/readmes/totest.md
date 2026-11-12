@@ -31,6 +31,10 @@ Each open task folder holds:
 Previous rounds are not here — they are in `../archive/<year>/totest/<task>/`, listed
 with their verdicts in the feature's `tests.md`.
 
+Not worth testing? Say so: on your word an agent marks the scenarios (or the rest of the
+round) **skipped** with `novadev test-result skip`, with who decided and why. The round then
+closes without a confirmation — its todos get `ai_testskipped.md` (not tested by a human).
+
 ```sh
 novadev totest        # what is waiting on you, and what is ready for review
 novadev totest --all  # also lists every completed round in the archive

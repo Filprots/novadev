@@ -605,6 +605,26 @@ Finally set `status: reviewed`, `verdict: <…>`, `last-tested: <date>` in the p
 frontmatter, clear `todos:`, and add a line to `## Revisions`. Phase 10 archives the
 round and links it into the feature's `tests.md`.
 
+**Skipped — the owner decided a person will not test it.** When the human says a round (or
+some scenarios) is not worth testing, never close it with `ai_confirmed.md`: nobody verified
+anything. Record their decision with the command, `by` naming THEM and `reason` quoting them:
+
+```sh
+cat > "$payload" <<'JSON'
+{ "taskId": "FEAT-0001-planner", "scenarios": "rest", "by": "human:<id>",
+  "reason": "Board on IRR-184: close the round, the result is not important." }
+JSON
+novadev test-result skip "$payload"
+```
+
+`scenarios` is a list of numbers or `"rest"` (every scenario without a verdict). A verdict a
+person recorded is kept — never list it. When nothing is left open the command closes the round
+itself (plan `reviewed`, verdict `skipped` or `partly-skipped`, a `## Revisions` line) and gives
+every gated todo `ai_testskipped.md` — **not tested by a human**: the todo is `completed`, never
+`confirmed`. Results a person did record still get this phase's review: a failure among them
+becomes a follow-up todo (the answer's `next` says so). Never skip on your own judgement, and
+never mark a scenario skipped by writing the file by hand. Then phase 10 archives the round.
+
 Then read the feature's `feature.md` against what the round showed. Where the human saw
 behaviour the document describes differently, the document is wrong: fix it and record an
 `update`. Where the round confirmed it, you may record a `verify` — by YOU, citing the round

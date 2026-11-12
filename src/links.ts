@@ -486,6 +486,7 @@ function renderTests(rounds: TestRound[], open: TestTask[], f: Feature): string 
     for (const r of [...rounds].reverse()) {
       const bits = [r.verdict || 'verdict not recorded', r.date].filter(Boolean);
       lines.push(`- \`archive/${r.year}/totest/${r.taskId}/${r.round}\` — ${bits.join(' · ')}`);
+      if (r.skipped > 0) lines.push(`  - skipped by the owner${r.skippedBy ? ` (${r.skippedBy})` : ''}: ${r.skipped} scenario(s) not tested by a human — see test-results/skipped.md`);
       if (r.todoRefs.length) lines.push(`  - gated: ${r.todoRefs.map((x) => `\`${x}\``).join(', ')}`);
       if (r.results.length) lines.push(`  - evidence: ${r.results.join(', ')}`);
     }

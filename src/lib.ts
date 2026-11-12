@@ -73,6 +73,11 @@ export const RECORD_NEEDSTEST = 'ai_needstest.md';
 /** The gate, closed: a person tested it and the results were reviewed. */
 export const RECORD_CONFIRMED = 'ai_confirmed.md';
 /**
+ * The gate, closed WITHOUT a human test: the owner skipped the round's scenarios (`novadev
+ * test-result skip`). Never a confirmation — the todo stays `completed`, not `confirmed`.
+ */
+export const RECORD_TESTSKIPPED = 'ai_testskipped.md';
+/**
  * The records that say what work was done: the ones a `## Debt` or a `## Placement` section may sit
  * in. Never a brief, never a test gate.
  */
@@ -372,6 +377,9 @@ export type TestRound = {
   featureIds: string[];
   todoRefs: string[];
   results: string[];
+  /** Scenarios the owner skipped (`novadev test-result skip`), and who decided; 0 and '' when none. */
+  skipped: number;
+  skippedBy: string;
 };
 
 /** Completed rounds under archive/<year>/totest/<task>/<round>/, newest last. */
@@ -397,6 +405,8 @@ export function listTestRounds(nd: string, taskId?: string): TestRound[] {
           featureIds: featureIdsIn(`${fm.feature ?? ''} ${task}`),
           todoRefs: csvList(fm.todos ?? fm.todo),
           results: listFiles(join(dir, TEST_RESULTS_DIR)).filter((f) => f !== 'README.md'),
+          skipped: Number(fm.skipped ?? '') || 0,
+          skippedBy: (fm['skipped-by'] ?? '').trim(),
         });
       }
     }

@@ -51,8 +51,10 @@ export function totest(args: string[]): void {
     return;
   }
 
-  const ready = tasks.filter((t) => t.hasResults);
-  console.log(`totest — ${tasks.length} awaiting you, ${ready.length} ready for review`);
+  // A round closed (reviewed, or skipped by the owner) waits only for `novadev sync` to archive it.
+  const closed = tasks.filter((t) => t.status === 'reviewed');
+  const ready = tasks.filter((t) => t.hasResults && t.status !== 'reviewed');
+  console.log(`totest — ${tasks.length - closed.length} awaiting you, ${ready.length} ready for review`);
   for (const t of tasks) print(t);
   if (opts.all && rounds.length > 0) printRounds(rounds);
 
@@ -62,7 +64,8 @@ export function totest(args: string[]): void {
         '\nreads them and closes the loop (ai_confirmed.md, or follow-up todos for the failures).',
     );
   }
-  const untested = tasks.filter((t) => !t.hasResults);
+  if (closed.length > 0) console.log(`\n${closed.length} round(s) are closed — \`novadev sync\` archives them.`);
+  const untested = tasks.filter((t) => !t.hasResults && t.status !== 'reviewed');
   if (untested.length > 0) {
     console.log(
       `\n${untested.length} task(s) still need YOUR hands: open the ${TEST_PLAN_FILE}, walk the` +
@@ -73,6 +76,11 @@ export function totest(args: string[]): void {
 }
 
 function print(t: TestTask): void {
+  if (t.status === 'reviewed') {
+    const skipped = Number(t.fm.skipped ?? '') || 0;
+    console.log(`  ✓ ${t.id}  — CLOSED (${(t.fm.verdict ?? '').trim() || 'reviewed'}${skipped > 0 ? `, ${skipped} scenario(s) skipped by the owner` : ''}), waiting for \`novadev sync\` to archive it`);
+    return;
+  }
   console.log(`  ${t.hasResults ? '◆' : '○'} ${t.id}  — ${t.hasResults ? 'READY FOR REVIEW' : 'awaiting your test'}`);
   const meta = [
     `${t.scenarios} scenario(s)`,

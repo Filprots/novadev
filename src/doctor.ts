@@ -6,6 +6,7 @@ import {
   NOVADEV_VERSION,
   RECORD_COMPLETED,
   RECORD_CONFIRMED,
+  RECORD_TESTSKIPPED,
   RECORD_FAILED,
   RECORD_NEEDSTEST,
   RECORD_PROGRESS,
@@ -88,6 +89,11 @@ export function doctor(): void {
       if (files.includes(RECORD_NEEDSTEST) && files.includes(RECORD_CONFIRMED)) {
         problems.push(
           `todos/${batch}/${todo}: BOTH ${RECORD_NEEDSTEST} and ${RECORD_CONFIRMED} present — the review replaces the gate, delete ${RECORD_NEEDSTEST}`,
+        );
+      }
+      if (files.includes(RECORD_NEEDSTEST) && files.includes(RECORD_TESTSKIPPED)) {
+        problems.push(
+          `todos/${batch}/${todo}: BOTH ${RECORD_NEEDSTEST} and ${RECORD_TESTSKIPPED} present — the skipped round closed the gate, delete ${RECORD_NEEDSTEST}`,
         );
       }
       if (

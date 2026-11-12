@@ -201,6 +201,19 @@ against its written expectation, writes `ai_confirmed.md` with the verdict on ev
 todo the round gated, and files follow-up todos for whatever failed. An agent never
 reviews a task with an empty results folder — silence is never read as a pass.
 
+**Skipping a test.** Sometimes a round is not worth a person's time: the result matters
+little, or the backlog of scenarios is too long. Only you decide that. Say so, and the agent
+runs `novadev test-result skip payload.json` (`{ "taskId": …, "scenarios": [3, 4] | "rest",
+"by": "human:<id>" | "human", "reason": "…" }`): the scenarios are recorded as **skipped**, with
+who decided and why, in the round's `test-results/skipped.md`; a verdict you already recorded
+is kept (it is never skipped). Once no scenario is left without a verdict, the round is closed
+like a review — the plan `reviewed`, verdict `skipped` (or `partly-skipped` when some were
+really tested), `skipped:` and `skipped-by:` in its frontmatter, a line under `## Revisions` —
+and every todo it gated gets `ai_testskipped.md` in place of `ai_needstest.md`: **not tested by
+a human**, never `ai_confirmed.md`, so the todo is `completed`, not `confirmed`. `novadev sync`
+archives the round, and the feature's `tests.md` lists it as skipped by the owner. `by` must be a
+person: an agent relays the owner's decision, it never makes it.
+
 **Chat-initiated work.** When the human asks an agent in chat to
 implement/fix/change something that no open todo already covers, the agent must
 file it as a todo itself, before starting (a matching postponed item or spark
@@ -1090,6 +1103,7 @@ novadev file-todo file payload.json     # write the folders, the briefs, and the
 novadev test-result tasks [query]       # resolve "16" / "the selection one" against the real queue
 novadev test-result write payload.json  # one scenario's verdict → scenario-<N>.txt   (APPENDS)
 novadev test-result review payload.json # a whole round → review.md                   (APPENDS)
+novadev test-result skip payload.json   # the owner skips scenarios / the rest → skipped.md; closes the round (ai_testskipped.md)
 
 novadev work pause <batch> payload.json # the pause record, newest entry of the batch's lock
 

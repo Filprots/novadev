@@ -29,6 +29,11 @@ closed" or "round complete" — say which file you wrote.
 
 **Never claim a write you did not make**, and never invent a verdict they did not give.
 
+When they say a scenario was NOT tested and is not worth testing ("skip the rest"), that is not
+a verdict for the review: it is the owner's decision to skip, which an agent records with
+`novadev test-result skip` (phase 6 of `/novadev-work`). Write the review of what they DID test,
+and pass their skip, in their words, to that agent.
+
 ## The loop
 
 **1. Find the task.** They said a number or a word; the queue says which folder that is:

@@ -19,6 +19,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import {
   RECORD_COMPLETED,
   RECORD_CONFIRMED,
+  RECORD_TESTSKIPPED,
   RECORD_FAILED,
   RECORD_NEEDSTEST,
   RECORD_PROGRESS,
@@ -36,7 +37,7 @@ import { liveElsewhere, lockLiveness, readWorkLock } from './work.ts';
 import { copyAttachments } from './todo-filing.ts';
 
 const PROMPT = 'prompt.md';
-const RECORDS = [RECORD_NEEDSTEST, RECORD_CONFIRMED, RECORD_REVIEW, RECORD_COMPLETED, RECORD_FAILED, RECORD_PROGRESS] as const;
+const RECORDS = [RECORD_NEEDSTEST, RECORD_CONFIRMED, RECORD_TESTSKIPPED, RECORD_REVIEW, RECORD_COMPLETED, RECORD_FAILED, RECORD_PROGRESS] as const;
 const MAX_RECORD_CHARS = 12000;
 const MAX_TEXT_BYTES = 20000;
 const USAGE =
