@@ -7,8 +7,11 @@
 //   novadev todo edit <ref> <payload.json>                   {title, request, context, reason}: the brief rewritten where
 //                                                            asked, the previous one kept in .brief-history/
 //   novadev todo cancel <ref> <payload.json>                 {reason}: an ai_failed.md that says *cancelled*
-//   novadev todo review <ref> <payload.json>                 {verdict, by, checks, findings?, notes?}: ai_review.md, a
-//                                                            reviewer's APPROVE or CHANGES on a finished todo (review.ts)
+//   novadev todo review <ref> <payload.json>                 {verdict, by, checks, findings?, notes?, override?}: ai_review.md,
+//                                                            a reviewer's APPROVE or CHANGES on a finished todo (review.ts);
+//                                                            with area owners (owners.ts) an APPROVE is PARTIAL until one
+//                                                            reviewer of each matching rule approved, or a person or the
+//                                                            lead overrides: "override": { "reason" }
 //   novadev todo priority <ref> <level> [<payload.json>] [--by <actor>]
 //                                                            urgent|high|normal|later, on a person's decision or the
 //                                                            lead's ("lead" in novadev.json): {by, reason} — who, when
@@ -47,6 +50,7 @@ import {
 } from './lib.ts';
 import { humanActor } from './knowledge-log.ts';
 import { ACTOR_FORMAT, actorKind, nowTimestamp } from './okf.ts';
+import { type SuggestedOwner, VERDICT_PARTIAL, judgeReviews, mayOverride, ownerSuggester, overrideText, readOwners, readSignOffs, recordCommits, requiredReviews, reviewFields, todoReviewRules } from './owners.ts';
 import { RECORD_REVIEW, REVIEW_HISTORY_DIR, parseReviewPayload, renderReview } from './review.ts';
 import { liveElsewhere, lockLiveness, readWorkLock } from './work.ts';
 import { copyAttachments } from './todo-filing.ts';
@@ -77,13 +81,16 @@ const USAGE =
   '       novadev todo addendum <ref> <payload.json>   ({ "text": …, "attachments": [paths] })\n' +
   '       novadev todo edit <ref> <payload.json>       ({ "title"?, "request"?, "context"?, "reason"? })\n' +
   '       novadev todo cancel <ref> <payload.json>     ({ "reason": … })\n' +
-  '       novadev todo review <ref> <payload.json>     ({ "verdict": "APPROVE"|"CHANGES", "by", "checks": […], "findings"?, "notes"? })\n' +
+  '       novadev todo review <ref> <payload.json>     ({ "verdict": "APPROVE"|"CHANGES", "by", "checks": […], "findings"?, "notes"?, "override"?: { "reason" } })\n' +
   `       novadev todo priority <ref> <${PRIORITIES.join('|')}> [<payload.json>] [--by <actor>]   ({ "by": "human:<id>" or the lead, "reason"? })\n` +
   '       novadev todo priority --changed-since <YYYY-MM-DD|timestamp> [--by-agent] [--json]   (who changed which priority, when and why)\n' +
   '       novadev todo after <ref> [<ref>…] [--clear] [--by <actor>]   (the todos it waits for; --clear removes them)';
 
-/** One open todo: where it is, what it is called, its state, its priority, and what its "do after" links say now. */
-export type TodoItem = { ref: string; batch: string; todo: string; title: string; state: TodoState; priority: Priority } & LinkFacts;
+/**
+ * One open todo: where it is, what it is called, its state, its priority, and what its "do after" links say now.
+ * `suggestedOwner` is there only in a project with area owners (owners.ts), on a todo a rule with an owner matches.
+ */
+export type TodoItem = { ref: string; batch: string; todo: string; title: string; state: TodoState; priority: Priority; suggestedOwner?: SuggestedOwner } & LinkFacts;
 
 /** The brief's title: its first `## ` heading (the filed form), else the first line that says something. */
 export function briefTitle(text: string): string {
@@ -100,12 +107,23 @@ export function briefTitle(text: string): string {
 export function listTodos(nd: string): TodoItem[] {
   const out: TodoItem[] = [];
   const links = linkReader(nd);
+  const owner = ownerSuggester(nd);
   for (const batch of listDirs(join(nd, 'todos'))) {
     for (const todo of listDirs(join(nd, 'todos', batch))) {
       const dir = join(nd, 'todos', batch, todo);
       const prompt = join(dir, PROMPT);
       const state = todoState(dir);
-      out.push({ ref: `${batch}/${todo}`, batch, todo, title: existsSync(prompt) ? briefTitle(readFileSync(prompt, 'utf8')) : '', state, priority: readTodoMeta(dir).priority, ...links(dir, state) });
+      const suggested = owner(dir);
+      out.push({
+        ref: `${batch}/${todo}`,
+        batch,
+        todo,
+        title: existsSync(prompt) ? briefTitle(readFileSync(prompt, 'utf8')) : '',
+        state,
+        priority: readTodoMeta(dir).priority,
+        ...links(dir, state),
+        ...(suggested !== null ? { suggestedOwner: suggested } : {}),
+      });
     }
   }
   return out;
@@ -169,7 +187,9 @@ export function showTodo(nd: string, ref: string, now: Date = new Date()): Recor
     lock === null ? null : lock.state === 'invalid' ? { state: 'unreadable' } : { state: lock.lock.state, live: lockLiveness(lock.lock, now).live, agent: lock.lock.agent, todo: lock.lock.todo, updated: lock.lock.updated };
   // What changed its priority (and its links), with who and when — only when something was ever recorded.
   const history = readTodoMeta(dir).history;
-  return { ...t, ...(history.length > 0 ? { history } : {}), brief: existsSync(join(dir, PROMPT)) ? readFileSync(join(dir, PROMPT), 'utf8') : '', records, batchInWork: inWork, files: listFilesIn(dir) };
+  // The reviews its area owners ask for (owners.ts) — only in a project with owners, on a todo a rule matches.
+  const required = requiredReviews(todoReviewRules(nd, dir));
+  return { ...t, ...(required.length > 0 ? { requiredReviewers: required.map(({ rule, reviewers }) => ({ rule, reviewers })) } : {}), ...(history.length > 0 ? { history } : {}), brief: existsSync(join(dir, PROMPT)) ? readFileSync(join(dir, PROMPT), 'utf8') : '', records, batchInWork: inWork, files: listFilesIn(dir) };
 }
 
 function listFilesIn(dir: string): string[] {
@@ -336,6 +356,12 @@ export function cancelTodo(nd: string, ref: string, payload: Record<string, unkn
  * A reviewer's verdict on a finished todo: ai_review.md beside its ai_completed.md. The review before
  * it, if any, moves to the todo's .review-history/. Not refused behind a lock: reviewing is part of
  * the loop, often done while the builder still holds the batch.
+ *
+ * In a project with area owners (owners.ts) an APPROVE is the approval only when one reviewer of EACH
+ * rule the work falls under has approved. Until then every APPROVE is kept as a sign-off — the review
+ * reads PARTIAL and names who is still needed — and the sign-offs stay for as long as the record names
+ * the same commits. `"override": { "reason" }` from a person, the lead or an actor of `owners.override`
+ * approves without the missing ones; who, when and why are written into the review.
  */
 export function reviewTodo(nd: string, ref: string, payload: Record<string, unknown>, now: Date = new Date()): Record<string, unknown> {
   const t = resolveTodo(nd, ref);
@@ -352,19 +378,59 @@ export function reviewTodo(nd: string, ref: string, payload: Record<string, unkn
     throw new Error(`'by' must be an actor — ${ACTOR_FORMAT}.`);
   }
   const path = join(dir, RECORD_REVIEW);
+  const before = existsSync(path) ? readFileSync(path, 'utf8') : null;
+
+  // Area owners: which reviews this work needs, and which of them it has by now.
+  const owners = readOwners(nd);
+  const required = review.verdict === 'APPROVE' ? requiredReviews(todoReviewRules(nd, dir, owners)) : [];
+  let more: { verdict?: string; fields?: string[] } = {};
+  let answer: Record<string, unknown> = {};
+  if (required.length > 0) {
+    const commits = recordCommits(dir);
+    const kept = before === null ? { signoffs: [], commits: null } : readSignOffs(before);
+    // A sign-off is for the work as it was: new commits in the record ask for the reviews again.
+    const carried = kept.commits === commits ? kept.signoffs.filter((s) => s.by !== review.by) : [];
+    const dropped = kept.commits === commits ? [] : kept.signoffs.filter((s) => s.by !== review.by).map((s) => s.by);
+    const signoffs = [...carried, { by: review.by, at: nowTimestamp(now) }];
+    const judgement = judgeReviews(required, signoffs);
+    let override: { by: string; at: string; reason: string } | null = null;
+    if (payload['override'] !== undefined && payload['override'] !== null && payload['override'] !== false && judgement.missing.length > 0) {
+      const given = payload['override'];
+      const reason = reasonText(typeof given === 'string' ? given : (given as Record<string, unknown>)?.['reason']);
+      if (reason === undefined) throw new Error('An override needs its reason: "override": { "reason": "why this is approved without the required review" } — it is recorded in the review.');
+      if (!mayOverride(nd, owners, review.by)) {
+        throw new Error(
+          `"${review.by}" may not approve without the required reviews (${judgement.missing.map((m) => m.rule).join(', ')}): an override is for ${overrideText(nd, owners)}. Without "override" the approval is kept as a sign-off.`,
+        );
+      }
+      override = { by: review.by, at: nowTimestamp(now), reason };
+    }
+    const approved = judgement.missing.length === 0 || override !== null;
+    more = { ...(approved ? {} : { verdict: `${VERDICT_PARTIAL} — approved by ${signoffs.map((s) => s.by).join(', ')}; still needed: ${judgement.missing.map((m) => `${m.rule} (one of ${m.reviewers.join(', ')})`).join('; ')}` }), fields: reviewFields(judgement, signoffs, commits, override) };
+    answer = {
+      approved,
+      signoffs,
+      requiredReviewers: judgement.required.map(({ rule, reviewers, approvedBy }) => ({ rule, reviewers, approvedBy })),
+      ...(approved ? {} : { waitingFor: judgement.missing.map(({ rule, reviewers }) => ({ rule, reviewers })), message: `Kept as a sign-off, not the approval yet: ${judgement.missing.map((m) => `${m.rule} needs one of ${m.reviewers.join(', ')}`).join('; ')}.` }),
+      ...(override !== null ? { override: { ...override, without: judgement.missing.map((m) => m.rule) } } : {}),
+      ...(dropped.length > 0 ? { dropped: { signoffs: dropped, why: `the record names other commits now (${commits}; reviewed: ${kept.commits ?? 'none'})` } } : {}),
+    };
+  }
+
   let previous: string | null = null;
-  if (existsSync(path)) {
+  if (before !== null) {
     const history = join(dir, REVIEW_HISTORY_DIR);
     mkdirSync(history, { recursive: true });
     previous = `${now.toISOString().replace(/[:.]/g, '-')}.md`;
-    writeFileSync(join(history, previous), readFileSync(path, 'utf8'));
+    writeFileSync(join(history, previous), before);
   }
-  writeFileSync(path, renderReview(t.todo, today(now), review));
+  writeFileSync(path, renderReview(t.todo, today(now), review, more));
   return {
     ref: t.ref,
     written: `todos/${t.ref}/${RECORD_REVIEW}`,
-    verdict: review.verdict,
+    verdict: more.verdict !== undefined ? VERDICT_PARTIAL : review.verdict,
     state: todoState(dir),
+    ...answer,
     ...(previous === null ? {} : { previous: `todos/${t.ref}/${REVIEW_HISTORY_DIR}/${previous}` }),
   };
 }

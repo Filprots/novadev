@@ -38,6 +38,13 @@ usage:
                             which ones an agent made), "after <ref> [<ref>…] [--clear] [--by <actor>]"
                             (the todos it waits for: "work start" refuses it until they are completed; the lists
                             say ready / waits for; sync and doctor flag a link to no todo and a cycle)
+  novadev owners [<path|area>] [--json]
+                            who owns a path or a feature area and who must review a change to it ("owners" in
+                            novadev.json: areas, paths as globs or "<sub-repo>:<glob>", override); no argument: the
+                            rules. A todo's suggested owner is in file-todo's answer, "todo show" and the JSON lists;
+                            "worktree mr" names the required reviewers; "todo review" holds an APPROVE as PARTIAL
+                            until one reviewer of each matching rule approved (a person or the lead may override,
+                            with a reason)
   novadev work …            the lock of a batch in work (todos/<batch>/working.md): "start <batch>"
                             takes or resumes it, "waypoint <batch> <payload.json>" records where the
                             work is, "pause <batch> <payload.json>" writes exactly where it stopped
@@ -139,6 +146,11 @@ switch (command) {
   case 'todo': {
     const { todoCommand } = await import('../src/todo.ts');
     todoCommand(args);
+    break;
+  }
+  case 'owners': {
+    const { ownersCommand } = await import('../src/owners.ts');
+    ownersCommand(args);
     break;
   }
   case 'test-result': {

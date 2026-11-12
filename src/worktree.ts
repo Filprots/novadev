@@ -57,6 +57,7 @@ import {
   samePlace,
   writeRegistryWorktree,
 } from './registry.ts';
+import { requiredReviewerLines } from './owners.ts';
 import { forgetSubrepos, listSubrepos } from './subrepos.ts';
 
 const NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
@@ -456,7 +457,10 @@ export function mrText(root: string, name: string): string {
     }
   }
   const batches = registryLocks(entry.main).filter((l) => samePlace(l.worktree, entry.path)).map((l) => l.batch);
+  // Area owners (owners.ts): who must review the files this branch changed — nothing in a project without them.
+  const reviewers = requiredReviewerLines(existsSync(novadevDir(entry.path)) ? entry.path : entry.main, reposOf(entry).flatMap((repo) => (existsSync(repo.path) ? changedFiles(repo, entry.branch) : [])));
   lines.push(
+    ...(reviewers.length > 0 ? ['', ...reviewers] : []),
     '',
     `Claims: ${gateClaims(entry).join(', ') || 'none'}`,
     ...(batches.length > 0 ? [`Batches in work there: ${batches.join(', ')} — stop (or pause) them before the merge`] : []),

@@ -23,6 +23,11 @@
 // and a record that names none is itself committed on the default branch. Until then it is `review`
 // (no APPROVE yet) or `unmerged` (approved, not on the default branch yet).
 //
+// In a project with area owners (`"owners"` in novadev.json, owners.ts) an APPROVE that still lacks
+// a required reviewer is written as `**Verdict:** PARTIAL`, with the sign-offs given so far. A
+// PARTIAL review holds the todo in `review` in every project, team mode or not — as a CHANGES
+// reopens it in every project: the rule would mean nothing where no review is otherwise needed.
+//
 // lib.ts asks `reviewGate` from `todoState`; nothing here may run at load time (the two modules
 // import each other).
 import { existsSync, readFileSync } from 'node:fs';
@@ -49,6 +54,13 @@ export function reviewVerdict(todoDir: string): Verdict | null {
   const path = join(todoDir, RECORD_REVIEW);
   if (!existsSync(path)) return null;
   return parseVerdict(readField(readFileSync(path, 'utf8'), 'Verdict'));
+}
+
+/** Is the todo's review an approval by some, not yet by every reviewer its area owners ask for (owners.ts)? */
+export function reviewIsPartial(todoDir: string): boolean {
+  const path = join(todoDir, RECORD_REVIEW);
+  if (!existsSync(path)) return false;
+  return /^PARTIAL\b/i.test((readField(readFileSync(path, 'utf8'), 'Verdict') ?? '').trim());
 }
 
 /** `"team"` in novadev.json: true turns team mode on; anything else is off. */
@@ -89,7 +101,9 @@ export function reviewGate(todoDir: string, checkMerge = true): 'changes' | 'rev
   const verdict = reviewVerdict(todoDir);
   if (verdict === 'CHANGES') return 'changes';
   const nd = openTodoNd(todoDir);
-  if (nd === null || !teamMode(nd)) return null;
+  if (nd === null) return null;
+  if (verdict === null && reviewIsPartial(todoDir)) return 'review';
+  if (!teamMode(nd)) return null;
   if (verdict !== 'APPROVE') return 'review';
   if (!checkMerge) return null;
   // One run asks this many times per todo (status, links, the sweep, the lists); the history does
@@ -186,14 +200,18 @@ export function parseReviewPayload(payload: Record<string, unknown>): ReviewInpu
   return { verdict, by, checks, findings: text('findings'), notes: text('notes') };
 }
 
-/** The ai_review.md a review writes. */
-export function renderReview(todo: string, date: string, review: ReviewInput): string {
+/**
+ * The ai_review.md a review writes. `more` is what a project with area owners adds (owners.ts): the
+ * verdict as it is written when the approval is not complete, and the lines after the reviewer.
+ */
+export function renderReview(todo: string, date: string, review: ReviewInput, more: { verdict?: string; fields?: readonly string[] } = {}): string {
   return [
     `# ai_review — ${todo}`,
     '',
     `**Date:** ${date}`,
-    `**Verdict:** ${review.verdict}`,
+    `**Verdict:** ${more.verdict ?? review.verdict}`,
     `**Reviewer:** ${review.by}`,
+    ...(more.fields ?? []),
     '',
     '## Checks',
     '',

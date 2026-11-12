@@ -8,6 +8,7 @@ import { copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { BATCH_RE, WORK_LOCK_FILE, listDirs, todayStamp } from './lib.ts';
 import { batchesInWorkElsewhere } from './registry.ts';
+import { type SuggestedOwner, ownerSuggester } from './owners.ts';
 import { resolveFiledLinks } from './todo-links.ts';
 import { DEFAULT_PRIORITY, PRIORITIES, type Priority, parsePriority, writeFiledMeta } from './todo-meta.ts';
 
@@ -51,6 +52,8 @@ export type FiledTodo = {
   readonly priority?: Priority;
   /** The refs it waits for — named only when the part had any. */
   readonly after?: readonly string[];
+  /** Who normally takes work there — only in a project with area owners, when a rule with an owner matches (owners.ts). */
+  readonly suggestedOwner?: SuggestedOwner;
 };
 
 /** Who asked for the filing (`by` in the payload): recorded in each todo.json the filing writes. */
@@ -100,6 +103,7 @@ export function fileTodos(nd: string, parts: readonly TodoPart[], opts: FilingOp
     writeFileSync(join(batchDir, CHAT_MARKER), `${todayStamp()}\n`);
   }
   const filed: FiledTodo[] = [];
+  const owner = ownerSuggester(nd);
   for (const [index, part] of parts.entries()) {
     const folder = folders[index]!;
     const dir = join(batchDir, folder);
@@ -112,12 +116,14 @@ export function fileTodos(nd: string, parts: readonly TodoPart[], opts: FilingOp
     const priority = part.priority ?? DEFAULT_PRIORITY;
     const after = links[index]!;
     writeFiledMeta(dir, { priority, after }, opts.by ?? null);
+    const suggested = owner(dir);
     filed.push({
       ref: `${target.batch}/${folder}`,
       path: `.novadev/todos/${target.batch}/${folder}`,
       attachments,
       ...(priority !== DEFAULT_PRIORITY ? { priority } : {}),
       ...(after.length > 0 ? { after } : {}),
+      ...(suggested !== null ? { suggestedOwner: suggested } : {}),
     });
   }
   return filed;

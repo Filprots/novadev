@@ -41,9 +41,10 @@ import { displayCommand, refreshMetrics } from './metrics.ts';
 import { auditMetrics } from './metrics-audit.ts';
 import { auditPlacement } from './placement.ts';
 import { afterMergeRefusal, commitAfterMerge, MERGE_DRIVER, hasMergeRules, mergeDriverConfigured, repairLogFile } from './merge-rules.ts';
-import { merged } from './review.ts';
+import { merged, reviewIsPartial } from './review.ts';
 import { auditTodoLinks, depName, linkReader } from './todo-links.ts';
 import { auditLead } from './lead.ts';
+import { auditOwners, waitingReviews } from './owners.ts';
 import { auditTodoMeta, orderByPriority, priorityLabel, todoPriority } from './todo-meta.ts';
 import { auditWork } from './work.ts';
 
@@ -138,7 +139,8 @@ export async function sync(args: string[]): Promise<void> {
   const inWork = auditWork(nd);
   // The todos' own settings (todo.json: priority, "do after" links): a file novadev cannot read.
   // … and a link to a todo nobody has, or todos that wait for each other (todo-links.ts).
-  const todoMeta = { problems: [...auditTodoMeta(nd).problems, ...auditLead(nd).problems] };
+  // … who may decide them besides a person ("lead"), and who owns and reviews what ("owners").
+  const todoMeta = { problems: [...auditTodoMeta(nd).problems, ...auditLead(nd).problems, ...auditOwners(nd).problems] };
   const todoLinks = auditTodoLinks(nd);
   const problems = [...inWork.problems, ...audit.problems, ...todoMeta.problems, ...todoLinks.problems, ...metricsAudit.problems, ...placement.problems, ...knowledge.problems];
   if (problems.length > 0) {
@@ -305,7 +307,15 @@ function reviewWaiting(root: string, nd: string): string[] {
   for (const todo of listAllTodos(nd)) {
     if (todo.archived) continue;
     const state = todoState(todo.dir);
-    if (state === 'review') out.push(`${todo.ref} — finished; waiting for a review (\`novadev todo review\` writes the verdict)`);
+    if (state === 'review') {
+      // An approval some reviewers gave, not yet all the area owners ask for (owners.ts).
+      const missing = reviewIsPartial(todo.dir) ? waitingReviews(nd, todo.dir) : [];
+      out.push(
+        missing.length > 0
+          ? `${todo.ref} — finished; reviewed in part — still needed: ${missing.map((m) => `${m.rule} (one of ${m.reviewers.join(', ')})`).join('; ')} (\`novadev todo review\`)`
+          : `${todo.ref} — finished; waiting for a review (\`novadev todo review\` writes the verdict)`,
+      );
+    }
     if (state === 'unmerged') out.push(`${todo.ref} — approved; waiting for the merge (${merged(root, todo.dir).why ?? 'not on the default branch yet'})`);
   }
   return out;

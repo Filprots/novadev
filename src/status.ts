@@ -85,7 +85,7 @@ export function statusData(nd: string, now: Date = new Date()): Record<string, u
       batch,
       readyToArchive: batchIsDone(join(nd, 'todos', batch)),
       inWork: lock === null ? null : lock.state === 'invalid' ? 'unreadable' : lock.lock.state,
-      todos: todos.filter((t) => t.batch === batch).map(({ todo, title, state, priority, after, waitsFor, ready }) => ({ todo, title, state, priority, after, waitsFor, ready })),
+      todos: todos.filter((t) => t.batch === batch).map(({ todo, title, state, priority, after, waitsFor, ready, suggestedOwner }) => ({ todo, title, state, priority, after, waitsFor, ready, ...(suggestedOwner !== undefined ? { suggestedOwner } : {}) })),
     };
   });
   const counts: Record<string, number> = {};
