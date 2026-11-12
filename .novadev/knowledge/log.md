@@ -12,6 +12,11 @@
 * **Verification**: [Conventions](wiki/conventions.md) — Re-checked after the batch: the new `test-result skip` and `worktree claim` follow the payload/JSON and fail() conventions it describes. (claude-code/claude-opus-5-5 · 2026-11-12_1/02-totest-skip-scenarios-and-close-round)
 * **Verification**: [Overview](wiki/overview.md) — Re-checked: README changes of the batch add commands, nothing that changes the overview. (claude-code/claude-opus-5-5 · 2026-11-12_1/03-work-start-one-todo-claims)
 * **Verification**: [Stack](wiki/stack.md) — Re-checked: still zero dependencies (node:crypto is built in), no tsconfig/linter. (claude-code/claude-opus-5-5 · 2026-11-12_1/03-work-start-one-todo-claims)
+* **Update**: [The work lock: waypoints, pause and resume](features/FEAT-0014-work-lock/feature.md) — The todo is the unit of work: a lock per todo in the todo's folder, the whole batch as one batch-root lock for a solo round, 0.17.0 locks read unchanged. (claude-code/claude-fable-5-2 · 2026-11-12_2/02-todo-is-the-unit-of-work)
+* **Update**: [novadev worktree: one worktree per task across repositories](features/FEAT-0019-worktree-command/feature.md) — A worktree knows its todos: create --todo, todos added by work start, Todo: lines in the merge request. (claude-code/claude-fable-5-2 · 2026-11-12_2/02-todo-is-the-unit-of-work)
+* **Update**: [Glossary](wiki/glossary.md) — Lock, registry and covers now describe the todo's lock beside the batch-root one. (claude-code/claude-fable-5-2 · 2026-11-12_2/02-todo-is-the-unit-of-work)
+* **Update**: [Architecture](wiki/architecture.md) — Where locks and their registry entries live, per todo and per batch. (claude-code/claude-fable-5-2 · 2026-11-12_2/02-todo-is-the-unit-of-work)
+* **Update**: [Workflows](wiki/workflows.md) — Test count checked: 625 tests in 33 files on branch robust-work. (claude-code/claude-fable-5-2 · 2026-11-12_2/02-todo-is-the-unit-of-work)
 
 ## 2026-11-10
 

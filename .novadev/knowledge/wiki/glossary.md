@@ -12,8 +12,8 @@ sources:
   - resource: repo:src/debt-budget.ts
   - resource: repo:src/placement.ts
   - resource: repo:templates/skills/novadev-work.md
-generated: { by: claude-code/claude-opus-5-5, at: 2026-11-12T08:15:26+01:00 }
-stale_after: 2027-02-10T08:15:26+01:00
+generated: { by: claude-code/claude-fable-5-2, at: 2026-11-12T14:42:34+01:00 }
+stale_after: 2027-02-10T14:42:34+01:00
 ---
 
 # Glossary
@@ -52,9 +52,11 @@ wording for agents; this page maps each word to the code.
 
 ## The lock
 
-- **Lock** — `todos/<batch>/working.md` (`WORK_LOCK_FILE`): state `working` or `paused`,
+- **Lock** — on a todo, the unit of work: `todos/<batch>/<todo>/working.md`; on a whole batch (one
+  developer, and every lock 0.17.0 wrote): `todos/<batch>/working.md` (`WORK_LOCK_FILE`). State `working` or `paused`,
   holder (agent actor, host, pid, session), `started`, `updated` (the heartbeat), last todo
-  and phase. While it exists the batch is *in work*: never complete or archived, and
+  and phase. A todo is held by one lock, its own or the batch-root one that covers it
+  (`todoHolders`). While a lock exists the batch is *in work*: never complete or archived, and
   `file-todo` never reuses it (`todo` writes wait only while the holder is live).
 - **Waypoint** — one entry of the lock's trail, newest first: todo, loop phase
   (`LOOP_PHASES`, 0 ORIENT … 10 CLOSE), what is done, what is next.
@@ -118,9 +120,10 @@ wording for agents; this page maps each word to the code.
   (`irrippr@abc1234`); **`**Repos:**`** — the sub-repos a todo changed (`src/subrepos.ts`).
 - **Registry** — `<git common dir>/novadev/`, shared by every worktree of a clone: `locks/<batch>.json`
   mirrors each lock (worktree, branch, holder, claims) so other worktrees see it (`src/registry.ts`);
-  a lock on part of a batch is `locks/<batch>@<worktree hash>.json`.
-- **Covers** — the todos a lock on part of a batch holds (`work start --todo`; `covers:` in
-  working.md); null/absent = the whole batch. Two locks of one batch collide when either covers
+  a todo's lock is `locks/<batch>.<todo>.json` (`unit: "todo"`); a 0.17.0 lock on part of a batch
+  is `locks/<batch>@<worktree hash>.json` (read, never made new).
+- **Covers** — the todos a lock holds: one for a todo's lock; for a 0.17.0 part-lock the `covers:`
+  list in working.md; null/absent = the whole batch. Two locks of one batch collide when either covers
   the whole batch or they share a todo.
 - **Claim** — a path a batch in work owns (its features' `touches:`, `--claim`, `work claim`;
   `irrippr:ps/` for a sub-repo). Overlapping claims across worktrees are refused: one owner per file.

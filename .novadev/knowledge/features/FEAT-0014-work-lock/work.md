@@ -21,6 +21,7 @@ The work that built [FEAT-0014 — The work lock: waypoints, pause and resume](f
 - `2026-11-10_2/14-history-work-lock` — completed · 2026-11-10 · archived
 - `2026-11-12_1/03-work-start-one-todo-claims` — completed · 2026-11-12
 - `2026-11-12_1/04-worktree-batch-claims-files-only` — completed · 2026-11-12
+- `2026-11-12_2/02-todo-is-the-unit-of-work` — completed · 2026-11-12
 
 ## Commits
 
@@ -33,6 +34,9 @@ The work that built [FEAT-0014 — The work lock: waypoints, pause and resume](f
 - `6655fee` — 2026-11-10_2/14-history-work-lock
 - `132e326` — 2026-11-12_1/03-work-start-one-todo-claims
 - `132e326` — 2026-11-12_1/04-worktree-batch-claims-files-only
+- `2c5c777` — 2026-11-12_2/02-todo-is-the-unit-of-work
+- `4660e71` — 2026-11-12_2/02-todo-is-the-unit-of-work
+- `6ed4bcc` — 2026-11-12_2/02-todo-is-the-unit-of-work
 
 _Linked by `**Feature:** FEAT-0014` in each todo's record._
 <!-- novadev:work:end -->
