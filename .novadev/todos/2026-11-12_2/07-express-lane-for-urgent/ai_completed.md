@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-12
 **Feature:** FEAT-0023, FEAT-0022
-**Commits:** f2904df
+**Commits:** f2904df, 9c808c6
 
 ## Prompt
 An urgent todo jumps the merge queue, is exempt from the work-in-progress limit, pauses what its holder was in, and skips no check.
@@ -15,6 +15,7 @@ An urgent todo jumps the merge queue, is exempt from the work-in-progress limit,
 ## Decisions
 - Only locks in THIS worktree are paused: a lock in another worktree is on another branch and cannot be written from here; it is named so it is paused there.
 - Nothing is paused below the limit.
+- **After the independent review:** only locks that hold a todo counted against the limit are paused; a lock that cannot be paused is reported (`notPaused`), never a reason to refuse the urgent start.
 
 ## Placement
 In `src/work.ts` (`wipCheck`, `pauseForUrgent`) and `queueAdd` in `src/worktree.ts`; counting in `src/wip.ts`. No hubs are configured.

@@ -21,6 +21,7 @@ The work that built [FEAT-0021 — Area owners](feature.md).
 
 - `25f4e8e` — 2026-11-12_2/08-area-owners
 - `9f1adac` — 2026-11-12_2/08-area-owners
+- `9c808c6` — 2026-11-12_2/08-area-owners
 
 _Linked by `**Feature:** FEAT-0021` in each todo's record._
 <!-- novadev:work:end -->

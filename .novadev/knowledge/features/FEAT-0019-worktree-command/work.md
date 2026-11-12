@@ -35,7 +35,9 @@ The work that built [FEAT-0019 — novadev worktree: one worktree per task acros
 - `4660e71` — 2026-11-12_2/02-todo-is-the-unit-of-work
 - `6ed4bcc` — 2026-11-12_2/02-todo-is-the-unit-of-work
 - `9865cb7` — 2026-11-12_2/03-claims-warn-protected-paths-lock
+- `9c808c6` — 2026-11-12_2/03-claims-warn-protected-paths-lock
 - `9865cb7` — 2026-11-12_2/04-merge-queue
+- `9c808c6` — 2026-11-12_2/04-merge-queue
 
 _Linked by `**Feature:** FEAT-0019` in each todo's record._
 <!-- novadev:work:end -->

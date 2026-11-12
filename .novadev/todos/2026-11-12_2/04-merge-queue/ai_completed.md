@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-12
 **Feature:** FEAT-0022, FEAT-0019
-**Commits:** 9865cb7
+**Commits:** 9865cb7, 9c808c6
 
 ## Prompt
 `novadev worktree queue add|list|run|remove`: each approved branch is brought onto the newest default branches, checked there, and only then landed; a failure lands nothing and the queue goes on; one merge at a time; `worktree merge` uses the same checks.
@@ -16,6 +16,7 @@
 
 ## Decisions
 - The merged result is checked in the builder's own worktree (the default branches merged into the branch), not in a temporary checkout: it has the project's links and shared folders, and with one merge at a time the tree that passed is the tree that lands.
+- **After the independent review (2026-11-12):** the branch tips are pinned before the gate and the merges take those commits — a commit added while the checks ran fails the entry (it was a way for unchecked code to land); a main checkout that is not ready stops the run without failing entries; every change of `queue.json` is one locked, atomic step (`updateQueue`); a dead merge lock is taken over by one command only.
 
 ## Placement
 New module `src/queue.ts` (state and lock only); the commands in `src/worktree.ts`, beside the merge they share. No hubs are configured.

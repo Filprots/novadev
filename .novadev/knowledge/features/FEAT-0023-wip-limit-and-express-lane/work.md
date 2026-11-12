@@ -21,7 +21,9 @@ The work that built [FEAT-0023 — Wip limit and express lane](feature.md).
 ## Commits
 
 - `f2904df` — 2026-11-12_2/07-express-lane-for-urgent
+- `9c808c6` — 2026-11-12_2/07-express-lane-for-urgent
 - `f2904df` — 2026-11-12_2/09-work-in-progress-limit
+- `9c808c6` — 2026-11-12_2/09-work-in-progress-limit
 
 _Linked by `**Feature:** FEAT-0023` in each todo's record._
 <!-- novadev:work:end -->

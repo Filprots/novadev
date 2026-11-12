@@ -25,6 +25,7 @@
 * **Update**: [novadev worktree: one worktree per task across repositories](features/FEAT-0019-worktree-command/feature.md) — The gate under notice claims; merge --yes checks the merged result; the queue; required reviewers in mr. (claude-code/claude-fable-5-2 · 2026-11-12_2/04-merge-queue)
 * **Update**: [Architecture](wiki/architecture.md) — New modules: claim-policy, queue, todo-meta, todo-links, lead, owners, wip; queue.json and queue.lock in the registry folder. (claude-code/claude-fable-5-2 · 2026-11-12_2/04-merge-queue)
 * **Update**: [Workflows](wiki/workflows.md) — Test count checked: 717 tests in 38 files on branch robust-work. (claude-code/claude-fable-5-2 · 2026-11-12_2/09-work-in-progress-limit)
+* **Update**: [Workflows](wiki/workflows.md) — Test count checked after the review fixes: 724 tests in 39 files. (claude-code/claude-fable-5-2 · 2026-11-12_2/04-merge-queue)
 
 ## 2026-11-10
 

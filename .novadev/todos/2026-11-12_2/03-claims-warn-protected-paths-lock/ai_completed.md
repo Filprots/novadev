@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-12
 **Feature:** FEAT-0014, FEAT-0019
-**Commits:** 9865cb7
+**Commits:** 9865cb7, 9c808c6
 
 ## Prompt
 Claims become notices behind an opt-in setting; only the project's `protectedPaths` stay hard locks; the gate fails only on an unheld protected file and lists shared files.
@@ -18,6 +18,7 @@ Claims become notices behind an opt-in setting; only the project's `protectedPat
 - Shares are computed, not stored: nothing to keep in step between two worktrees' entries.
 - Two claims on a folder ABOVE a protected path are hard too: they share the protected path.
 - Goes live with the merge queue (todo 04), which is the guard that replaces the lock.
+- **After the independent review:** a pattern with no folder (`*.sql`) protects that name in any folder; `{a,b}`, `[abc]`, `!` are refused, not misread; a protected path is enforced inside `.novadev/` too; without `"notice"` a malformed `protectedPaths` stops nothing; `worktree mr` never fails on the setting; a project below its repository's top reads the main checkout's rule too.
 
 ## Placement
 New module `src/claim-policy.ts` (the policy, globs, `sharedClaims`); callers in `src/work.ts`, `src/worktree.ts`, `src/status.ts`. No hubs are configured in this project.

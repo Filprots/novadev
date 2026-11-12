@@ -21,7 +21,9 @@ The work that built [FEAT-0022 — Merge queue](feature.md).
 ## Commits
 
 - `9865cb7` — 2026-11-12_2/04-merge-queue
+- `9c808c6` — 2026-11-12_2/04-merge-queue
 - `f2904df` — 2026-11-12_2/07-express-lane-for-urgent
+- `9c808c6` — 2026-11-12_2/07-express-lane-for-urgent
 
 _Linked by `**Feature:** FEAT-0022` in each todo's record._
 <!-- novadev:work:end -->
