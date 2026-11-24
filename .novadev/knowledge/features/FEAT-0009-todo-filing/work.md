@@ -16,12 +16,14 @@ The work that built [FEAT-0009 — Filing a todo from chat](feature.md).
 ## Todos
 
 - `2026-11-10_2/09-history-todo-filing` — completed · 2026-11-10 · archived
+- `2026-11-24_1/01-todo-recipient` — completed · 2026-11-24
 
 ## Commits
 
 - `5c9f453` — 2026-11-10_2/09-history-todo-filing
 - `dc73f7e` — 2026-11-10_2/09-history-todo-filing
 - `6655fee` — 2026-11-10_2/09-history-todo-filing
+- `c107377` — 2026-11-24_1/01-todo-recipient
 
 _Linked by `**Feature:** FEAT-0009` in each todo's record._
 <!-- novadev:work:end -->

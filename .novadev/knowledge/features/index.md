@@ -34,6 +34,7 @@
 # todos
 
 * [● FEAT-0020 — Todo priority and order](FEAT-0020-todo-priority-and-order/feature.md) - shipped · Give every todo a priority (urgent, high, normal, later) and 'do after' links to other todos — set when filing, changed by a person or the lead with who, when and why recorded — so every list is ordered, `work start` refuses a todo that still waits, and `todo priority --changed-since` reports every change for a digest.
+* [● FEAT-0024 — Todo recipients](FEAT-0024-todo-recipients/feature.md) - shipped · Address a todo to a recipient — a team like `hq` (every actor `hq/…`) or one actor — when filing or with `novadev todo recipient`, so that only the recipient works it: the lists say `for <recipient>`, `novadev todo list --for <who>` is a recipient's own list, `work start` refuses anybody else, and sync lists addressed todos apart; a todo without one is anyone's.
 
 # work
 

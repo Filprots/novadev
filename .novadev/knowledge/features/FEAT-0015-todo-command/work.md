@@ -17,6 +17,7 @@ The work that built [FEAT-0015 — novadev todo: one todo at a time, away from t
 
 - `2026-11-10_1/06-review-record` — completed · 2026-11-10
 - `2026-11-10_2/15-history-todo-command` — completed · 2026-11-10 · archived
+- `2026-11-24_1/01-todo-recipient` — completed · 2026-11-24
 
 ## Commits
 
@@ -24,6 +25,7 @@ The work that built [FEAT-0015 — novadev todo: one todo at a time, away from t
 - `89e9399` — 2026-11-10_1/06-review-record
 - `fb0170f` — 2026-11-10_2/15-history-todo-command
 - `772a96c` — 2026-11-10_2/15-history-todo-command
+- `c107377` — 2026-11-24_1/01-todo-recipient
 
 _Linked by `**Feature:** FEAT-0015` in each todo's record._
 <!-- novadev:work:end -->

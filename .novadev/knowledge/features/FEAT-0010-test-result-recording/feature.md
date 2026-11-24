@@ -15,8 +15,8 @@ superseded-by: []
 conflicts-with: []
 sources:
   - resource: commit:dc73f7e
-generated: { by: claude-code/claude-opus-5-5, at: 2026-11-12T08:15:26+01:00 }
-stale_after: 2027-11-12T08:15:26+01:00
+generated: { by: claude-code/claude-fable-5-2, at: 2026-11-24T13:06:51+01:00 }
+stale_after: 2027-11-24T13:06:51+01:00
 ---
 
 # FEAT-0010 — Recording a person's test results
@@ -50,6 +50,7 @@ which names clashes with `numbered` from `src/todo-filing.ts`.
 
 - 2026-09-09 — landed in 0.9.0 (commit dc73f7e): the two companion playbooks and `novadev test-result`
 - 2026-11-12 — `test-result skip` (`2026-11-12_1/02-totest-skip-scenarios-and-close-round`); tests/test-skip.test.ts is the first test of `src/test-results.ts`
+- 2026-11-24 — `test-result write` takes any scenario number a plan has; it refused every number above 99, so IRRISketch's FEAT-0001 round (scenarios 460–465) could not be recorded (`2026-11-24_1/02-scenario-numbers-above-99`); tests/test-result-write.test.ts
 
 ## Open questions
 

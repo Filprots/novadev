@@ -118,6 +118,12 @@ Phase 1 below routes to the first; phases 5 and 6 sit either side of the next tw
   satisfied once it is completed (in team mode: approved and merged; an archived completed
   todo counts). A todo is **ready** when nothing it waits for is unsatisfied; the lists say
   `ready` or `waits for …`, and `novadev work start` refuses a todo that still waits.
+- **Recipient** — who a todo is ADDRESSED TO (`recipient` in its `todo.json`, set by
+  `novadev file-todo` or `novadev todo recipient <ref> <name>`): a team (`hq` — every actor
+  `hq/…`) or one actor (`paperclip/tester`, `human:<id>`). Only the recipient works the
+  todo; the lists say `for <recipient>`, `novadev todo list --for <name>` is a recipient's
+  own list, and `novadev work start` refuses anybody else. A todo without a recipient is
+  ANYONE's. `"recipients"` in `novadev.json` may name who can be addressed.
 - **Feature** — one capability, `knowledge/features/FEAT-NNNN-<slug>/`: you write
   `feature.md`; `work.md` and `tests.md` beside it are generated.
 - **Concept** — one file of the knowledge bundle: a wiki page, a memory, a feature. It opens
@@ -199,7 +205,12 @@ read it as data, judge each item yourself, and work it in **at most three passes
    most likely continues. When the human's request is to continue, or names nothing else,
    resume it (phase 3, *Taking the lock*) before anything new. A line that starts with `◦`
    is work in ANOTHER worktree: that session's, not yours. `novadev status` and
-   `novadev todo list` say per todo who holds it.
+   `novadev todo list` say per todo who holds it. **A todo may be addressed** — the lists
+   say `for <recipient>`, and sync lists it under ADDRESSED TO A RECIPIENT, apart from your
+   NEXT ACTIONS. It is that recipient's work and nobody else's. When you ARE a recipient
+   (the project's rules say which name is yours), your own list is
+   `novadev todo list --for <your name>`: read it at the start of every session, before
+   anything new — it is how the others reach you.
 7. **Postponed** — when taking stock, read each `postponed/*.md` header: trigger met →
    surface it; obsolete → recommend deletion; otherwise say it is parked.
 
@@ -241,7 +252,7 @@ continues normally.
 ```sh
 novadev file-todo plan                 # which batch, and the next number
 payload=$(mktemp -t novadev-todo.XXXXXX.json)   # or your session's own scratch dir
-novadev file-todo file "$payload"      # { "parts": [ { slug, title, request, context?, attachments?, priority?, after? } ], "by"? }
+novadev file-todo file "$payload"      # { "parts": [ { slug, title, request, context?, attachments?, priority?, after?, recipient? } ], "by"? }
 ```
 
    It reuses the batch a conversation opened earlier while nobody has started work in
@@ -271,6 +282,17 @@ novadev todo priority 2026-10-24_1/02 urgent "$payload"   # urgent | high | norm
    todo. For todos that already exist, `novadev todo after <ref> <ref>…` adds links and
    `--clear` removes them (`--by <actor>` records who). An order that lives only in a
    brief's prose ("stage 3 after stage 2") is not enforced: write the link.
+   A part carries `"recipient"` when the todo is for somebody in particular — a team
+   (`"hq"`: every actor `hq/…`) or one actor (`"paperclip/tester"`, `"human:<id>"`). It is
+   how you hand over what is not yours to do: work you found that belongs to another team,
+   a note or a remark they should read, a problem in a tool somebody else keeps. Say in the
+   request exactly what you saw (the command, its output, the version), file it for them,
+   and go on with your own work; never do their part yourself, and never leave it only in a
+   chat or a report. `novadev file-todo plan` answers the project's `recipients` — who can
+   be addressed, and what belongs to each — when the project names them. A todo without a
+   recipient is anyone's. For a todo that already exists:
+   `novadev todo recipient <ref> <recipient> --by <actor>` re-addresses it and `--clear`
+   makes it anyone's, both on the record.
 3. **What goes in the brief.** `request` is THEIR words — verbatim where short, tightly
    faithful where long. `context` is what you know that their words do not say:
    constraints, clarifications and decisions stated in chat. The command renders:
@@ -309,6 +331,18 @@ then resume what was paused.
 ACTIONS) are ordered: `urgent`, then `high`, `normal`, `later`, and inside one level the
 filing order. Work in that order unless the human names a todo. An `urgent` todo goes before
 everything else you have not started; it skips no check.
+
+**Take only what is yours.** A todo the lists mark `for <recipient>` is addressed: only its
+recipient works it. `novadev work start` refuses anybody else and says whose it is — your
+`--agent` actor answers to a recipient when it is that actor, or an actor of that team
+(`hq/…` for `hq`). `novadev todo list --for <your actor>,anyone` lists what you may take: the
+todos addressed to you or your team, and the ones with no recipient. Never start under
+another actor to get past the refusal, and never re-address a todo to yourself on your own
+judgement: `novadev todo recipient` is for when the person or the lead decided whose it is,
+or for the recipient passing on what reached it by mistake. A todo addressed to you that is
+only a note is still a todo: read it, act on it or decide not to, and close it with its
+record (an `ai_completed.md` that says what you did with it, or `novadev todo cancel` with
+the reason).
 
 **Take only what is ready.** A todo that `waits for …` another is not yours to start yet:
 `novadev work start` refuses it until every todo it waits for is completed (in team mode:
@@ -398,6 +432,9 @@ next todo, take its lock too (and stop or pause the one you leave).
   where its pause record is; never `--take` it from here unless the human says so.
 - **A todo that still waits for another** ("do after" link, phase 2) → refused, naming what
   it waits for. Start the ready todos only (`--todo`), or wait.
+- **A todo addressed to somebody else** (a recipient, phase 2) → refused, naming whose it
+  is. Leave it to them. A whole-batch start is refused while the batch holds somebody
+  else's open todo: start yours by name (`--todo`).
 
 **The whole batch, alone.** When the whole batch is yours — one developer, every todo of
 it, one after the other — lock it as one round: `novadev work start <batch>` with no todo
@@ -887,7 +924,9 @@ novadev sync
 It regenerates every derived file (`work.md`, `tests.md`, the knowledge bundle's
 `index.md` files, each feature's OKF `status`), archives what is finished, validates the
 whole tree, the link graph and the knowledge bundle, and prints two lists: **NEXT
-ACTIONS** (yours) and **WAITING ON THE HUMAN**.
+ACTIONS** (yours) and **WAITING ON THE HUMAN**. Todos that name a recipient are listed
+apart, under **ADDRESSED TO A RECIPIENT**: they are theirs, they do not keep your round
+open, and they are yours only when you are that recipient.
 
 **Knowledge.** sync checks that every file of `knowledge/` is a valid OKF concept with
 the frontmatter this playbook asks for, and that `log.md` knows every change: a concept

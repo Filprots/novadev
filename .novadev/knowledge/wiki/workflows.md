@@ -1,7 +1,7 @@
 ---
 type: Wiki Page
 title: Workflows
-description: "Exact commands to install (bun link), run (bun bin/novadev.ts vs the linked novadev, which is this working tree), test (bun test, ~78 s, 724 tests), and release a version (the bump places, migrations, migrate-repo + deploy here and in consumer projects); no CI, no hooks, no secrets."
+description: "Exact commands to install (bun link), run (bun bin/novadev.ts vs the linked novadev, which is this working tree), test (bun test, ~110 s, 751 tests), and release a version (the bump places, migrations, migrate-repo + deploy here and in consumer projects); no CI, no hooks, no secrets."
 tags: [workflows, install, run, test, release, version, deploy, dogfooding]
 sources:
   - resource: repo:package.json
@@ -12,8 +12,8 @@ sources:
   - resource: repo:src/sync.ts
   - resource: repo:src/deploy.ts
   - resource: repo:README.md
-generated: { by: claude-code/claude-fable-5-2, at: 2026-11-12T15:48:47+01:00 }
-stale_after: 2027-02-10T15:48:47+01:00
+generated: { by: claude-code/claude-fable-5-2, at: 2026-11-24T13:06:51+01:00 }
+stale_after: 2027-02-22T13:06:51+01:00
 ---
 
 # Workflows
@@ -41,7 +41,7 @@ No build step, no install step: there are no dependencies. Bun >= 1.4 is require
 ## Test
 
 ```sh
-bun test                     # the whole suite: 724 tests in 39 files, ~78 s (verified 2026-11-12, branch robust-work)
+bun test                     # the whole suite: 751 tests in 41 files, ~110 s (verified 2026-11-24, branch todo-recipient)
 bun test tests/work.test.ts  # one file
 bun test -t "novadev work stop"   # by test name
 ```
@@ -96,7 +96,12 @@ Releases are not tagged (`git tag` lists none, 2026-11-10).
 Commit `772a96c` (2026-11-04) added `todo edit` and attachments to `todo addendum`
 without a version bump; the README's 0.15.0 paragraph already describes them.
 A feature commit between releases waits for the next bump (772a96c waited for 0.16.0; so did
-the commits of batch 2026-11-10_1).
+the commits of batch 2026-11-10_1). Batch 2026-11-24_1 (a todo's recipient; scenario numbers
+above 99) went live on 0.18.0 without a bump, on purpose: a bump stops `novadev sync` in every
+open worktree of a consumer project until it merges the stamped default branch, and IRRISketch
+had about twenty open worktrees mid-run. Such a change needs no `migrate-repo`; `novadev deploy`
+in each consumer project refreshes the playbooks (until then `novadev doctor` there says the
+playbooks differ from the installed novadev).
 
 ## Editing the playbooks
 
