@@ -120,11 +120,14 @@ export function statusData(nd: string, now: Date = new Date()): Record<string, u
       readyToArchive: batchIsDone(join(nd, 'todos', batch)),
       inWork: batchInWork(nd, batch),
       inWorkElsewhere: elsewhere.has(batch),
-      todos: todos.filter((t) => t.batch === batch).map(({ todo, title, state, priority, after, waitsFor, ready, suggestedOwner }) => ({ todo, title, state, priority, after, waitsFor, ready, ...(suggestedOwner !== undefined ? { suggestedOwner } : {}), holder: holderData(holders.get(`${batch}/${todo}`)) })),
+      todos: todos.filter((t) => t.batch === batch).map(({ todo, title, state, priority, recipient, after, waitsFor, ready, suggestedOwner }) => ({ todo, title, state, priority, recipient, after, waitsFor, ready, ...(suggestedOwner !== undefined ? { suggestedOwner } : {}), holder: holderData(holders.get(`${batch}/${todo}`)) })),
     };
   });
   const counts: Record<string, number> = {};
   for (const t of todos) counts[t.state] = (counts[t.state] ?? 0) + 1;
+  // Per recipient, the addressed todos still to be worked (todo-recipient.ts): what each one's own list holds.
+  const addressed: Record<string, number> = {};
+  for (const t of todos) if (t.recipient !== null && ['open', 'progress', 'changes'].includes(t.state)) addressed[t.recipient] = (addressed[t.recipient] ?? 0) + 1;
   const tasks = listTestTasks(nd).map((t) => ({ id: t.id, features: t.featureIds, scenarios: t.scenarios, revision: t.revision || 1, lastTested: t.lastTested || null, readyForReview: t.hasResults, results: t.results, todos: t.todoRefs }));
   const postponed = listFiles(join(nd, 'postponed')).filter((f) => f.endsWith('.md') && f !== 'README.md').map((file) => {
     const fm = readFrontmatter(join(nd, 'postponed', file)) ?? {};
@@ -135,7 +138,7 @@ export function statusData(nd: string, now: Date = new Date()): Record<string, u
   let archived = 0;
   for (const year of listDirs(join(nd, 'archive'))) archived += listDirs(join(nd, 'archive', year)).length;
   return {
-    inWork, worktrees: worktreesData(nd), wip: wipData(nd, holders), mergeQueue: mergeQueueData(nd), sharedClaims: sharedClaims(dirname(nd)).map((s) => ({ path: s.path, between: s.between })), batches, todoCounts: counts, totest: tasks, postponed,
+    inWork, worktrees: worktreesData(nd), wip: wipData(nd, holders), mergeQueue: mergeQueueData(nd), sharedClaims: sharedClaims(dirname(nd)).map((s) => ({ path: s.path, between: s.between })), batches, todoCounts: counts, addressed, totest: tasks, postponed,
     sparks: listFiles(join(nd, 'sparks')).filter((f) => f !== 'README.md').length,
     features, archivedBatches: archived,
   };

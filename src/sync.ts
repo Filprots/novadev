@@ -43,11 +43,12 @@ import { auditPlacement } from './placement.ts';
 import { afterMergeRefusal, commitAfterMerge, MERGE_DRIVER, hasMergeRules, mergeDriverConfigured, repairLogFile } from './merge-rules.ts';
 import { merged, reviewIsPartial } from './review.ts';
 import { auditTodoLinks, depName, linkReader } from './todo-links.ts';
+import { addressedTodos, auditTodoRecipients } from './todo-recipient.ts';
 import { auditLead } from './lead.ts';
 import { auditClaimPolicy } from './claim-policy.ts';
 import { auditWip } from './wip.ts';
 import { auditOwners, waitingReviews } from './owners.ts';
-import { auditTodoMeta, orderByPriority, priorityLabel, todoPriority } from './todo-meta.ts';
+import { auditTodoMeta, orderByPriority, priorityLabel, readTodoMeta, todoPriority } from './todo-meta.ts';
 import { auditWork } from './work.ts';
 
 export async function sync(args: string[]): Promise<void> {
@@ -144,7 +145,10 @@ export async function sync(args: string[]): Promise<void> {
   // … who may decide them besides a person ("lead"), and who owns and reviews what ("owners").
   const todoMeta = { problems: [...auditTodoMeta(nd).problems, ...auditLead(nd).problems, ...auditClaimPolicy(nd).problems, ...auditWip(nd).problems, ...auditOwners(nd).problems] };
   const todoLinks = auditTodoLinks(nd);
-  const problems = [...inWork.problems, ...audit.problems, ...todoMeta.problems, ...todoLinks.problems, ...metricsAudit.problems, ...placement.problems, ...knowledge.problems];
+  // … and who a todo is addressed to ("recipients", todo-recipient.ts): a setting novadev cannot read, a
+  // todo for a name the project does not list.
+  const recipients = auditTodoRecipients(nd);
+  const problems = [...inWork.problems, ...audit.problems, ...todoMeta.problems, ...recipients.problems, ...todoLinks.problems, ...metricsAudit.problems, ...placement.problems, ...knowledge.problems];
   if (problems.length > 0) {
     console.log(`\nPROBLEMS (${problems.length}):`);
     for (const p of problems) console.log(`  ✗ ${p}`);
@@ -173,9 +177,11 @@ export async function sync(args: string[]): Promise<void> {
   // 4. What still needs doing, split by who has to do it. An abandoned lock comes first: a session
   // died mid-work, and its last waypoint is where this one should pick up. A paused batch waits on
   // the human — they stopped it, they say when it goes on.
-  const agent = [...inWork.actions, ...knowledge.actions, ...agentActions(root, nd, audit.notes), ...todoLinks.actions, ...metrics.actions, ...placement.actions];
+  const agent = [...inWork.actions, ...knowledge.actions, ...agentActions(root, nd, audit.notes), ...todoLinks.actions, ...recipients.actions, ...metrics.actions, ...placement.actions];
   const human = [...inWork.waiting, ...humanActions(nd)];
   const gated = reviewWaiting(root, nd);
+  // The todos that name a recipient are that recipient's work, not whoever runs this sync.
+  const addressed = addressedTodos(nd);
 
   if (agent.length > 0) {
     console.log(`\nNEXT ACTIONS — you (${agent.length}):`);
@@ -189,12 +195,19 @@ export async function sync(args: string[]): Promise<void> {
     console.log(`\nWAITING ON REVIEW OR MERGE (${gated.length}):`);
     for (const g of gated) console.log(`  ◇ ${g}`);
   }
+  if (addressed.length > 0) {
+    console.log(`\nADDRESSED TO A RECIPIENT — theirs to do, yours only if you are the recipient (${addressed.length}):`);
+    for (const a of addressed) console.log(`  ✉ ${a.line}`);
+  }
 
   if (agent.length === 0 && problems.length === 0) {
+    const left = [human.length > 0 ? 'the human\'s to do' : '', addressed.length > 0 ? 'addressed to its recipient' : ''].filter(Boolean);
     console.log(
-      human.length > 0
+      human.length > 0 && addressed.length === 0
         ? '\nsync: clean — everything left is the human\'s to do.'
-        : '\nsync: clean. ✓',
+        : left.length > 0
+          ? `\nsync: clean — everything left is ${left.join(', or ')}.`
+          : '\nsync: clean. ✓',
     );
   }
   // After a merge, what this run changed in .novadev/ is committed — problems or not: the derived
@@ -265,6 +278,8 @@ function agentActions(root: string, nd: string, notes: string[]): string[] {
   const open = orderByPriority(listAllTodos(nd).filter((todo) => !todo.archived), (todo) => todoPriority(todo.dir));
   const links = linkReader(nd);
   for (const todo of open) {
+    // A todo that names a recipient is listed apart (ADDRESSED TO A RECIPIENT): it is theirs.
+    if (readTodoMeta(todo.dir).recipient !== null) continue;
     const state = todoState(todo.dir);
     const name = `${todo.ref}${priorityLabel(todoPriority(todo.dir))}`;
     // A todo that waits for others ("do after" links, todo-links.ts) is not to be started yet: say what for.

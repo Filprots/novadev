@@ -17,11 +17,15 @@ Inside a todo folder:
   section.
 
 - **`todo.json`** — only when the todo has a priority other than normal (`urgent`,
-  `high`, `normal` or `later`) or waits for other todos (`after`: their refs), with who
+  `high`, `normal` or `later`), waits for other todos (`after`: their refs) or is addressed
+  to somebody (`recipient`: a team like `hq`, or one actor), with who
   changed it, when and why. Written by `novadev file-todo`, `novadev todo priority` (a
-  person's decision, or the lead's) and `novadev todo after`; never edit it by hand. A todo without the
-  file is `normal` and waits for nothing. Every list orders by priority and says which
+  person's decision, or the lead's), `novadev todo after` and `novadev todo recipient`; never edit it by hand. A todo without the
+  file is `normal`, waits for nothing and is anyone's. Every list orders by priority and says which
   todos are ready and which wait; `novadev work start` refuses a todo that still waits.
+  A todo with a recipient is that recipient's only: the lists say `for <recipient>`,
+  `novadev todo list --for <recipient>` is its own list, and `novadev work start` refuses
+  anybody else.
 
 What a todo teaches is not kept here: the agent records it in `../knowledge/` (a memory, a
 wiki page, a feature), citing the todo as its source, so it outlives the archive move.

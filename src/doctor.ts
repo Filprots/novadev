@@ -30,6 +30,7 @@ import { auditLinks } from './links.ts';
 import { auditMetrics } from './metrics-audit.ts';
 import { auditPlacement } from './placement.ts';
 import { auditTodoLinks } from './todo-links.ts';
+import { auditTodoRecipients } from './todo-recipient.ts';
 import { auditTodoMeta } from './todo-meta.ts';
 import { auditLead } from './lead.ts';
 import { auditClaimPolicy } from './claim-policy.ts';
@@ -133,6 +134,10 @@ export function doctor(): void {
   const todoLinks = auditTodoLinks(nd);
   problems.push(...todoLinks.problems);
   notes.push(...todoLinks.actions);
+  // --- recipients: who a todo may be addressed to ("recipients" in novadev.json) ---
+  const recipients = auditTodoRecipients(nd);
+  problems.push(...recipients.problems);
+  notes.push(...recipients.actions);
 
   // --- archive: year grouping + naming ---
   const archiveDir = join(nd, 'archive');

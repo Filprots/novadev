@@ -3,19 +3,21 @@
 //   novadev file-todo plan               which batch the todos would land in, and the next number
 //   novadev file-todo file <payload>     create the folders, write the briefs, copy the files in
 //
-// The payload is a JSON FILE — `{ "parts": [ { slug, title, request, context?, attachments?, priority?, after? } ], "by"? }`
+// The payload is a JSON FILE — `{ "parts": [ { slug, title, request, context?, attachments?, priority?, after?, recipient? } ], "by"? }`
 // — because a request is multi-line prose written by a person, and quoting that through a shell is
 // how it gets mangled. `attachments` are absolute paths to files already on disk. `priority` is
 // urgent | high | normal | later, named only when the person signalled one (it goes into the todo's
 // todo.json, todo-meta.ts); `after` lists the todos the part waits for — refs, or the slug of another part
-// of the same payload (todo-links.ts); `by` is the person who asked (`human:<id>`, or `human` for git's
-// user.name).
+// of the same payload (todo-links.ts); `recipient` is who the part is addressed to, when it is for somebody
+// in particular (a team like `hq`, or one actor — recipients.ts; `plan` answers the project's own list
+// when it names one); `by` is who asked (`human:<id>`, `human` for git's user.name, or an agent's actor).
 //
 // Both commands answer in JSON on stdout, and errors as `{ "error": … }` with a non-zero exit, so
 // the agent driving them can read the outcome instead of guessing from prose.
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { novadevDir, requireProjectRoot } from './lib.ts';
+import { readRecipients } from './recipients.ts';
 import { fileTodos, parseParts, planBatch } from './todo-filing.ts';
 import { resolveActor } from './todo-meta.ts';
 
@@ -26,7 +28,9 @@ export function fileTodo(args: string[]): void {
   const nd = novadevDir(requireProjectRoot());
   try {
     if (command === 'plan') {
-      console.log(JSON.stringify(planBatch(nd), null, 2));
+      // The recipients the project names, with what belongs to each: whoever files sees who can be addressed.
+      const { known } = readRecipients(nd);
+      console.log(JSON.stringify({ ...planBatch(nd), ...(known !== null ? { recipients: Object.fromEntries(known.map((k) => [k.name, k.about])) } : {}) }, null, 2));
       return;
     }
     if (command === 'file') {
