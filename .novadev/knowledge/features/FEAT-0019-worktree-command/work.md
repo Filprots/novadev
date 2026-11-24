@@ -15,13 +15,13 @@ The work that built [FEAT-0019 — novadev worktree: one worktree per task acros
 
 ## Todos
 
-- `2026-11-10_1/07-worktree-command` — completed · 2026-11-10
+- `2026-11-10_1/07-worktree-command` — completed · 2026-11-10 · archived
 - `2026-11-12_1/01-worktree-gate-reads-batch-claims` — completed · 2026-11-12
 - `2026-11-12_1/04-worktree-batch-claims-files-only` — completed · 2026-11-12
-- `2026-11-12_2/01-merge-refuses-second-paused-part` — completed · 2026-11-12
-- `2026-11-12_2/02-todo-is-the-unit-of-work` — completed · 2026-11-12
-- `2026-11-12_2/03-claims-warn-protected-paths-lock` — completed · 2026-11-12
-- `2026-11-12_2/04-merge-queue` — completed · 2026-11-12
+- `2026-11-12_2/01-merge-refuses-second-paused-part` — completed · 2026-11-12 · archived
+- `2026-11-12_2/02-todo-is-the-unit-of-work` — completed · 2026-11-12 · archived
+- `2026-11-12_2/03-claims-warn-protected-paths-lock` — completed · 2026-11-12 · archived
+- `2026-11-12_2/04-merge-queue` — completed · 2026-11-12 · archived
 
 ## Commits
 

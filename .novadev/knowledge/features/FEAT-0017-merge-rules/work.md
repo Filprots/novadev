@@ -15,7 +15,7 @@ The work that built [FEAT-0017 — Merge rules for parallel branches, and sync -
 
 ## Todos
 
-- `2026-11-10_1/03-merge-rules-for-parallel-branches` — completed · 2026-11-10
+- `2026-11-10_1/03-merge-rules-for-parallel-branches` — completed · 2026-11-10 · archived
 
 ## Commits
 

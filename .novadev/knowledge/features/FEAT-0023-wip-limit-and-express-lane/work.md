@@ -15,8 +15,8 @@ The work that built [FEAT-0023 — Wip limit and express lane](feature.md).
 
 ## Todos
 
-- `2026-11-12_2/07-express-lane-for-urgent` — completed · 2026-11-12
-- `2026-11-12_2/09-work-in-progress-limit` — completed · 2026-11-12
+- `2026-11-12_2/07-express-lane-for-urgent` — completed · 2026-11-12 · archived
+- `2026-11-12_2/09-work-in-progress-limit` — completed · 2026-11-12 · archived
 
 ## Commits
 

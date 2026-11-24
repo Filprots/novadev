@@ -15,7 +15,7 @@ The work that built [FEAT-0016 — Sub-repos: commits in nested repositories](fe
 
 ## Todos
 
-- `2026-11-10_1/02-multi-repo-commits` — completed · 2026-11-10
+- `2026-11-10_1/02-multi-repo-commits` — completed · 2026-11-10 · archived
 
 ## Commits
 

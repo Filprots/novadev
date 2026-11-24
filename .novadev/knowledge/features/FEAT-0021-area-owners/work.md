@@ -15,7 +15,7 @@ The work that built [FEAT-0021 — Area owners](feature.md).
 
 ## Todos
 
-- `2026-11-12_2/08-area-owners` — completed · 2026-11-12
+- `2026-11-12_2/08-area-owners` — completed · 2026-11-12 · archived
 
 ## Commits
 

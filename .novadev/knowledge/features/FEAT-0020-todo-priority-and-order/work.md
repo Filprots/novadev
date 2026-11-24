@@ -15,8 +15,8 @@ The work that built [FEAT-0020 — Todo priority and order](feature.md).
 
 ## Todos
 
-- `2026-11-12_2/05-todo-priority` — completed · 2026-11-12
-- `2026-11-12_2/06-todo-after-links` — completed · 2026-11-12
+- `2026-11-12_2/05-todo-priority` — completed · 2026-11-12 · archived
+- `2026-11-12_2/06-todo-after-links` — completed · 2026-11-12 · archived
 
 ## Commits
 

@@ -15,14 +15,14 @@ The work that built [FEAT-0014 — The work lock: waypoints, pause and resume](f
 
 ## Todos
 
-- `2026-11-10_1/01-worktree-visible-locks` — completed · 2026-11-10
-- `2026-11-10_1/05-batch-path-ownership` — completed · 2026-11-10
-- `2026-11-10_1/07-worktree-command` — completed · 2026-11-10
+- `2026-11-10_1/01-worktree-visible-locks` — completed · 2026-11-10 · archived
+- `2026-11-10_1/05-batch-path-ownership` — completed · 2026-11-10 · archived
+- `2026-11-10_1/07-worktree-command` — completed · 2026-11-10 · archived
 - `2026-11-10_2/14-history-work-lock` — completed · 2026-11-10 · archived
 - `2026-11-12_1/03-work-start-one-todo-claims` — completed · 2026-11-12
 - `2026-11-12_1/04-worktree-batch-claims-files-only` — completed · 2026-11-12
-- `2026-11-12_2/02-todo-is-the-unit-of-work` — completed · 2026-11-12
-- `2026-11-12_2/03-claims-warn-protected-paths-lock` — completed · 2026-11-12
+- `2026-11-12_2/02-todo-is-the-unit-of-work` — completed · 2026-11-12 · archived
+- `2026-11-12_2/03-claims-warn-protected-paths-lock` — completed · 2026-11-12 · archived
 
 ## Commits
 

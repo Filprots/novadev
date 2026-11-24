@@ -15,7 +15,7 @@ The work that built [FEAT-0018 — The review record (ai_review.md) and team mod
 
 ## Todos
 
-- `2026-11-10_1/06-review-record` — completed · 2026-11-10
+- `2026-11-10_1/06-review-record` — completed · 2026-11-10 · archived
 
 ## Commits
 
