@@ -13,9 +13,10 @@ sources:
   - resource: repo:tests/docs.test.ts
   - resource: repo:tests/migrations.test.ts
 generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:50:53+01:00 }
-stale_after: 2027-02-10T08:15:41+01:00
+stale_after: 2027-02-22T13:07:11+01:00
 verified:
   - { by: claude-code/claude-opus-5-5, at: 2026-11-12T08:15:41+01:00 }
+  - { by: claude-code/claude-fable-5-2, at: 2026-11-24T13:07:11+01:00 }
 ---
 
 # Conventions

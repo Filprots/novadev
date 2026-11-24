@@ -12,8 +12,8 @@ sources:
   - resource: repo:src/debt-budget.ts
   - resource: repo:src/placement.ts
   - resource: repo:templates/skills/novadev-work.md
-generated: { by: claude-code/claude-fable-5-2, at: 2026-11-12T14:42:34+01:00 }
-stale_after: 2027-02-10T14:42:34+01:00
+generated: { by: claude-code/claude-fable-5-2, at: 2026-11-24T13:06:51+01:00 }
+stale_after: 2027-02-22T13:06:51+01:00
 ---
 
 # Glossary
@@ -42,6 +42,11 @@ wording for agents; this page maps each word to the code.
 - **Todo state** — `open · progress · completed · failed · needstest · confirmed`, and the review
   gate's `changes · review · unmerged` (`src/review.ts`); terminal = completed, failed, confirmed
   (`TERMINAL_STATES`).
+- **Recipient** — who a todo is addressed to: `"recipient"` in its `todo.json` — a team (`hq`:
+  every actor `hq/…`) or one actor (`paperclip/tester`, `human:<id>`); `parseRecipient`, `answersTo`
+  in `src/recipients.ts`. No recipient = **anyone's** (`ANYONE`, the word `--for` uses for those).
+  Only the recipient starts it (`refuseOthersTodos`, `src/todo-recipient.ts`). `"recipients"` in
+  `novadev.json` may name who can be addressed.
 - **`.filed-from-chat`** — marker in a batch `file-todo` created; only such a batch, still
   untouched, is reused by later filings (`planBatch`).
 - **Grace period** — a fully recorded batch gets `completed.md` and stays in `todos/` for

@@ -1,5 +1,19 @@
 # Knowledge log
 
+## 2026-11-24
+
+* **Creation**: [Todo recipients](features/FEAT-0024-todo-recipients/feature.md) — A todo may name its recipient (a team like hq, or one actor): set when filing or with `novadev todo recipient`, shown and filtered by the lists, enforced by `work start`, listed apart by sync; `"recipients"` in novadev.json may name who can be addressed. (claude-code/claude-fable-5-2 · 2026-11-24_1/01-todo-recipient)
+* **Update**: [novadev todo: one todo at a time, away from the repository](features/FEAT-0015-todo-command/feature.md) — Progress: `todo recipient` and `todo list --for`; every JSON view carries `recipient`. (claude-code/claude-fable-5-2 · 2026-11-24_1/01-todo-recipient)
+* **Update**: [Filing a todo from chat](features/FEAT-0009-todo-filing/feature.md) — Progress: a part may carry `recipient`; `file-todo plan` answers the project's `recipients`. (claude-code/claude-fable-5-2 · 2026-11-24_1/01-todo-recipient)
+* **Update**: [Recording a person's test results](features/FEAT-0010-test-result-recording/feature.md) — Progress: `test-result write` takes any scenario number a plan has (it stopped at 99). (claude-code/claude-fable-5-2 · 2026-11-24_1/02-scenario-numbers-above-99)
+* **Update**: [Architecture](wiki/architecture.md) — Module map: `src/recipients.ts` and `src/todo-recipient.ts`; the settings read from the main checkout, `recipients` among them; sync's fourth list, ADDRESSED TO A RECIPIENT. (claude-code/claude-fable-5-2 · 2026-11-24_1/01-todo-recipient)
+* **Update**: [Glossary](wiki/glossary.md) — New term: Recipient (and anyone's). (claude-code/claude-fable-5-2 · 2026-11-24_1/01-todo-recipient)
+* **Update**: [Workflows](wiki/workflows.md) — The suite is 751 tests in 41 files (~110 s); a change without a layout change may go live without a version bump — why batch 2026-11-24_1 did, and what consumer projects then need (deploy only). (claude-code/claude-fable-5-2 · 2026-11-24_1/01-todo-recipient)
+* **Update**: [Overview](wiki/overview.md) — Capabilities: a todo's recipient. Checked against the README of 2026-11-24; the table still lacks the 0.16.0–0.18.0 capabilities (worktrees, priority, owners, the merge queue) — the features registry has them. (claude-code/claude-fable-5-2 · 2026-11-24_1/01-todo-recipient)
+* **Verification**: [Conventions](wiki/conventions.md) — Re-checked against src/file-todo.ts, src/lib.ts and tests/docs.test.ts after batch 2026-11-24_1: payload files and JSON answers, refusals before any write, opt-in settings and the docs tests are as the page says (`todo recipient` follows `todo priority`: the name as an argument, who and why in a payload). (claude-code/claude-fable-5-2 · 2026-11-24_1/01-todo-recipient)
+* **Update**: [Todo recipients](features/FEAT-0024-todo-recipients/feature.md) — The independent review before the merge: eleven edge cases fixed (the recipient's own todo in work stays a NEXT ACTION, `--for <team>` includes its actors, an unreadable recipient is never dropped silently, and eight more — see Progress). (claude-code/claude-fable-5-2 · 2026-11-24_1/01-todo-recipient)
+* **Update**: [Workflows](wiki/workflows.md) — The suite is 762 tests in 41 files after the review fixes. (claude-code/claude-fable-5-2 · 2026-11-24_1/01-todo-recipient)
+
 ## 2026-11-12
 
 * **Update**: [The work lock: waypoints, pause and resume](features/FEAT-0014-work-lock/feature.md) — Part of a batch (work start --todo, covers), worktree-only claims inside a novadev worktree, claims judged once. (claude-code/claude-opus-5-5 · 2026-11-12_1/03-work-start-one-todo-claims)

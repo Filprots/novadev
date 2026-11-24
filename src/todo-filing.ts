@@ -9,6 +9,7 @@ import { dirname, join } from 'node:path';
 import { BATCH_RE, batchLockFiles, listDirs, todayStamp } from './lib.ts';
 import { batchesInWorkElsewhere } from './registry.ts';
 import { type SuggestedOwner, ownerSuggester } from './owners.ts';
+import { RECIPIENT_FORMAT, parseRecipient, resolveRecipient } from './recipients.ts';
 import { resolveFiledLinks } from './todo-links.ts';
 import { DEFAULT_PRIORITY, PRIORITIES, type Priority, parsePriority, writeFiledMeta } from './todo-meta.ts';
 
@@ -42,6 +43,8 @@ export type TodoPart = {
   readonly priority?: Priority;
   /** The todos this one waits for (todo-links.ts): refs, or the slug of another part of the same filing. */
   readonly after?: readonly string[];
+  /** Who the todo is addressed to (recipients.ts) — absent means anyone. */
+  readonly recipient?: string;
 };
 
 export type FiledTodo = {
@@ -52,6 +55,8 @@ export type FiledTodo = {
   readonly priority?: Priority;
   /** The refs it waits for — named only when the part had any. */
   readonly after?: readonly string[];
+  /** Who it is addressed to — named only when the part had a recipient. */
+  readonly recipient?: string;
   /** Who normally takes work there — only in a project with area owners, when a rule with an owner matches (owners.ts). */
   readonly suggestedOwner?: SuggestedOwner;
 };
@@ -86,7 +91,7 @@ export function planBatch(nd: string, today = todayStamp()): BatchPlan {
   return { batch: nextBatchName(nd, today), reused: false, nextNumber: 1 };
 }
 
-/** Create the folders, write the briefs, copy the attachments in; a part's priority goes into its todo.json. */
+/** Create the folders, write the briefs, copy the attachments in; a part's priority, links and recipient go into its todo.json. */
 export function fileTodos(nd: string, parts: readonly TodoPart[], opts: FilingOptions = {}): readonly FiledTodo[] {
   if (parts.length === 0) throw new Error('Nothing to file.');
   if (parts.length > MAX_PARTS) throw new Error(`At most ${MAX_PARTS} todos in one filing.`);
@@ -97,6 +102,8 @@ export function fileTodos(nd: string, parts: readonly TodoPart[], opts: FilingOp
   const folders = slugs.map((slug, index) => `${String(target.nextNumber + index).padStart(2, '0')}-${slug}`);
   // … and every "do after" link: a part that waits for a todo nobody has must not be filed half-linked.
   const links = resolveFiledLinks(nd, parts.map((part, index) => ({ ref: `${target.batch}/${folders[index]!}`, slug: slugs[index]!, after: part.after ?? [] })));
+  // … and every recipient: a todo addressed to a name nobody answers to would wait forever.
+  const recipients = parts.map((part) => (part.recipient === undefined ? null : resolveRecipient(nd, part.recipient)));
   const batchDir = join(nd, 'todos', target.batch);
   mkdirSync(batchDir, { recursive: true });
   if (!existsSync(join(batchDir, CHAT_MARKER))) {
@@ -115,7 +122,8 @@ export function fileTodos(nd: string, parts: readonly TodoPart[], opts: FilingOp
     writeFileSync(join(dir, 'prompt.md'), renderBrief(slugs[index]!, part, attachments));
     const priority = part.priority ?? DEFAULT_PRIORITY;
     const after = links[index]!;
-    writeFiledMeta(dir, { priority, after }, opts.by ?? null);
+    const recipient = recipients[index]!;
+    writeFiledMeta(dir, { priority, after, recipient }, opts.by ?? null);
     const suggested = owner(dir);
     filed.push({
       ref: `${target.batch}/${folder}`,
@@ -123,6 +131,7 @@ export function fileTodos(nd: string, parts: readonly TodoPart[], opts: FilingOp
       attachments,
       ...(priority !== DEFAULT_PRIORITY ? { priority } : {}),
       ...(after.length > 0 ? { after } : {}),
+      ...(recipient !== null ? { recipient } : {}),
       ...(suggested !== null ? { suggestedOwner: suggested } : {}),
     });
   }
@@ -264,6 +273,10 @@ export function parseParts(raw: unknown): readonly TodoPart[] {
       throw new Error("A part's 'after' must be a list of todos it waits for: refs (\"2026-11-12_2/05\"), or the slug of another part of this filing.");
     }
     const after = Array.isArray(rawAfter) ? (rawAfter as string[]) : undefined;
+    // A recipient is named only when the todo is for somebody in particular; a word that is no name is
+    // refused rather than filed for anyone — whoever filed it would believe it was addressed.
+    const recipient = record['recipient'] === undefined || record['recipient'] === null ? undefined : parseRecipient(record['recipient']);
+    if (recipient === null) throw new Error(`A part's 'recipient' must be ${RECIPIENT_FORMAT} — not "${String(record['recipient'])}". Leave it out for a todo that is anyone's.`);
     return {
       slug,
       title,
@@ -272,6 +285,7 @@ export function parseParts(raw: unknown): readonly TodoPart[] {
       ...(files !== undefined ? { attachments: files } : {}),
       ...(priority !== undefined ? { priority } : {}),
       ...(after !== undefined && after.length > 0 ? { after } : {}),
+      ...(recipient !== undefined ? { recipient } : {}),
     };
   });
 }

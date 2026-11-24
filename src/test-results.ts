@@ -65,8 +65,9 @@ export function writeResult(
   },
 ): WrittenResult {
   const { taskId, scenario } = input;
-  if (!Number.isInteger(scenario) || scenario < 1 || scenario > 99) {
-    throw new Error(`Scenario number must be 1-99, got '${scenario}'.`);
+  // Any number a plan can give a scenario: a long-lived feature's plan numbers them in the hundreds.
+  if (!Number.isSafeInteger(scenario) || scenario < 1) {
+    throw new Error(`Scenario number must be a whole number from 1 up, got '${scenario}'.`);
   }
   const body = requireBody(input.text);
   const dir = join(taskDir(nd, taskId), TEST_RESULTS_DIR);

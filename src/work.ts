@@ -115,6 +115,7 @@ import {
 } from './lib.ts';
 import { ACTOR_FORMAT, actorKind, isTimestamp, nowTimestamp } from './okf.ts';
 import { refuseWaitingTodos } from './todo-links.ts';
+import { refuseOthersTodos } from './todo-recipient.ts';
 import { todoPriority } from './todo-meta.ts';
 import { wipHolders, wipSettings, wipSlot } from './wip.ts';
 
@@ -1043,7 +1044,11 @@ export function startWork(root: string, nd: string, batch: string, opts: StartOp
   // "Do after" links (todo-links.ts): a todo that still waits for another is not started. Judged once
   // for everything this start takes, so two todos started together may depend on each other in order.
   const wholeBatch = targets.some((target) => target.todo === null && (target.read?.state === 'ok' ? target.read.lock.covers : null) === null);
-  refuseWaitingTodos(nd, batch, wholeBatch ? null : targets.flatMap((target) => (target.todo !== null ? [target.todo] : target.read?.state === 'ok' ? (target.read.lock.covers ?? []) : [])));
+  const covered = wholeBatch ? null : targets.flatMap((target) => (target.todo !== null ? [target.todo] : target.read?.state === 'ok' ? (target.read.lock.covers ?? []) : []));
+  // A recipient (todo-recipient.ts): a todo addressed to somebody else is not this holder's to start —
+  // judged first, because what such a todo waits for is its recipient's question.
+  refuseOthersTodos(nd, batch, covered, ctx.agent === UNKNOWN_AGENT ? null : ctx.agent, targets.some((target) => target.todo === null && target.read !== null));
+  refuseWaitingTodos(nd, batch, covered);
 
   pruneGone(root);
   const plans = targets.map((target) => planStart(ctx, target));

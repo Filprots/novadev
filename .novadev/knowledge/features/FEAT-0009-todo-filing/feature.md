@@ -17,8 +17,8 @@ sources:
   - resource: commit:5c9f453
   - resource: commit:dc73f7e
   - resource: commit:6655fee
-generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:18:33+01:00 }
-stale_after: 2027-11-10T15:18:33+01:00
+generated: { by: claude-code/claude-fable-5-2, at: 2026-11-24T13:06:51+01:00 }
+stale_after: 2027-11-24T13:06:51+01:00
 ---
 
 # FEAT-0009 — Filing a todo from chat
@@ -51,6 +51,7 @@ copying.
 - 2026-08-19 — 0.2.0 (commit 5c9f453): the chat-initiated work rule in the playbook
 - 2026-09-09 — landed in 0.9.0 (commit dc73f7e): `novadev file-todo` and `/novadev-file-a-todo`
 - 2026-10-25 — 0.14.0 (commit 6655fee): never files into a batch someone holds the lock of
+- 2026-11-24 — a part may carry `recipient`, and `file-todo plan` answers the project's `recipients` ([FEAT-0024](../FEAT-0024-todo-recipients/feature.md); `2026-11-24_1/01-todo-recipient`)
 
 ## Open questions
 

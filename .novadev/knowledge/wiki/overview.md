@@ -8,8 +8,8 @@ sources:
   - resource: repo:package.json
   - resource: repo:bin/novadev.ts
   - resource: repo:templates/skills/novadev-work.md
-generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:18:33+01:00 }
-stale_after: 2027-02-10T08:15:41+01:00
+generated: { by: claude-code/claude-fable-5-2, at: 2026-11-24T13:07:11+01:00 }
+stale_after: 2027-02-22T13:07:11+01:00
 verified:
   - { by: claude-code/claude-opus-5-5, at: 2026-11-12T08:15:41+01:00 }
 ---
@@ -61,6 +61,7 @@ templates, never the copies.
 | The lock of a batch in work: waypoints, pause, resume | `work start/waypoint/pause/stop` |
 | File a chat request as a todo, attachments included | `file-todo plan/file` |
 | One todo at a time from outside the repo | `todo list/show/addendum/edit/cancel` |
+| Address a todo to a recipient (a team like `hq`, or one actor): only that one works it | a part's `recipient` in `file-todo`, `todo recipient`, `todo list --for` |
 | Human-testing queue, one living task per feature | `totest` |
 | Record a human's test results (append-only) | `test-result tasks/write/review` |
 | Features registry + record↔feature↔commit link graph | `features`, `links` |

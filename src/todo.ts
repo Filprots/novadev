@@ -1,6 +1,9 @@
 // `novadev todo` — one todo at a time, for a person (or an agent acting for one) away from the repository:
 //
-//   novadev todo list [--state open,progress,…] [--json]   the open todos with their titles and states
+//   novadev todo list [--state open,progress,…] [--for <recipient>,…] [--json]
+//                                                            the open todos with their titles and states; --for keeps
+//                                                            the ones addressed to a recipient, its team or — for a
+//                                                            team — one of its actors (`anyone`: addressed to nobody)
 //   novadev todo show <ref>                                  one todo as JSON: its brief and its records
 //   novadev todo addendum <ref> <payload.json>               {text, attachments}: a "Chat addendum" appended to the brief;
 //                                                            attachments (screenshots) are copied into the todo folder
@@ -23,9 +26,14 @@
 //                                                            the todos it waits for ("do after" links, todo-links.ts):
 //                                                            refs add links, --clear removes them all (with refs:
 //                                                            replaces them), no refs shows them
+//   novadev todo recipient <ref> [<recipient>] [<payload.json>] [--clear] [--by <actor>]
+//                                                            who the todo is addressed to (recipients.ts): a name
+//                                                            addresses it, --clear makes it anyone's again, neither
+//                                                            shows it; {by, reason} — who did it, when and why go into
+//                                                            the todo's todo.json (todo-recipient.ts)
 //
 // `list` and the JSON views order the todos by priority (urgent first), then by filing order, and say for
-// each todo whether it is ready or which todos it waits for.
+// each todo whether it is ready or which todos it waits for, and who it is addressed to when it is.
 //
 // A <ref> is how people name a todo: `2026-10-16_2/02-router-…`, `2026-10-16_2/02`, or a word of its slug that only one
 // open todo has. The two writes follow the playbook's intake rules: a todo with a terminal record, or one waiting on a
@@ -54,6 +62,8 @@ import { type SuggestedOwner, VERDICT_PARTIAL, judgeReviews, mayOverride, ownerS
 import { RECORD_REVIEW, REVIEW_HISTORY_DIR, parseReviewPayload, renderReview } from './review.ts';
 import { batchWorkLocks, holderNote, liveElsewhere, lockHolding, lockLiveness, todoHolders } from './work.ts';
 import { copyAttachments } from './todo-filing.ts';
+import { matchesFor, parseForFilter, readRecipients, recipientTag, resolveRecipient } from './recipients.ts';
+import { addressedBy, changeRecipient } from './todo-recipient.ts';
 import { type LinkFacts, changeAfter, linkReader, linkTag } from './todo-links.ts';
 import {
   PRIORITIES,
@@ -76,7 +86,7 @@ const RECORDS = [RECORD_NEEDSTEST, RECORD_CONFIRMED, RECORD_TESTSKIPPED, RECORD_
 const MAX_RECORD_CHARS = 12000;
 const MAX_TEXT_BYTES = 20000;
 const USAGE =
-  'usage: novadev todo list [--state open,progress,needstest,…] [--json]\n' +
+  'usage: novadev todo list [--state open,progress,needstest,…] [--for <recipient>[,<recipient>…]] [--json]   (--for anyone: the todos addressed to nobody)\n' +
   '       novadev todo show <ref>\n' +
   '       novadev todo addendum <ref> <payload.json>   ({ "text": …, "attachments": [paths] })\n' +
   '       novadev todo edit <ref> <payload.json>       ({ "title"?, "request"?, "context"?, "reason"? })\n' +
@@ -84,13 +94,15 @@ const USAGE =
   '       novadev todo review <ref> <payload.json>     ({ "verdict": "APPROVE"|"CHANGES", "by", "checks": […], "findings"?, "notes"?, "override"?: { "reason" } })\n' +
   `       novadev todo priority <ref> <${PRIORITIES.join('|')}> [<payload.json>] [--by <actor>]   ({ "by": "human:<id>" or the lead, "reason"? })\n` +
   '       novadev todo priority --changed-since <YYYY-MM-DD|timestamp> [--by-agent] [--json]   (who changed which priority, when and why)\n' +
-  '       novadev todo after <ref> [<ref>…] [--clear] [--by <actor>]   (the todos it waits for; --clear removes them)';
+  '       novadev todo after <ref> [<ref>…] [--clear] [--by <actor>]   (the todos it waits for; --clear removes them)\n' +
+  '       novadev todo recipient <ref> [<recipient>] [<payload.json>] [--clear] [--by <actor>]   (who it is addressed to; --clear: anyone; { "by", "reason"? })';
 
 /**
- * One open todo: where it is, what it is called, its state, its priority, and what its "do after" links say now.
+ * One open todo: where it is, what it is called, its state, its priority, who it is addressed to (null: anyone),
+ * and what its "do after" links say now.
  * `suggestedOwner` is there only in a project with area owners (owners.ts), on a todo a rule with an owner matches.
  */
-export type TodoItem = { ref: string; batch: string; todo: string; title: string; state: TodoState; priority: Priority; suggestedOwner?: SuggestedOwner } & LinkFacts;
+export type TodoItem = { ref: string; batch: string; todo: string; title: string; state: TodoState; priority: Priority; recipient: string | null; suggestedOwner?: SuggestedOwner } & LinkFacts;
 
 /** The brief's title: its first `## ` heading (the filed form), else the first line that says something. */
 export function briefTitle(text: string): string {
@@ -114,13 +126,15 @@ export function listTodos(nd: string): TodoItem[] {
       const prompt = join(dir, PROMPT);
       const state = todoState(dir);
       const suggested = owner(dir);
+      const meta = readTodoMeta(dir);
       out.push({
         ref: `${batch}/${todo}`,
         batch,
         todo,
         title: existsSync(prompt) ? briefTitle(readFileSync(prompt, 'utf8')) : '',
         state,
-        priority: readTodoMeta(dir).priority,
+        priority: meta.priority,
+        recipient: meta.recipient,
         ...links(dir, state),
         ...(suggested !== null ? { suggestedOwner: suggested } : {}),
       });
@@ -135,13 +149,17 @@ export function todosInOrder(nd: string): TodoItem[] {
 }
 
 /**
- * A todo's state as the lists print it: `(open)`, `(open, urgent)`, `(open, waits for 05-todo-priority)`,
- * `(open, ready)`. `ready` is said only in a project that uses "do after" links (`showReady`), so a
- * project without them prints as it always did.
+ * A todo's state as the lists print it: `(open)`, `(open, urgent)`, `(open, for hq)`, `(open, waits for
+ * 05-todo-priority)`, `(open, ready)`. `ready` is said only in a project that uses "do after" links
+ * (`showReady`), and the recipient only on a todo that has one, so a project without them prints as it
+ * always did. A finished todo no longer names its recipient: nothing in it is left to take.
  */
 export function stateText(t: TodoItem, showReady: boolean): string {
-  return `(${t.state}${priorityTag(t.priority)}${linkTag(t, showReady)})`;
+  return `(${t.state}${priorityTag(t.priority)}${ADDRESSED_OVER.includes(t.state) ? '' : recipientTag(t.recipient)}${linkTag(t, showReady)})`;
 }
+
+/** States that end a todo for good: the lists stop naming who it was for. */
+const ADDRESSED_OVER: readonly string[] = ['completed', 'confirmed', 'failed'];
 
 /** Does any of these todos wait for another? Then the lists say `ready` on the ones that do not. */
 export function usesLinks(todos: readonly TodoItem[]): boolean {
@@ -481,6 +499,27 @@ export function afterTodo(nd: string, ref: string, deps: readonly string[], opts
   return changeAfter(nd, { ref: t.ref, batch: t.batch, dir: join(nd, 'todos', t.batch, t.todo), state: t.state }, deps, { clear: opts.clear === true, by }, now);
 }
 
+/**
+ * Who a todo is addressed to: address it (`name`), make it anyone's again (`clear`), or — with neither —
+ * only say who it is for. A change names who made it (`by`: any actor — a person, the lead, the agent that
+ * found the todo is not its own) and may say why; both go into the todo's history. In a project that
+ * names its recipients, only one of them can be addressed. Not refused behind a lock: a todo that turns
+ * out to be somebody else's is often one a session has already opened.
+ */
+export function recipientTodo(nd: string, ref: string, name: string | undefined, who: { clear?: boolean; by?: unknown; reason?: unknown } = {}, now: Date = new Date()): Record<string, unknown> {
+  const t = resolveTodo(nd, ref);
+  const dir = join(nd, 'todos', t.batch, t.todo);
+  if (name === undefined && who.clear !== true) {
+    const since = t.recipient === null ? null : addressedBy(readTodoMeta(dir).history, t.recipient);
+    const { known } = readRecipients(nd);
+    return { ref: t.ref, recipient: t.recipient, ...(since !== null ? { addressedBy: since.by, addressedAt: since.at } : {}), ...(known !== null ? { recipients: Object.fromEntries(known.map((k) => [k.name, k.about])) } : {}) };
+  }
+  if (name !== undefined && who.clear === true) throw new Error(`Name a recipient or pass --clear, not both: --clear makes the todo anyone's.\n${USAGE}`);
+  const to = name === undefined ? null : resolveRecipient(nd, name);
+  const by = resolveActor(dirname(nd), who.by, { personOnly: false, what: to === null ? 'made the todo anyone\'s' : 'addressed the todo' });
+  return changeRecipient({ ref: t.ref, dir, state: t.state }, to, { by, reason: reasonText(who.reason) }, now);
+}
+
 function readPayload(argument: string | undefined): Record<string, unknown> {
   if (argument === undefined) throw new Error(USAGE);
   const path = isAbsolute(argument) ? argument : resolve(process.cwd(), argument);
@@ -491,18 +530,24 @@ function readPayload(argument: string | undefined): Record<string, unknown> {
 }
 
 /** The arguments of a `novadev todo` call: what is positional, and the options that take a value. */
-type TodoArgs = { positional: string[]; by?: string; state?: string; changedSince?: string; json: boolean; clear: boolean; byAgent: boolean };
+const VALUE_OPTIONS: readonly string[] = ['--by', '--state', '--changed-since', '--for'];
+type TodoArgs = { positional: string[]; by?: string; state?: string; changedSince?: string; for?: string; json: boolean; clear: boolean; byAgent: boolean };
 function parseArgs(args: string[]): TodoArgs {
   const out: TodoArgs = { positional: [], json: false, clear: false, byAgent: false };
   for (let i = 0; i < args.length; i++) {
-    const arg = args[i]!;
-    if (arg === '--by' || arg === '--state' || arg === '--changed-since') {
-      const value = args[i + 1];
-      if (value === undefined || value.startsWith('--')) throw new Error(`${arg} needs a value.\n${USAGE}`);
+    let arg = args[i]!;
+    // `--for=hq` is `--for hq`: an option that silently became a positional would print the whole list as "its own".
+    const eq = arg.startsWith('--') ? arg.indexOf('=') : -1;
+    const inline = eq > 0 && VALUE_OPTIONS.includes(arg.slice(0, eq)) ? arg.slice(eq + 1) : undefined;
+    if (inline !== undefined) arg = arg.slice(0, eq);
+    if (VALUE_OPTIONS.includes(arg)) {
+      const value = inline ?? args[i + 1];
+      if (value === undefined || value === '' || (inline === undefined && value.startsWith('--'))) throw new Error(`${arg} needs a value.\n${USAGE}`);
       if (arg === '--by') out.by = value;
       else if (arg === '--state') out.state = value;
+      else if (arg === '--for') out.for = value;
       else out.changedSince = value;
-      i++;
+      if (inline === undefined) i++;
     } else if (arg === '--json') out.json = true;
     else if (arg === '--clear') out.clear = true;
     else if (arg === '--by-agent') out.byAgent = true;
@@ -518,14 +563,16 @@ export function todoCommand(args: string[]): void {
     const [command, ref, argument, second] = opts.positional;
     if (command === 'list' || command === undefined) {
       const states = (opts.state ?? '').split(',').map((s) => s.trim()).filter(Boolean);
-      const todos = todosInOrder(nd).filter((t) => states.length === 0 || states.includes(t.state));
+      // `--for hq`: the todos addressed to hq; `--for hq,anyone`: those, and the ones addressed to nobody.
+      const wanted = opts.for === undefined ? null : parseForFilter(opts.for);
+      const todos = todosInOrder(nd).filter((t) => (states.length === 0 || states.includes(t.state)) && (wanted === null || matchesFor(t.recipient, wanted)));
       // Who holds each todo (work.ts): its own lock or its batch's, here or in another worktree.
       const holders = todoHolders(nd);
       if (opts.json) {
         console.log(JSON.stringify({ todos: todos.map((t) => ({ ...t, holder: holders.get(t.ref) ?? null })) }, null, 2));
         return;
       }
-      if (todos.length === 0) console.log('todos — none open');
+      if (todos.length === 0) console.log(wanted === null ? 'todos — none open' : `todos — none open for ${wanted.join(', ')}`);
       const showReady = usesLinks(todos);
       for (const t of todos) console.log(`${listLine(t, showReady)}${holderNote(holders.get(t.ref))}`);
       return;
@@ -551,6 +598,17 @@ export function todoCommand(args: string[]): void {
       return void console.log(JSON.stringify(priorityTodo(nd, ref, argument, { by: opts.by ?? payload['by'], reason: payload['reason'] }), null, 2));
     }
     if (command === 'after') return void console.log(JSON.stringify(afterTodo(nd, ref, opts.positional.slice(2), { clear: opts.clear, by: opts.by }), null, 2));
+    if (command === 'recipient') {
+      // `recipient <ref> hq [payload]`, `recipient <ref> --clear [payload]`, `recipient <ref>`: with --clear the
+      // next word is the payload, when it is a file — there is no name to give (a name there is refused).
+      const lonePayload = argument !== undefined && second === undefined && existsSync(isAbsolute(argument) ? argument : resolve(process.cwd(), argument));
+      // … and without --clear a lone file is a payload whose recipient was left out: never a recipient called "why.json".
+      if (lonePayload && !opts.clear) throw new Error(`"${argument}" is a file, not a recipient: name the recipient before the payload (\`novadev todo recipient <ref> <recipient> ${argument}\`), or pass --clear to make the todo anyone's.`);
+      const name = lonePayload ? undefined : argument;
+      const file = lonePayload ? argument : second;
+      const payload = file === undefined ? {} : readPayload(file);
+      return void console.log(JSON.stringify(recipientTodo(nd, ref, name, { clear: opts.clear, by: opts.by ?? payload['by'], reason: payload['reason'] }), null, 2));
+    }
     throw new Error(USAGE);
   } catch (error) {
     console.log(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }, null, 2));

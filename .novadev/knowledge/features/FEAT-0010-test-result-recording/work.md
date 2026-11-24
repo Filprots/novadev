@@ -17,11 +17,13 @@ The work that built [FEAT-0010 — Recording a person's test results](feature.md
 
 - `2026-11-10_2/10-history-test-result-recording` — completed · 2026-11-10 · archived
 - `2026-11-12_1/02-totest-skip-scenarios-and-close-round` — completed · 2026-11-12
+- `2026-11-24_1/02-scenario-numbers-above-99` — completed · 2026-11-24
 
 ## Commits
 
 - `dc73f7e` — 2026-11-10_2/10-history-test-result-recording
 - `d9caccd` — 2026-11-12_1/02-totest-skip-scenarios-and-close-round
+- `0c604d1` — 2026-11-24_1/02-scenario-numbers-above-99
 
 _Linked by `**Feature:** FEAT-0010` in each todo's record._
 <!-- novadev:work:end -->

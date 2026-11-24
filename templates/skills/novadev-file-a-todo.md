@@ -62,10 +62,19 @@ actually described; never invent work they did not ask for. Give each part:
   the import", "after the login fix is in"): the slug of the other part of this filing, or
   the ref of an existing todo (`novadev todo list` shows them). Never invent an order they
   did not state.
+- who it is for (`recipient`) — **only when it is for somebody in particular**: they said so
+  ("that one is for the headquarters session", "leave a note for the tester"), or the
+  project's own rules say whose such work is. `novadev file-todo plan` answers the project's
+  `recipients` — the names that can be addressed, each with what belongs to it — when the
+  project names them; use one of those names, never a spelling of your own. A recipient is
+  a team (`hq`: every actor `hq/…`) or one actor (`paperclip/tester`, `human:<id>`). Only
+  the recipient will work the todo, so a wrong one parks it: when you cannot tell whose it
+  is, leave the recipient out — the todo is then anyone's — and say so.
 
 **4. Show the plan and WAIT.** Answer with the batch name and a numbered list: for each
 part, its title, one line of what it will say, which files go in it, its priority when
-it is not normal, and what it waits for when they gave an order. Then ask plainly
+it is not normal, what it waits for when they gave an order, and who it is addressed to
+when it has a recipient. Then ask plainly
 whether to file it. **Do not run the `file` command until they say yes.** If they change
 the split, redo this step. "Just file it" or "go ahead" is the yes.
 
@@ -108,6 +117,12 @@ For each part write:
   `"after": ["new-table"]` (another part of this payload, by its slug) or
   `"after": ["2026-09-08_4/02"]` (an existing todo). Work on the part cannot start until
   those are completed. For a todo that already exists: `novadev todo after <ref> <ref>…`.
+- `recipient` — who the part is addressed to, when it is for somebody in particular (step
+  3): `"recipient": "hq"`. Leave it out for a todo that is anyone's. A note or a remark for
+  a recipient is filed the same way: the request says what they should know, and the
+  recipient closes it when it has read and acted on it. A name the project does not list
+  is refused with the list. For a todo that already exists:
+  `novadev todo recipient <ref> <recipient> --by <actor>` (`--clear` makes it anyone's).
 - **A standing rule is knowledge, not only a todo.** When they state something that must
   hold beyond this one change — "never…", "always…", "from now on…", "we decided…" — keep
   their exact words in `request` and add one line to `context`: *Standing rule — record it
@@ -116,7 +131,7 @@ For each part write:
   write the memory yourself.
 
 **6. Confirm.** Report the refs it created (`2026-09-08_4/01-green-highlight-too-thin`),
-which files landed in each, the priority of each that has one, the `suggestedOwner` the answer names (when the project has area owners), and stop. **Do not start working on the todo.** Do not run
+which files landed in each, the priority of each that has one, the recipient of each that is addressed, the `suggestedOwner` the answer names (when the project has area owners), and stop. **Do not start working on the todo.** Do not run
 `novadev sync` either; a brand-new brief with no record is exactly what the tree expects.
 
 ## Rules

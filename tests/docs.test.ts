@@ -11,7 +11,8 @@ import { WIKI_PAGES, auditKnowledge, parseKnowledgeSettings } from '../src/knowl
 import { parseEvents } from '../src/knowledge-log.ts';
 import { readFrontmatterText } from '../src/okf.ts';
 import { placementState } from '../src/placement.ts';
-import { afterTodo, priorityTodo } from '../src/todo.ts';
+import { readRecipients } from '../src/recipients.ts';
+import { afterTodo, priorityTodo, recipientTodo } from '../src/todo.ts';
 import { PRIORITIES, readTodoMeta } from '../src/todo-meta.ts';
 import { auditOwners, readOwners } from '../src/owners.ts';
 import {
@@ -587,6 +588,81 @@ describe('"do after" links in the docs', () => {
     const help = run(tempDir(), 'help').stdout;
     expect(help).toContain('"after <ref> [<ref>…] [--clear] [--by <actor>]"');
     expect(help).toContain('"after": the todos it waits for');
+  });
+});
+
+describe('recipients in the docs', () => {
+  const section = readme.split('### Recipients — a todo addressed to someone')[1]!.split('\n## ')[0]!;
+
+  test('the README states the rules the code enforces, and its todo.json and setting examples are ones novadev reads', () => {
+    for (const text of [
+      'A\ntodo without one is anyone\'s',
+      '**a team** — `hq`, `paperclip`: every actor of that producer',
+      '**one actor** — `paperclip/tester` for an agent, `human:filipp` for a person',
+      'novadev todo recipient 2026-10-01_1/02 hq --by paperclip/minifil',
+      '`--clear` makes it anyone\'s again',
+      '**`novadev work start` refuses anybody but the recipient**',
+      'A person\n  (`human:<id>`) is never refused',
+      'carries `recipient` on\n  every todo (`null`: anyone)',
+      'the word `anyone` stands for\n  the todos with no recipient',
+      'listed under ADDRESSED TO A RECIPIENT',
+      '`"recipients"` in\n`.novadev/novadev.json`, read from the main checkout',
+      'is a PROBLEM in `sync` and `doctor`',
+      'is a NEXT ACTION',
+    ]) {
+      expect(section).toContain(text);
+    }
+    const example = fences(section, 'json').find((body) => body.includes('"recipient"'))!;
+    const root = project();
+    todo(root, '2026-10-01_1/02-dev-env');
+    write(root, '.novadev/todos/2026-10-01_1/02-dev-env/todo.json', example);
+    expect(readTodoMeta(join(root, '.novadev/todos/2026-10-01_1/02-dev-env'))).toMatchObject({ recipient: 'hq', error: null, history: [{ by: 'paperclip/minifil', change: 'filed' }] });
+    setManifest(root, JSON.parse(fences(section, 'json').find((body) => body.includes('"recipients"'))!));
+    const read = readRecipients(join(root, '.novadev'));
+    expect(read.error).toBeNull();
+    expect(read.known!.map((k) => k.name)).toEqual(['hq', 'paperclip']);
+    expect(read.known!.every((k) => k.about !== null)).toBe(true);
+    // … and every command it shows runs.
+    todo(root, '2026-10-02_1/01-other');
+    for (const line of fences(section, 'sh').join('\n').split('\n').filter((l) => l.startsWith('novadev todo '))) {
+      const args = line.split('#')[0]!.trim().split(/\s+/).slice(1);
+      if (args.includes('why.json')) write(root, 'why.json', JSON.stringify({ by: 'hq/claude-opus-5-5', reason: 'It is a test account, not the tool.' }));
+      expect([line, run(root, ...args).code]).toEqual([line, 0]);
+    }
+  });
+
+  test('its sample list is what `novadev todo list` prints, line for line', () => {
+    const sample = fences(section, '').find((body) => body.includes('$ novadev todo list'))!;
+    const root = project();
+    const brief = (title: string) => `# prompt — x\n\n## ${title}\nThe words.\n`;
+    todo(root, '2026-10-01_1/01-dark-mode', { 'prompt.md': brief('Dark mode') });
+    todo(root, '2026-10-01_1/02-dev-env', { 'prompt.md': brief('The dev tool gives only one login') });
+    recipientTodo(join(root, '.novadev'), 'dev-env', 'hq', { by: 'paperclip/minifil' });
+    expect(run(root, 'todo', 'list').stdout).toBe(sample.split('\n').slice(1).join('\n'));
+  });
+
+  test('the playbooks, the folder README, the upgrade note and the CLI help teach it', () => {
+    expect(filingPlaybook).toContain('who it is for (`recipient`) — **only when it is for somebody in particular**');
+    expect(filingPlaybook).toContain('`novadev file-todo plan` answers the project\'s\n  `recipients`');
+    expect(filingPlaybook).toContain('`novadev todo recipient <ref> <recipient> --by <actor>` (`--clear` makes it anyone\'s)');
+    for (const text of [
+      '**Take only what is yours.**',
+      '`novadev todo list --for <your name>`: read it at the start of every session',
+      '`novadev todo list --for <your actor>,anyone` lists what you may take',
+      'never re-address a todo to yourself on your own\njudgement',
+      'A part carries `"recipient"` when the todo is for somebody in particular',
+      '**A todo addressed to somebody else** (a recipient, phase 2) → refused',
+      '**ADDRESSED TO A RECIPIENT**',
+    ]) {
+      expect(playbook).toContain(text);
+    }
+    expect(playbook.split('## Vocabulary')[1]!.split('\n---')[0]!).toContain('**Recipient**');
+    expect(todosReadme).toContain('`novadev todo list --for <recipient>` is its own list');
+    expect(readme.split('## Upgrading')[1]!.split('\n## ')[0]!).toContain('a todo may name its **recipient**');
+    const help = run(tempDir(), 'help').stdout.replace(/\s+/g, ' ');
+    expect(help).toContain('"recipient <ref> [<recipient>] [<payload.json>] [--clear] [--by <actor>]"');
+    expect(help).toContain('"list [--state s,…] [--for <recipient>,…] [--json]"');
+    expect(help).toContain('and "recipient": who it is addressed to');
   });
 });
 

@@ -1,33 +1,40 @@
-// A todo's own settings — its priority, and the todos it waits for — kept in the todo folder:
+// A todo's own settings — its priority, the todos it waits for, and its recipient — kept in the todo folder:
 //
 //   todos/<batch>/<todo>/todo.json
 //   {
 //     "priority": "urgent",                              urgent | high | normal | later; absent = normal
 //     "after": ["2026-11-12_2/05-todo-priority"],        the todos it waits for (todo-links.ts); absent = none
+//     "recipient": "hq",                                 who it is addressed to (recipients.ts); absent = anyone
 //     "history": [                                       every change, oldest first: who, when, from → to, why
 //       { "at": "2026-11-12T15:02:11+01:00", "by": "human:filipp", "change": "priority",
 //         "from": "normal", "to": "urgent", "reason": "Board on IRR-260: production is down." }
 //     ]
 //   }
 //
-// A todo without the file — every todo filed before it existed — is `normal` and waits for nothing: there
-// is nothing to migrate. The file is JSON rather than lines in the brief because novadev reads fields at the
+// A todo without the file — every todo filed before it existed — is `normal`, waits for nothing and is
+// anyone's: there is nothing to migrate. The file is JSON rather than lines in the brief because novadev reads fields at the
 // start of any line of any brief (`**Feature:**`), and a person quoting a test scenario's `**Priority:**
 // critical` into a request must not be able to change a todo's priority, or break `novadev sync`, by
-// accident. It is written by `novadev file-todo` (a part's `priority` and `after`) and by `novadev todo
-// priority|after`, never by hand; a file novadev cannot read is a problem `sync` and `doctor` name, and the
-// todo then reads as `normal` with no links. Keys novadev does not know are kept as they are.
+// accident. It is written by `novadev file-todo` (a part's `priority`, `after` and `recipient`) and by
+// `novadev todo priority|after|recipient`, never by hand; a file novadev cannot read is a problem `sync` and
+// `doctor` name, and the todo then reads as `normal`, with no links and no recipient. Keys novadev does not
+// know are kept as they are.
 //
 // Priority orders every queue: `novadev todo list`, `novadev status` (and `--json`), sync's NEXT ACTIONS —
 // urgent first, then high, normal, later, and inside one level the filing order (batch, then todo). A
 // change of priority is a person's decision, or the lead's (`"lead"` in novadev.json, lead.ts) — no other
 // agent's: `novadev todo priority` records who made it, when and why, and `novadev todo priority
 // --changed-since <date>` lists the changes, saying which ones an agent made (`priorityChanges`).
+//
+// The recipient says whose the todo is (recipients.ts): only the recipient starts it (`novadev work start`
+// refuses anybody else, todo-recipient.ts), and every list names it. Anyone may address a todo when filing
+// it; a later change (`novadev todo recipient`) is recorded with who made it and when.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { humanActor } from './knowledge-log.ts';
 import { isLead, leadText } from './lead.ts';
 import { ROOT_DIR_NAME, type TodoState, isPlainObject, listAllTodos, listDirs } from './lib.ts';
+import { RECIPIENT_FORMAT, parseRecipient } from './recipients.ts';
 import { actorKind, isTimestamp, nowTimestamp } from './okf.ts';
 
 export const TODO_META_FILE = 'todo.json';
@@ -47,6 +54,8 @@ export type TodoMeta = {
   priority: Priority;
   /** Refs of the todos this one waits for, `<batch>/<todo folder>`. */
   after: string[];
+  /** Who the todo is addressed to (recipients.ts); null: anyone. */
+  recipient: string | null;
   history: MetaChange[];
   /** The file as it was read — unknown keys included — or null when there is none. */
   raw: Record<string, unknown> | null;
@@ -79,7 +88,7 @@ export function comparePriority(a: Priority, b: Priority): number {
  * read — `error` then says which, so `sync` and `doctor` can name it.
  */
 export function readTodoMeta(todoDir: string): TodoMeta {
-  const out: TodoMeta = { priority: DEFAULT_PRIORITY, after: [], history: [], raw: null, error: null };
+  const out: TodoMeta = { priority: DEFAULT_PRIORITY, after: [], recipient: null, history: [], raw: null, error: null };
   const path = join(todoDir, TODO_META_FILE);
   if (!existsSync(path)) return out;
   let data: unknown;
@@ -100,6 +109,11 @@ export function readTodoMeta(todoDir: string): TodoMeta {
     if (!Array.isArray(data.after) || data.after.some((ref) => typeof ref !== 'string' || ref.trim() === '')) errors.push('"after" must be a list of todo refs, like ["2026-11-12_2/05-todo-priority"]');
     else out.after = [...new Set((data.after as string[]).map((ref) => ref.trim()))];
   }
+  if (data.recipient !== undefined && data.recipient !== null) {
+    const recipient = parseRecipient(data.recipient);
+    if (recipient === null) errors.push(`"recipient" must be ${RECIPIENT_FORMAT}`);
+    else out.recipient = recipient;
+  }
   if (data.history !== undefined) {
     if (!Array.isArray(data.history)) errors.push('"history" must be a list');
     else out.history = data.history.filter((entry): entry is MetaChange => isPlainObject(entry) && typeof entry.at === 'string' && typeof entry.change === 'string');
@@ -115,14 +129,18 @@ export function todoPriority(todoDir: string): Priority {
 
 /**
  * Write a todo's settings: the known keys first, in one order, then whatever else the file held. A value
- * the file held that novadev could not read is replaced by what `meta` says.
+ * the file held that novadev could not read is replaced by what `meta` says — except a recipient (below).
  */
-export function writeTodoMeta(todoDir: string, meta: Pick<TodoMeta, 'priority' | 'after' | 'history' | 'raw'>): void {
-  const { priority: _p, after: _a, history: _h, ...rest } = meta.raw ?? {};
+export function writeTodoMeta(todoDir: string, meta: Pick<TodoMeta, 'priority' | 'after' | 'recipient' | 'history' | 'raw'>): void {
+  const { priority: _p, after: _a, recipient: heldRecipient, history: _h, ...rest } = meta.raw ?? {};
+  // A recipient the file held that novadev could not read stays as it is: it is the one value whose loss
+  // would hand somebody's todo to everyone without a trace. `novadev todo recipient` replaces it, on the record.
+  const recipient = meta.recipient ?? (heldRecipient !== undefined && heldRecipient !== null && parseRecipient(heldRecipient) === null ? heldRecipient : null);
   const data: Record<string, unknown> = {
     // Written out once it was ever set, so the file says "normal" after a change back to it.
     ...(meta.priority !== DEFAULT_PRIORITY || meta.raw?.priority !== undefined || meta.history.some((h) => h.change === 'priority') ? { priority: meta.priority } : {}),
     ...(meta.after.length > 0 ? { after: meta.after } : {}),
+    ...(recipient !== null ? { recipient } : {}),
     history: meta.history,
     ...rest,
   };
@@ -277,16 +295,17 @@ export function priorityChangeLine(c: PriorityChange): string {
   return `${c.ref}${c.archived ? ' (archived)' : ''}  ${what}  ${who}  ${c.at}${c.reason !== undefined ? `  — ${c.reason}` : ''}`;
 }
 
-/** What a filing writes: the part's priority and links, with one history entry saying it was filed so. */
-export function writeFiledMeta(todoDir: string, set: { priority: Priority; after: readonly string[] }, by: string | null, now: Date = new Date()): void {
-  if (set.priority === DEFAULT_PRIORITY && set.after.length === 0) return;
+/** What a filing writes: the part's priority, links and recipient, with one history entry saying it was filed so. */
+export function writeFiledMeta(todoDir: string, set: { priority: Priority; after: readonly string[]; recipient?: string | null }, by: string | null, now: Date = new Date()): void {
+  const recipient = set.recipient ?? null;
+  if (set.priority === DEFAULT_PRIORITY && set.after.length === 0 && recipient === null) return;
   const entry: MetaChange = {
     at: nowTimestamp(now),
     by,
     change: 'filed',
-    to: { ...(set.priority !== DEFAULT_PRIORITY ? { priority: set.priority } : {}), ...(set.after.length > 0 ? { after: [...set.after] } : {}) },
+    to: { ...(set.priority !== DEFAULT_PRIORITY ? { priority: set.priority } : {}), ...(set.after.length > 0 ? { after: [...set.after] } : {}), ...(recipient !== null ? { recipient } : {}) },
   };
-  writeTodoMeta(todoDir, { priority: set.priority, after: [...set.after], history: [entry], raw: null });
+  writeTodoMeta(todoDir, { priority: set.priority, after: [...set.after], recipient, history: [entry], raw: null });
 }
 
 /** Sort by priority, highest first; inside one level the order the list came in (the filing order) is kept. */
@@ -337,7 +356,7 @@ export function auditTodoMeta(nd: string): { problems: string[] } {
       const meta = readTodoMeta(join(todos, batch, todo));
       if (meta.error === null) continue;
       problems.push(
-        `todos/${batch}/${todo}/${TODO_META_FILE}: ${meta.error} — fix it, or delete it; until then ${meta.raw === null ? 'the todo reads as priority normal, with no "do after" links' : 'that value reads as its default'}. It is written by \`novadev todo priority\` and \`novadev todo after\`, never by hand.`,
+        `todos/${batch}/${todo}/${TODO_META_FILE}: ${meta.error} — fix it, or delete it; until then ${meta.raw === null ? 'the todo reads as priority normal, with no "do after" links and no recipient' : 'that value reads as its default'}. It is written by \`novadev todo priority\`, \`novadev todo after\` and \`novadev todo recipient\`, never by hand.`,
       );
     }
   }

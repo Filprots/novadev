@@ -167,6 +167,14 @@ Everything else is new and off, or empty, until you use it: a todo's priority
 every developer or agent its own actor id (`--agent`, `by`) before turning on the limit, the
 owners or the lead: those rules tell people apart by it. The JSON outputs only gain keys.
 
+Since 2026-11-24 (still 0.18.0: no layout change, nothing to migrate; run `novadev deploy` so the
+playbooks learn it) a todo may name its **recipient** — `"recipient"` in its `todo.json`, a part's
+`"recipient"` when filing, `novadev todo recipient`, `novadev todo list --for`, and the optional
+setting `"recipients"`. Off until a todo is addressed: a todo without a recipient is anyone's,
+and a project that addresses none prints as before. The JSON outputs gain `recipient` on every
+todo and `addressed` in `status --json`. And `novadev test-result write` takes any scenario
+number a plan has (it stopped at 99). See *Recipients* below.
+
 ## The system
 
 ```
@@ -470,6 +478,105 @@ $ novadev todo list
 
 (The `high` todo is listed first and still waits: priority orders the list, the links say what
 can be started.)
+
+### Recipients — a todo addressed to someone
+
+A todo can name its **recipient**: the one it is addressed to. Only the recipient works it. A
+todo without one is anyone's, as every todo was before recipients existed. It is how one team
+leaves work, a note or a remark for another — a company's agents for the session that keeps
+their tools, a developer for the person who owns the accounts — in the same queue, without
+anybody else taking it by mistake.
+
+A recipient is one of two things:
+
+- **a team** — `hq`, `paperclip`: every actor of that producer. A session that starts work as
+  `--agent hq/claude-opus-5-5` answers to `hq`; nothing has to list the members.
+- **one actor** — `paperclip/tester` for an agent, `human:filipp` for a person.
+
+A team's name is kept in lower case (`HQ` is `hq`), and matching ignores case. The words for
+nobody in particular (`anyone`, `all`, `none` …) and the bare `human` and `process` are not names.
+
+It is kept in the todo's `todo.json`, written by novadev and never by hand:
+
+```json
+{
+  "recipient": "hq",
+  "history": [
+    { "at": "2026-11-24T12:10:00+01:00", "by": "paperclip/minifil", "change": "filed",
+      "to": { "recipient": "hq" } }
+  ]
+}
+```
+
+- **When filing**, a part of the `file-todo` payload may carry `"recipient"`; a `"recipient"`
+  beside `"parts"` addresses every part that names none. Anyone may address a todo; the payload's
+  `"by"` says who filed it.
+- **Later**, `novadev todo recipient <ref> <recipient>` addresses or re-addresses it, and
+  `--clear` makes it anyone's again. A change names who made it — `--by <actor>`, or a payload
+  file `{ "by", "reason" }` — and who, when, from whom to whom and why are appended to `history`.
+  A finished todo takes no recipient. Not refused behind a lock.
+
+```sh
+novadev todo recipient 2026-10-01_1/02 hq --by paperclip/minifil
+novadev todo recipient dev-env paperclip/tester why.json   # { "by": "hq/claude-opus-5-5", "reason": "It is a test account, not the tool." }
+novadev todo recipient dev-env --clear --by human:filipp   # anyone's again
+novadev todo recipient dev-env                             # show it: recipient, addressedBy, addressedAt
+novadev todo list --for hq                                 # the todos addressed to hq
+novadev todo list --for paperclip/dev,anyone --state open  # what paperclip/dev may take: its own, its team's, and the ones with no recipient
+novadev todo list --for paperclip,anyone --state open      # a lead's view: the team's, each of its actors', and the ones with no recipient
+```
+
+- **`novadev work start` refuses anybody but the recipient**, and says whose the todo is. Who
+  starts is the `--agent` actor: it answers to the recipient when it is that actor, or an actor
+  of that team. A start that names nobody is refused on an addressed todo. A person
+  (`human:<id>`) is never refused. A start that covers several todos — a whole batch, or
+  `--todo 01 --todo 02` — judges each todo it covers that is still to be worked, so a whole
+  batch cannot be taken while it holds somebody else's open todo: start yours by name. The way
+  for somebody else to take an addressed todo is to re-address it first, which is recorded.
+- **The lists say it.** `novadev todo list` and `novadev status` print `for <recipient>` beside
+  an addressed todo that is not finished; their JSON (and `todo show`) carries `recipient` on
+  every todo (`null`: anyone), and `status --json` counts in `addressed` the addressed todos
+  still to be worked, per recipient. `novadev todo list --for <who>[,<who>…]` keeps the todos
+  addressed to `<who>`, to the team `<who>` is an actor of, or — when `<who>` is a team — to one
+  of its actors: `--for paperclip/dev` is what that agent may take, `--for paperclip` is all that
+  is addressed to the team or to anyone in it; the word `anyone` stands for
+  the todos with no recipient.
+- **sync lists them apart.** An addressed todo that is still to be worked is not one of sync's
+  NEXT ACTIONS — those are for whoever runs sync. It is listed under ADDRESSED TO A RECIPIENT,
+  and a tree whose only open work is addressed comes back clean. The exception is an addressed
+  todo a lock in this worktree holds: whoever works it here finds it in NEXT ACTIONS, marked
+  `(for <recipient>, in work here)`, until it is recorded.
+
+```
+$ novadev todo list
+2026-10-01_1/01-dark-mode  (open)  Dark mode
+2026-10-01_1/02-dev-env  (open, for hq)  The dev tool gives only one login
+```
+
+**A project may name its recipients**, with what belongs to each — `"recipients"` in
+`.novadev/novadev.json`, read from the main checkout:
+
+```json
+{ "recipients": {
+    "hq": "The headquarters session: the tools, the machines, the company's rules.",
+    "paperclip": "The company's agents: the product's code."
+} }
+```
+
+(A plain list of names, `["hq", "paperclip"]`, works too.) With the setting, a todo can be
+addressed only to a name it lists, or to an actor of a team it lists: a filing to a name
+nobody answers to is refused, with the list, instead of waiting forever. `novadev file-todo
+plan` and `novadev todo recipient <ref>` answer the list (`recipients`), so whoever files sees
+who can be addressed and what belongs to whom. Without the setting any well-formed name is
+accepted. A setting novadev cannot read is a PROBLEM in `sync` and `doctor`; a todo still to
+be worked that is addressed to a name the setting no longer lists is a NEXT ACTION — nobody
+will pick it up until it is re-addressed. A `todo.json` that cannot be read at all and names a
+recipient (a merge conflict after two re-addressings) is a PROBLEM too, and until it is fixed
+nobody can start that todo: whose it is cannot be told.
+
+novadev does not check who is calling — an actor is what the caller says — so the rule holds
+through the record: the lock says who took an addressed todo, and its history says who
+addressed it.
 
 ## Work in progress — the lock, waypoints and pauses
 

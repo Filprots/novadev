@@ -12,8 +12,8 @@ sources:
   - resource: repo:src/knowledge.ts
   - resource: repo:src/links.ts
   - resource: repo:src/work.ts
-generated: { by: claude-code/claude-fable-5-2, at: 2026-11-12T15:39:48+01:00 }
-stale_after: 2027-02-10T15:39:48+01:00
+generated: { by: claude-code/claude-fable-5-2, at: 2026-11-24T13:06:51+01:00 }
+stale_after: 2027-02-22T13:06:51+01:00
 ---
 
 # Architecture
@@ -54,6 +54,7 @@ walking up from the cwd to the folder that contains `.novadev/` (`requireProject
 | `worktree …` (one worktree per task across repositories; `queue …`, the merge queue) | `src/worktree.ts`; the queue's state and its one-at-a-time lock: `src/queue.ts` |
 | what an overlapping claim means (`"claims"`, `"protectedPaths"`), who shares what | `src/claim-policy.ts` |
 | a todo's priority, its "do after" links, the lead | `src/todo-meta.ts`, `src/todo-links.ts`, `src/lead.ts` — none imports `todo.ts` |
+| a todo's recipient (`"recipient"` in todo.json, `"recipients"`, `todo recipient`, `todo list --for`) | `src/recipients.ts` (the names, who answers to one, the setting — imports no todo module), `src/todo-recipient.ts` (re-addressing, the refusal in `work start`, sync's list, the audit) |
 | area owners and required reviewers (`"owners"`, `owners …`) | `src/owners.ts` |
 | the work-in-progress limit (`"wipLimit"`) | `src/wip.ts` (counts; `work.ts` refuses) |
 | git (read-only questions) | `src/git.ts` — but see *The git boundary* |
@@ -88,15 +89,16 @@ the fixes and reports them as "stale" instead of writing.
 5. **Validate** — links and knowledge are audited again on the moved tree; `auditWork`
    reads the locks. Prints PROBLEMS, *in work*, batches held for grace.
 6. **Lists** — NEXT ACTIONS (locks, knowledge, todos without records, review of walked
-   tests, link notes, postponed triggers, metrics growth, placement) and WAITING ON THE
-   HUMAN (tests to walk, paused batches). Exit 1 on problems (or, with `--check`, on any
+   tests, link notes, postponed triggers, metrics growth, placement), WAITING ON THE
+   HUMAN (tests to walk, paused batches), WAITING ON REVIEW OR MERGE, and ADDRESSED TO A
+   RECIPIENT (open todos that name a recipient: theirs, never a NEXT ACTION). Exit 1 on problems (or, with `--check`, on any
    stale file, unwritten raise, uncheckable or exceeded budget).
 
 ## Where state lives (in a deployed project)
 
 | State | Where | Written by |
 |---|---|---|
-| version + settings (`archiveGraceDays`, `defaultBranch`, `subrepos`, `team`, `metrics`, `debtBudget`, `hubs`, `placementSince`, `knowledge`) | `.novadev/novadev.json` | `deploy`, `migrate-repo`, `sync` (budget raises); hand-edited settings |
+| version + settings (`archiveGraceDays`, `defaultBranch`, `subrepos`, `team`, `metrics`, `debtBudget`, `hubs`, `placementSince`, `knowledge`; read from the main checkout: `lead`, `owners`, `claims`, `protectedPaths`, `wipLimit`, `recipients`) | `.novadev/novadev.json` | `deploy`, `migrate-repo`, `sync` (budget raises); hand-edited settings |
 | briefs and records | `.novadev/todos/<batch>/<todo>/` | human / agent / `file-todo`, `todo` |
 | the lock + waypoint trail | `.novadev/todos/<batch>/<todo>/working.md` (a todo); `.novadev/todos/<batch>/working.md` (the whole batch, and 0.17.0 locks) | `work` only |
 | finished marker | `.novadev/todos/<batch>/completed.md` | `sync` only |

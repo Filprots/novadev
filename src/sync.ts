@@ -43,12 +43,13 @@ import { auditPlacement } from './placement.ts';
 import { afterMergeRefusal, commitAfterMerge, MERGE_DRIVER, hasMergeRules, mergeDriverConfigured, repairLogFile } from './merge-rules.ts';
 import { merged, reviewIsPartial } from './review.ts';
 import { auditTodoLinks, depName, linkReader } from './todo-links.ts';
+import { addressedTodos, auditTodoRecipients, recipientUnknown } from './todo-recipient.ts';
 import { auditLead } from './lead.ts';
 import { auditClaimPolicy } from './claim-policy.ts';
 import { auditWip } from './wip.ts';
 import { auditOwners, waitingReviews } from './owners.ts';
-import { auditTodoMeta, orderByPriority, priorityLabel, todoPriority } from './todo-meta.ts';
-import { auditWork } from './work.ts';
+import { auditTodoMeta, orderByPriority, priorityLabel, readTodoMeta, todoPriority } from './todo-meta.ts';
+import { auditWork, lockHolding } from './work.ts';
 
 export async function sync(args: string[]): Promise<void> {
   const check = args.includes('--check');
@@ -144,7 +145,10 @@ export async function sync(args: string[]): Promise<void> {
   // … who may decide them besides a person ("lead"), and who owns and reviews what ("owners").
   const todoMeta = { problems: [...auditTodoMeta(nd).problems, ...auditLead(nd).problems, ...auditClaimPolicy(nd).problems, ...auditWip(nd).problems, ...auditOwners(nd).problems] };
   const todoLinks = auditTodoLinks(nd);
-  const problems = [...inWork.problems, ...audit.problems, ...todoMeta.problems, ...todoLinks.problems, ...metricsAudit.problems, ...placement.problems, ...knowledge.problems];
+  // … and who a todo is addressed to ("recipients", todo-recipient.ts): a setting novadev cannot read, a
+  // todo for a name the project does not list.
+  const recipients = auditTodoRecipients(nd);
+  const problems = [...inWork.problems, ...audit.problems, ...todoMeta.problems, ...recipients.problems, ...todoLinks.problems, ...metricsAudit.problems, ...placement.problems, ...knowledge.problems];
   if (problems.length > 0) {
     console.log(`\nPROBLEMS (${problems.length}):`);
     for (const p of problems) console.log(`  ✗ ${p}`);
@@ -173,9 +177,12 @@ export async function sync(args: string[]): Promise<void> {
   // 4. What still needs doing, split by who has to do it. An abandoned lock comes first: a session
   // died mid-work, and its last waypoint is where this one should pick up. A paused batch waits on
   // the human — they stopped it, they say when it goes on.
-  const agent = [...inWork.actions, ...knowledge.actions, ...agentActions(root, nd, audit.notes), ...todoLinks.actions, ...metrics.actions, ...placement.actions];
+  const agent = [...inWork.actions, ...knowledge.actions, ...agentActions(root, nd, audit.notes), ...todoLinks.actions, ...recipients.actions, ...metrics.actions, ...placement.actions];
   const human = [...inWork.waiting, ...humanActions(nd)];
   const gated = reviewWaiting(root, nd);
+  // The todos that name a recipient are that recipient's work, not whoever runs this sync — except the
+  // ones a lock in this worktree holds: whoever works them here finds them in NEXT ACTIONS.
+  const addressed = addressedTodos(nd).filter((todo) => !heldHere(nd, todo.ref));
 
   if (agent.length > 0) {
     console.log(`\nNEXT ACTIONS — you (${agent.length}):`);
@@ -189,12 +196,19 @@ export async function sync(args: string[]): Promise<void> {
     console.log(`\nWAITING ON REVIEW OR MERGE (${gated.length}):`);
     for (const g of gated) console.log(`  ◇ ${g}`);
   }
+  if (addressed.length > 0) {
+    console.log(`\nADDRESSED TO A RECIPIENT — theirs to do, yours only if you are the recipient (${addressed.length}):`);
+    for (const a of addressed) console.log(`  ✉ ${a.line}`);
+  }
 
   if (agent.length === 0 && problems.length === 0) {
+    const left = [human.length > 0 ? 'the human\'s to do' : '', addressed.length > 0 ? 'addressed to its recipient' : ''].filter(Boolean);
     console.log(
-      human.length > 0
+      human.length > 0 && addressed.length === 0
         ? '\nsync: clean — everything left is the human\'s to do.'
-        : '\nsync: clean. ✓',
+        : left.length > 0
+          ? `\nsync: clean — everything left is ${left.join(', or ')}.`
+          : '\nsync: clean. ✓',
     );
   }
   // After a merge, what this run changed in .novadev/ is committed — problems or not: the derived
@@ -232,6 +246,12 @@ export async function sync(args: string[]): Promise<void> {
   }
 }
 
+/** Does a lock in this worktree hold the todo (its own, or the batch's)? */
+function heldHere(nd: string, ref: string): boolean {
+  const [batch, todo] = ref.split('/');
+  return batch !== undefined && todo !== undefined && lockHolding(nd, batch, todo) !== null;
+}
+
 /** Work only an agent can do — the loop keeps running until this list is empty. */
 function agentActions(root: string, nd: string, notes: string[]): string[] {
   const out: string[] = [];
@@ -265,11 +285,23 @@ function agentActions(root: string, nd: string, notes: string[]): string[] {
   const open = orderByPriority(listAllTodos(nd).filter((todo) => !todo.archived), (todo) => todoPriority(todo.dir));
   const links = linkReader(nd);
   for (const todo of open) {
+    // A todo that names a recipient is listed apart (ADDRESSED TO A RECIPIENT): it is theirs. One that is
+    // in work in this worktree is this session's all the same: its round is not over while it is open.
+    const recipient = readTodoMeta(todo.dir).recipient;
+    if (recipient !== null && !heldHere(nd, todo.ref)) continue;
     const state = todoState(todo.dir);
-    const name = `${todo.ref}${priorityLabel(todoPriority(todo.dir))}`;
+    const name = `${todo.ref}${priorityLabel(todoPriority(todo.dir))}${recipient !== null ? ` (for ${recipient}, in work here)` : ''}`;
+    // Its todo.json cannot be read and names a recipient: whose it is cannot be told, so it is nobody's to start.
+    if (recipient === null && recipientUnknown(todo.dir) !== null) {
+      if (state === 'open' || state === 'progress' || state === 'changes') out.push(`${name}: its todo.json cannot be read and names a recipient — whose the todo is cannot be told. Fix the file first (PROBLEMS, above); do not start it`);
+      continue;
+    }
     // A todo that waits for others ("do after" links, todo-links.ts) is not to be started yet: say what for.
     const waits = state === 'open' ? links(todo.dir, state).waitsFor : [];
-    if (state === 'open' && waits.length > 0) out.push(`${name} has no record yet — it waits for ${waits.map((dep) => `${depName(dep.ref, todo.batch)} (${dep.state})`).join(', ')}: do ${waits.length === 1 ? 'that' : 'those'} first`);
+    // … and whose those are, when they are addressed: then it is not this session's to do first.
+    const theirs = waits.map((dep) => readTodoMeta(join(nd, 'todos', dep.ref)).recipient);
+    const first = theirs.length > 0 && theirs.every((r) => r !== null) ? (waits.length === 1 ? 'its recipient does that first' : 'their recipients do those first') : `do ${waits.length === 1 ? 'that' : 'those'} first`;
+    if (state === 'open' && waits.length > 0) out.push(`${name} has no record yet — it waits for ${waits.map((dep, i) => `${depName(dep.ref, todo.batch)} (${dep.state}${theirs[i] !== null ? `, for ${theirs[i]}` : ''})`).join(', ')}: ${first}`);
     else if (state === 'open') out.push(`${name} has no record yet — do the work, then record it`);
     if (state === 'progress') out.push(`${name} is mid-flight — finish it or update ai_progress.md`);
     if (state === 'changes') out.push(`${name}: its review asked for CHANGES (ai_review.md) — make them, update ai_completed.md, then ask for a new review`);

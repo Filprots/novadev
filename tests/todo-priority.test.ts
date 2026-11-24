@@ -320,7 +320,7 @@ describe('a todo.json novadev cannot read', () => {
     write(root, `${dir}/todo.json`, '<<<<<<< HEAD\n{ "priority": "urgent" }\n');
     expect(readTodoMeta(`${root}/${dir}`)).toMatchObject({ priority: 'normal', after: [], raw: null, error: 'it is not valid JSON (a merge conflict?)' });
     const problem =
-      '✗ todos/2026-10-01_1/01-dark-mode/todo.json: it is not valid JSON (a merge conflict?) — fix it, or delete it; until then the todo reads as priority normal, with no "do after" links. It is written by `novadev todo priority` and `novadev todo after`, never by hand.';
+      '✗ todos/2026-10-01_1/01-dark-mode/todo.json: it is not valid JSON (a merge conflict?) — fix it, or delete it; until then the todo reads as priority normal, with no "do after" links and no recipient. It is written by `novadev todo priority`, `novadev todo after` and `novadev todo recipient`, never by hand.';
     const sync = run(root, 'sync');
     expect(sync.code).toBe(1);
     expect(sync.stdout).toContain(problem);
