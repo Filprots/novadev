@@ -43,6 +43,7 @@ import {
   listTestTasks,
   novadevDir,
   readField,
+  readManifest,
   requireProjectRoot,
   textValue,
   todoState,
@@ -50,7 +51,7 @@ import {
 } from './lib.ts';
 import { hasCommit } from './git.ts';
 import { readFrontmatterText, splitFrontmatter, yamlFlowMap, yamlString } from './okf.ts';
-import { type CommitRef, commitRefsIn, listSubrepos, repoNamesIn } from './subrepos.ts';
+import { type CommitRef, commitRefsIn, listSubrepos, parseCommitsSince, repoNamesIn } from './subrepos.ts';
 
 /** How a message names a feature's folder: by its place in `.novadev/`. */
 const FEATURES = `${KNOWLEDGE_DIR}/${FEATURES_DIR}`;
@@ -253,8 +254,15 @@ export function auditLinks(root: string): Audit {
   problems.push(...subrepos.problems);
   notes.push(...subrepos.notes);
   const repoByName = new Map(subrepos.repos.map((repo) => [repo.name, repo]));
-  const owners = (text: string) => todos.filter((t) => t.commits.includes(text)).map((t) => t.todo.ref).join(', ');
-  const allRefs = [...new Map(todos.flatMap((t) => t.refs).map((ref) => [ref.text, ref])).values()];
+  // "commitsSince" (subrepos.ts): a record dated before the day this repository's history starts for the
+  // project names commits that live in the place it moved from — it is not asked for them. A record's day
+  // is its `**Date:**`, else its batch's.
+  const since = parseCommitsSince(readManifest(nd)?.commitsSince);
+  if (!since.ok) problems.push(`novadev.json: ${since.error}`);
+  const dayOf = (t: TodoLinks) => /\d{4}-\d{2}-\d{2}/.exec(t.date)?.[0] ?? /^\d{4}-\d{2}-\d{2}/.exec(t.todo.batch)?.[0] ?? null;
+  const asked = since.ok && since.value !== null ? todos.filter((t) => { const day = dayOf(t); return day === null || day >= since.value!; }) : todos;
+  const owners = (text: string) => asked.filter((t) => t.commits.includes(text)).map((t) => t.todo.ref).join(', ');
+  const allRefs = [...new Map(asked.flatMap((t) => t.refs).map((ref) => [ref.text, ref])).values()];
   const ownHashes = allRefs.filter((ref) => ref.repo === null).map((ref) => ref.hash);
   for (const bad of unknownCommits(root, ownHashes)) {
     const home = subrepos.repos.find((repo) => hasCommit(repo.path, bad, true) === true);
@@ -272,7 +280,8 @@ export function auditLinks(root: string): Audit {
       notes.push(`commit ${ref.text} (${owners(ref.text)}) is not in ${repo.name}'s history (${repo.rel})`);
     }
   }
-  for (const t of todos) {
+  // A project that says it has no sub-repos (`"subrepos": []`) names folders there, in its own words.
+  for (const t of subrepos.declaredNone ? [] : asked) {
     for (const name of t.repos) {
       if (!repoByName.has(name)) {
         notes.push(`${t.todo.ref}: **Repos:** names "${name}", which is not a sub-repo — add its folder to "subrepos" in novadev.json, or correct the name`);

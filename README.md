@@ -175,6 +175,10 @@ and a project that addresses none prints as before. The JSON outputs gain `recip
 todo and `addressed` in `status --json`. And `novadev test-result write` takes any scenario
 number a plan has (it stopped at 99). See *Recipients* below.
 
+Also since 2026-11-24, for a project that moved repositories: `"commitsSince": "<day>"` (records
+dated before it are not asked for their commits) and the meaning of an empty `"subrepos": []`
+(the project has no sub-repos: a `**Repos:**` line is free text). Both opt-in; see *Sub-repos*.
+
 ## The system
 
 ```
@@ -776,6 +780,25 @@ the commits as written and the repos a todo changed. The placement check asks th
 which files its commit changed, so a hub inside it (`"hubs": ["repos/irrippr/src/big.js"]`)
 works like any other. Two sub-repos with one name are a problem: a record could not tell them
 apart.
+
+**A project that moved repositories** — several repositories joined into one, or a history that
+was not carried over — has records whose commits live in the old place, and sync would list every
+one of them ("is not in this repository's history") for ever. Two settings say what is true now:
+
+```json
+"subrepos": [],
+"commitsSince": "2026-11-18"
+```
+
+- `"commitsSince"` is the day from which the records' commits are in this repository. A record
+  dated before it (its `**Date:**`, else its batch's day) is not asked for its commits, nor for
+  its `**Repos:**` names; each feature's `work.md` still lists them as written. A record of that
+  day or later is asked as always, so a commit that is really missing is still named.
+- `"subrepos": []` — an empty list, not a missing setting — says the project has no sub-repos:
+  a record's `**Repos:**` line is then free text (which folders the todo touched) and is not
+  judged. A project that never set `"subrepos"` is still told when a record names one.
+
+Both are off until set; a `"commitsSince"` that is no day is a problem `sync` and `doctor` name.
 
 ### Locks every worktree sees, and claims: one owner per file
 

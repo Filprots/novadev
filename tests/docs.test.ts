@@ -12,6 +12,7 @@ import { parseEvents } from '../src/knowledge-log.ts';
 import { readFrontmatterText } from '../src/okf.ts';
 import { placementState } from '../src/placement.ts';
 import { readRecipients } from '../src/recipients.ts';
+import { forgetSubrepos, listSubrepos, parseCommitsSince } from '../src/subrepos.ts';
 import { afterTodo, priorityTodo, recipientTodo } from '../src/todo.ts';
 import { PRIORITIES, readTodoMeta } from '../src/todo-meta.ts';
 import { auditOwners, readOwners } from '../src/owners.ts';
@@ -588,6 +589,21 @@ describe('"do after" links in the docs', () => {
     const help = run(tempDir(), 'help').stdout;
     expect(help).toContain('"after <ref> [<ref>…] [--clear] [--by <actor>]"');
     expect(help).toContain('"after": the todos it waits for');
+  });
+});
+
+describe('a moved project in the docs', () => {
+  test('the README names "commitsSince" and the empty "subrepos", and its example is what the code reads', () => {
+    const section = readme.split('### Sub-repos: `repo@hash` and `**Repos:**`')[1]!.split('\n### ')[0]!;
+    for (const text of ['**A project that moved repositories**', '`"commitsSince"` is the day from which the records\' commits are in this repository', 'its `**Date:**`, else its batch\'s day', '`"subrepos": []` — an empty list, not a missing setting', 'is a problem `sync` and `doctor` name']) {
+      expect(section).toContain(text);
+    }
+    const example = JSON.parse(`{${fences(section, 'json').find((body) => body.includes('commitsSince'))!}}`);
+    expect(parseCommitsSince(example.commitsSince)).toEqual({ ok: true, value: '2026-11-18' });
+    const root = project(example);
+    forgetSubrepos();
+    expect(listSubrepos(root).declaredNone).toBe(true);
+    expect(readme.split('## Upgrading')[1]!.split('\n## ')[0]!).toContain('`"commitsSince": "<day>"`');
   });
 });
 
