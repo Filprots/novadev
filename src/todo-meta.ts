@@ -129,15 +129,18 @@ export function todoPriority(todoDir: string): Priority {
 
 /**
  * Write a todo's settings: the known keys first, in one order, then whatever else the file held. A value
- * the file held that novadev could not read is replaced by what `meta` says.
+ * the file held that novadev could not read is replaced by what `meta` says — except a recipient (below).
  */
 export function writeTodoMeta(todoDir: string, meta: Pick<TodoMeta, 'priority' | 'after' | 'recipient' | 'history' | 'raw'>): void {
-  const { priority: _p, after: _a, recipient: _r, history: _h, ...rest } = meta.raw ?? {};
+  const { priority: _p, after: _a, recipient: heldRecipient, history: _h, ...rest } = meta.raw ?? {};
+  // A recipient the file held that novadev could not read stays as it is: it is the one value whose loss
+  // would hand somebody's todo to everyone without a trace. `novadev todo recipient` replaces it, on the record.
+  const recipient = meta.recipient ?? (heldRecipient !== undefined && heldRecipient !== null && parseRecipient(heldRecipient) === null ? heldRecipient : null);
   const data: Record<string, unknown> = {
     // Written out once it was ever set, so the file says "normal" after a change back to it.
     ...(meta.priority !== DEFAULT_PRIORITY || meta.raw?.priority !== undefined || meta.history.some((h) => h.change === 'priority') ? { priority: meta.priority } : {}),
     ...(meta.after.length > 0 ? { after: meta.after } : {}),
-    ...(meta.recipient !== null && meta.recipient !== undefined ? { recipient: meta.recipient } : {}),
+    ...(recipient !== null ? { recipient } : {}),
     history: meta.history,
     ...rest,
   };
@@ -353,7 +356,7 @@ export function auditTodoMeta(nd: string): { problems: string[] } {
       const meta = readTodoMeta(join(todos, batch, todo));
       if (meta.error === null) continue;
       problems.push(
-        `todos/${batch}/${todo}/${TODO_META_FILE}: ${meta.error} — fix it, or delete it; until then ${meta.raw === null ? 'the todo reads as priority normal, with no "do after" links' : 'that value reads as its default'}. It is written by \`novadev todo priority\` and \`novadev todo after\`, never by hand.`,
+        `todos/${batch}/${todo}/${TODO_META_FILE}: ${meta.error} — fix it, or delete it; until then ${meta.raw === null ? 'the todo reads as priority normal, with no "do after" links and no recipient' : 'that value reads as its default'}. It is written by \`novadev todo priority\`, \`novadev todo after\` and \`novadev todo recipient\`, never by hand.`,
       );
     }
   }

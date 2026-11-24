@@ -127,7 +127,12 @@ export function statusData(nd: string, now: Date = new Date()): Record<string, u
   for (const t of todos) counts[t.state] = (counts[t.state] ?? 0) + 1;
   // Per recipient, the addressed todos still to be worked (todo-recipient.ts): what each one's own list holds.
   const addressed: Record<string, number> = {};
-  for (const t of todos) if (t.recipient !== null && ['open', 'progress', 'changes'].includes(t.state)) addressed[t.recipient] = (addressed[t.recipient] ?? 0) + 1;
+  for (const t of todos) {
+    if (t.recipient === null || !['open', 'progress', 'changes'].includes(t.state)) continue;
+    // One count per recipient, however an actor's name is capitalised (matching ignores case).
+    const key = Object.keys(addressed).find((name) => name.toLowerCase() === t.recipient!.toLowerCase()) ?? t.recipient;
+    addressed[key] = (addressed[key] ?? 0) + 1;
+  }
   const tasks = listTestTasks(nd).map((t) => ({ id: t.id, features: t.featureIds, scenarios: t.scenarios, revision: t.revision || 1, lastTested: t.lastTested || null, readyForReview: t.hasResults, results: t.results, todos: t.todoRefs }));
   const postponed = listFiles(join(nd, 'postponed')).filter((f) => f.endsWith('.md') && f !== 'README.md').map((file) => {
     const fm = readFrontmatter(join(nd, 'postponed', file)) ?? {};

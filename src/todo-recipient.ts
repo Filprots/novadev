@@ -22,6 +22,7 @@
 // - `sync` lists the addressed todos that are still to be worked apart from NEXT ACTIONS: they are their
 //   recipient's work, not whoever runs sync. A todo addressed to a name the project's `"recipients"` does
 //   not list (the list changed after it was filed) is a NEXT ACTION: nobody will pick it up.
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { type TodoState, listDirs, todoState } from './lib.ts';
 import { actorKind, nowTimestamp } from './okf.ts';
@@ -61,18 +62,36 @@ export function changeRecipient(
   if (OVER.includes(todo.state)) throw new Error(`${todo.ref} is finished (${todo.state}): there is nothing left in it to address. New work gets a new todo (novadev file-todo).`);
   const meta = readTodoMeta(todo.dir);
   if (meta.error !== null && meta.raw === null) throw new Error(`todos/${todo.ref}/${TODO_META_FILE} cannot be read: ${meta.error} — fix it, or delete it, then set the recipient again.`);
-  const from = meta.recipient;
-  if (from === to) return { ref: todo.ref, recipient: to, changed: false, written: null };
+  // A value in the file that is no name reads as "no recipient" and is still there: it is what is replaced.
+  const held = meta.raw?.recipient;
+  const unreadable = meta.recipient === null && held !== undefined && held !== null;
+  const from = unreadable ? String(held) : meta.recipient;
+  if (meta.recipient === to && !unreadable) return { ref: todo.ref, recipient: to, changed: false, written: null };
   meta.history.push({ at: nowTimestamp(now), by: who.by, change: 'recipient', from, to, ...(who.reason !== undefined ? { reason: who.reason } : {}) });
-  writeTodoMeta(todo.dir, { ...meta, recipient: to });
+  const { recipient: _replaced, ...raw } = meta.raw ?? {};
+  writeTodoMeta(todo.dir, { ...meta, recipient: to, raw });
   return { ref: todo.ref, recipient: to, from, changed: true, by: who.by, written: `todos/${todo.ref}/${TODO_META_FILE}` };
 }
 
 /**
- * `novadev work start`: throw when a todo the start covers is addressed to somebody else. `covers` is
- * null for the whole batch; `agent` is who starts, null when the command named nobody.
+ * Is this a todo whose recipient cannot be told: its todo.json cannot be read at all (a merge conflict —
+ * two worktrees re-addressed it), and what is in it names a recipient? Such a todo reads as anyone's, and
+ * must not be started as that. Answers why the file cannot be read, or null.
  */
-export function refuseOthersTodos(nd: string, batch: string, covers: readonly string[] | null, agent: string | null): void {
+export function recipientUnknown(todoDir: string): string | null {
+  const meta = readTodoMeta(todoDir);
+  if (meta.error === null || meta.raw !== null) return null;
+  const path = join(todoDir, TODO_META_FILE);
+  return existsSync(path) && /"recipient"\s*:/.test(readFileSync(path, 'utf8')) ? meta.error : null;
+}
+
+/**
+ * `novadev work start`: throw when a todo the start covers is addressed to somebody else. `covers` is
+ * null for the whole batch; `agent` is who starts, null when the command named nobody; `resumesBatchLock`
+ * says the start goes on with a lock at the batch root this worktree already holds (the whole batch, or a
+ * 0.17.0 lock on part of it) — it cannot be narrowed, so the way on is another one.
+ */
+export function refuseOthersTodos(nd: string, batch: string, covers: readonly string[] | null, agent: string | null, resumesBatchLock = false): void {
   if (agent !== null && actorKind(agent) === 'human') return;
   const batchDir = join(nd, 'todos', batch);
   const all = listDirs(batchDir);
@@ -82,6 +101,10 @@ export function refuseOthersTodos(nd: string, batch: string, covers: readonly st
   for (const todo of covered) {
     const dir = join(batchDir, todo);
     if (!WORKABLE.includes(todoState(dir))) continue;
+    const unknown = recipientUnknown(dir);
+    if (unknown !== null) {
+      throw new Error(`Not started — todos/${batch}/${todo}/${TODO_META_FILE} cannot be read (${unknown}), and it names a recipient: whose the todo is cannot be told. Fix the file first (after a merge conflict: keep one side), then start again.`);
+    }
     const meta = readTodoMeta(dir);
     if (meta.recipient === null || (agent !== null && answersTo(agent, meta.recipient))) mine++;
     else others.push({ ref: `${batch}/${todo}`, recipient: meta.recipient, since: addressedBy(meta.history, meta.recipient) });
@@ -97,7 +120,11 @@ export function refuseOthersTodos(nd: string, batch: string, covers: readonly st
   }
   throw new Error(
     `Not started — ${named}, and you are ${agent}. Only its recipient works an addressed todo: leave ${others.length === 1 ? 'it' : 'them'} to ${others.length === 1 ? 'its recipient' : 'their recipients'}. ` +
-      (mine > 0 ? `Start only the todos that are yours (\`novadev work start ${batch} --todo <nn>\`; \`novadev todo list --for ${agent},anyone\` lists them). ` : `\`novadev todo list --for ${agent},anyone\` lists what you may take: the todos addressed to you, and the ones with no recipient. `) +
+      (resumesBatchLock
+        ? `The lock this worktree holds at the root of ${batch} covers ${others.length === 1 ? 'it' : 'them'} and cannot be narrowed: write down where you are (\`novadev work waypoint ${batch} <payload.json>\`), release that lock (\`novadev work stop ${batch}\`), then start your own todos by name (\`novadev work start ${batch}/<todo>\`). `
+        : mine > 0
+          ? `Start only the todos that are yours (\`novadev work start ${batch} --todo <nn>\`; \`novadev todo list --for ${agent},anyone\` lists them). `
+          : `\`novadev todo list --for ${agent},anyone\` lists what you may take: the todos addressed to you, and the ones with no recipient. `) +
       `If you are the recipient, start it under the recipient's actor (\`--agent ${actorHint(first.recipient)}\`). When the person or the lead decided it is yours after all, it is re-addressed first, on the record: \`novadev todo recipient ${first.ref} <recipient> --by <actor>\` (\`--clear\` makes it anyone's).`,
   );
 }

@@ -2,8 +2,8 @@
 //
 //   novadev todo list [--state open,progress,…] [--for <recipient>,…] [--json]
 //                                                            the open todos with their titles and states; --for keeps
-//                                                            the ones addressed to a recipient (`anyone`: the ones
-//                                                            addressed to nobody)
+//                                                            the ones addressed to a recipient, its team or — for a
+//                                                            team — one of its actors (`anyone`: addressed to nobody)
 //   novadev todo show <ref>                                  one todo as JSON: its brief and its records
 //   novadev todo addendum <ref> <payload.json>               {text, attachments}: a "Chat addendum" appended to the brief;
 //                                                            attachments (screenshots) are copied into the todo folder
@@ -530,19 +530,24 @@ function readPayload(argument: string | undefined): Record<string, unknown> {
 }
 
 /** The arguments of a `novadev todo` call: what is positional, and the options that take a value. */
+const VALUE_OPTIONS: readonly string[] = ['--by', '--state', '--changed-since', '--for'];
 type TodoArgs = { positional: string[]; by?: string; state?: string; changedSince?: string; for?: string; json: boolean; clear: boolean; byAgent: boolean };
 function parseArgs(args: string[]): TodoArgs {
   const out: TodoArgs = { positional: [], json: false, clear: false, byAgent: false };
   for (let i = 0; i < args.length; i++) {
-    const arg = args[i]!;
-    if (arg === '--by' || arg === '--state' || arg === '--changed-since' || arg === '--for') {
-      const value = args[i + 1];
-      if (value === undefined || value.startsWith('--')) throw new Error(`${arg} needs a value.\n${USAGE}`);
+    let arg = args[i]!;
+    // `--for=hq` is `--for hq`: an option that silently became a positional would print the whole list as "its own".
+    const eq = arg.startsWith('--') ? arg.indexOf('=') : -1;
+    const inline = eq > 0 && VALUE_OPTIONS.includes(arg.slice(0, eq)) ? arg.slice(eq + 1) : undefined;
+    if (inline !== undefined) arg = arg.slice(0, eq);
+    if (VALUE_OPTIONS.includes(arg)) {
+      const value = inline ?? args[i + 1];
+      if (value === undefined || value === '' || (inline === undefined && value.startsWith('--'))) throw new Error(`${arg} needs a value.\n${USAGE}`);
       if (arg === '--by') out.by = value;
       else if (arg === '--state') out.state = value;
       else if (arg === '--for') out.for = value;
       else out.changedSince = value;
-      i++;
+      if (inline === undefined) i++;
     } else if (arg === '--json') out.json = true;
     else if (arg === '--clear') out.clear = true;
     else if (arg === '--by-agent') out.byAgent = true;
@@ -596,9 +601,11 @@ export function todoCommand(args: string[]): void {
     if (command === 'recipient') {
       // `recipient <ref> hq [payload]`, `recipient <ref> --clear [payload]`, `recipient <ref>`: with --clear the
       // next word is the payload, when it is a file — there is no name to give (a name there is refused).
-      const clearPayload = opts.clear && argument !== undefined && second === undefined && existsSync(isAbsolute(argument) ? argument : resolve(process.cwd(), argument));
-      const name = clearPayload ? undefined : argument;
-      const file = clearPayload ? argument : second;
+      const lonePayload = argument !== undefined && second === undefined && existsSync(isAbsolute(argument) ? argument : resolve(process.cwd(), argument));
+      // … and without --clear a lone file is a payload whose recipient was left out: never a recipient called "why.json".
+      if (lonePayload && !opts.clear) throw new Error(`"${argument}" is a file, not a recipient: name the recipient before the payload (\`novadev todo recipient <ref> <recipient> ${argument}\`), or pass --clear to make the todo anyone's.`);
+      const name = lonePayload ? undefined : argument;
+      const file = lonePayload ? argument : second;
       const payload = file === undefined ? {} : readPayload(file);
       return void console.log(JSON.stringify(recipientTodo(nd, ref, name, { clear: opts.clear, by: opts.by ?? payload['by'], reason: payload['reason'] }), null, 2));
     }

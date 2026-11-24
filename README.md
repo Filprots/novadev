@@ -493,6 +493,9 @@ A recipient is one of two things:
   `--agent hq/claude-opus-5-5` answers to `hq`; nothing has to list the members.
 - **one actor** — `paperclip/tester` for an agent, `human:filipp` for a person.
 
+A team's name is kept in lower case (`HQ` is `hq`), and matching ignores case. The words for
+nobody in particular (`anyone`, `all`, `none` …) and the bare `human` and `process` are not names.
+
 It is kept in the todo's `todo.json`, written by novadev and never by hand:
 
 ```json
@@ -505,8 +508,9 @@ It is kept in the todo's `todo.json`, written by novadev and never by hand:
 }
 ```
 
-- **When filing**, a part of the `file-todo` payload may carry `"recipient"`. Anyone may address
-  a todo; the payload's `"by"` says who filed it.
+- **When filing**, a part of the `file-todo` payload may carry `"recipient"`; a `"recipient"`
+  beside `"parts"` addresses every part that names none. Anyone may address a todo; the payload's
+  `"by"` says who filed it.
 - **Later**, `novadev todo recipient <ref> <recipient>` addresses or re-addresses it, and
   `--clear` makes it anyone's again. A change names who made it — `--by <actor>`, or a payload
   file `{ "by", "reason" }` — and who, when, from whom to whom and why are appended to `history`.
@@ -519,6 +523,7 @@ novadev todo recipient dev-env --clear --by human:filipp   # anyone's again
 novadev todo recipient dev-env                             # show it: recipient, addressedBy, addressedAt
 novadev todo list --for hq                                 # the todos addressed to hq
 novadev todo list --for paperclip/dev,anyone --state open  # what paperclip/dev may take: its own, its team's, and the ones with no recipient
+novadev todo list --for paperclip,anyone --state open      # a lead's view: the team's, each of its actors', and the ones with no recipient
 ```
 
 - **`novadev work start` refuses anybody but the recipient**, and says whose the todo is. Who
@@ -532,11 +537,15 @@ novadev todo list --for paperclip/dev,anyone --state open  # what paperclip/dev 
   an addressed todo that is not finished; their JSON (and `todo show`) carries `recipient` on
   every todo (`null`: anyone), and `status --json` counts in `addressed` the addressed todos
   still to be worked, per recipient. `novadev todo list --for <who>[,<who>…]` keeps the todos
-  `<who>` may take because they are addressed to it or to its team; the word `anyone` stands for
+  addressed to `<who>`, to the team `<who>` is an actor of, or — when `<who>` is a team — to one
+  of its actors: `--for paperclip/dev` is what that agent may take, `--for paperclip` is all that
+  is addressed to the team or to anyone in it; the word `anyone` stands for
   the todos with no recipient.
 - **sync lists them apart.** An addressed todo that is still to be worked is not one of sync's
   NEXT ACTIONS — those are for whoever runs sync. It is listed under ADDRESSED TO A RECIPIENT,
-  and a tree whose only open work is addressed comes back clean.
+  and a tree whose only open work is addressed comes back clean. The exception is an addressed
+  todo a lock in this worktree holds: whoever works it here finds it in NEXT ACTIONS, marked
+  `(for <recipient>, in work here)`, until it is recorded.
 
 ```
 $ novadev todo list
@@ -561,7 +570,9 @@ plan` and `novadev todo recipient <ref>` answer the list (`recipients`), so whoe
 who can be addressed and what belongs to whom. Without the setting any well-formed name is
 accepted. A setting novadev cannot read is a PROBLEM in `sync` and `doctor`; a todo still to
 be worked that is addressed to a name the setting no longer lists is a NEXT ACTION — nobody
-will pick it up until it is re-addressed.
+will pick it up until it is re-addressed. A `todo.json` that cannot be read at all and names a
+recipient (a merge conflict after two re-addressings) is a PROBLEM too, and until it is fixed
+nobody can start that todo: whose it is cannot be told.
 
 novadev does not check who is calling — an actor is what the caller says — so the rule holds
 through the record: the lock says who took an addressed todo, and its history says who

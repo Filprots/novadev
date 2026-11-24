@@ -32,11 +32,18 @@ import { actorKind } from './okf.ts';
 export const RECIPIENTS_SETTING = 'recipients';
 /** In a filter (`--for`), the todos with no recipient. Never a recipient's name. */
 export const ANYONE = 'anyone';
-/** Words that read as "no recipient" or "all of them": refused as a name, so no todo is ever addressed to them. */
-const NOT_A_NAME: readonly string[] = [ANYONE, 'anybody', 'everyone', 'everybody', 'all', 'none', 'nobody', 'null'];
+/**
+ * Words that read as "no recipient" or "all of them", and the two words that open an actor (`human:<id>`,
+ * `process:<id>`) and so are no team: refused as a name, so no todo is ever addressed to them.
+ */
+const NOT_A_NAME: readonly string[] = [ANYONE, 'anybody', 'everyone', 'everybody', 'all', 'none', 'nobody', 'null', 'human', 'process'];
 const TEAM = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const MAX_NAME_CHARS = 80;
-const MAX_ABOUT_CHARS = 400;
+/** How much of a recipient's description a message shows; `file-todo plan` answers all of it. */
+const SHOWN_ABOUT_CHARS = 160;
+/** What an argument put in the wrong place looks like: a payload file, or a todo's ref (`2026-10-01_1/02`). */
+const LOOKS_LIKE_A_FILE = /\.json$/i;
+const LOOKS_LIKE_A_TODO = /^\d{4}-\d{2}-\d{2}_\d+(\/|$)/;
 
 export const RECIPIENT_FORMAT =
   'a team\'s name (like `hq`: every actor `hq/…`), or one actor (`paperclip/tester` for an agent, `human:<id>` for a person)';
@@ -46,12 +53,19 @@ export function isTeam(name: string): boolean {
   return TEAM.test(name);
 }
 
-/** A recipient as it is written (` hq `), or null when it is no name a todo can be addressed to. */
+/**
+ * A recipient as it is written (` hq `), or null when it is no name a todo can be addressed to. A team's
+ * name is kept in lower case, so `HQ` and `hq` are one recipient in every list and count; an actor is
+ * kept as it is written (matching ignores case). A payload file's name or a todo's ref is never a
+ * recipient: it is an argument that landed in the wrong place.
+ */
 export function parseRecipient(value: unknown): string | null {
   const name = typeof value === 'string' ? value.trim() : '';
   if (name === '' || name.length > MAX_NAME_CHARS) return null;
   if (NOT_A_NAME.includes(name.toLowerCase())) return null;
-  return isTeam(name) || actorKind(name) !== null ? name : null;
+  if (LOOKS_LIKE_A_FILE.test(name) || LOOKS_LIKE_A_TODO.test(name)) return null;
+  if (isTeam(name)) return name.toLowerCase();
+  return actorKind(name) !== null ? name : null;
 }
 
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
@@ -79,9 +93,14 @@ export function readRecipients(nd: string): { known: KnownRecipient[] | null; er
   const bad: string[] = [];
   for (const [key, about] of entries) {
     const name = parseRecipient(key);
-    if (name === null) bad.push(`${JSON.stringify(key)} is not a name (${RECIPIENT_FORMAT})`);
-    else if (about !== null && (typeof about !== 'string' || about.length > MAX_ABOUT_CHARS)) bad.push(`what belongs to ${JSON.stringify(key)} must be a short text`);
-    else if (!known.some((k) => same(k.name, name))) known.push({ name, about: typeof about === 'string' && about.trim() !== '' ? about.trim() : null });
+    if (name === null) {
+      bad.push(`${JSON.stringify(key)} is not a name (${RECIPIENT_FORMAT})`);
+      continue;
+    }
+    // A description novadev cannot read is named, but the recipient itself stays one: its todos must not
+    // lose their recipient over a typo in a text.
+    if (about !== null && typeof about !== 'string') bad.push(`what belongs to ${JSON.stringify(key)} must be a text`);
+    if (!known.some((k) => same(k.name, name))) known.push({ name, about: typeof about === 'string' && about.trim() !== '' ? about.trim() : null });
   }
   return { known, error: bad.length > 0 ? bad.join('; ') : null };
 }
@@ -99,7 +118,8 @@ export function isKnownRecipient(nd: string, name: string): boolean {
 
 /** How a message lists the project's recipients: `hq (the tools, the machines), paperclip`. */
 export function recipientsText(known: readonly KnownRecipient[]): string {
-  return known.length === 0 ? 'none — the list is empty' : known.map((k) => (k.about !== null ? `${k.name} (${k.about})` : k.name)).join(', ');
+  const shown = (about: string) => (about.length > SHOWN_ABOUT_CHARS ? `${about.slice(0, SHOWN_ABOUT_CHARS).trimEnd()}…` : about);
+  return known.length === 0 ? 'none — the list is empty' : known.map((k) => (k.about !== null ? `${k.name} (${shown(k.about)})` : k.name)).join(', ');
 }
 
 /**
@@ -144,12 +164,13 @@ export function parseForFilter(value: string): string[] {
 }
 
 /**
- * Is a todo with this recipient one the filter asks for? `anyone` asks for the todos that have none; a
- * name asks for the todos that one may take because they are addressed to it — or to the team it is an
- * actor of.
+ * Is a todo with this recipient one the filter asks for? `anyone` asks for the todos that have none. A
+ * name asks for the todos addressed to it, to the team it is an actor of (what that actor may take), or —
+ * when the name is a team's — to one of the team's actors (what a lead who hands the team's work out has
+ * to see).
  */
 export function matchesFor(recipient: string | null, filter: readonly string[]): boolean {
-  return filter.some((who) => (who === ANYONE ? recipient === null : recipient !== null && answersTo(who, recipient)));
+  return filter.some((who) => (who === ANYONE ? recipient === null : recipient !== null && (answersTo(who, recipient) || answersTo(recipient, who))));
 }
 
 /** A `"recipients"` novadev cannot read is a problem `sync` and `doctor` name. */

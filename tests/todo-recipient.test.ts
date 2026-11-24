@@ -8,7 +8,7 @@ import { statusData } from '../src/status.ts';
 import { listTodos, showTodo } from '../src/todo.ts';
 import { readTodoMeta } from '../src/todo-meta.ts';
 import { addressedTodos } from '../src/todo-recipient.ts';
-import { completed, exists, project, read, readJson, run, setManifest, todo, write } from './helpers.ts';
+import { commitAll, completed, exists, git, project, read, readJson, run, setManifest, todo, write } from './helpers.ts';
 
 const BRIEF = (title: string) => `# prompt — x\n\n**Source:** chat-initiated — 2026-10-01\n\n## ${title}\nThe words.\n`;
 const HQ = 'The headquarters session: the tools and the machines.';
@@ -60,7 +60,10 @@ describe('the names', () => {
     expect(matchesFor('hq', ['hq'])).toBe(true);
     expect(matchesFor('paperclip', ['paperclip/dev'])).toBe(true);
     expect(matchesFor('paperclip/tester', ['paperclip/dev'])).toBe(false);
-    expect(matchesFor('paperclip/tester', ['paperclip'])).toBe(false);
+    // a team's name asks for its actors' todos too: what a lead who hands the team's work out has to see
+    expect(matchesFor('paperclip/tester', ['paperclip'])).toBe(true);
+    expect(matchesFor('paperclipx/tester', ['paperclip'])).toBe(false);
+    expect(matchesFor('hq', ['paperclip', 'anyone'])).toBe(false);
     expect(matchesFor(null, ['hq'])).toBe(false);
   });
 });
@@ -153,6 +156,10 @@ describe('the lists', () => {
     expect(json(run(root, 'todo', 'list', '--for', 'paperclip/dev,anyone', '--json')).todos.map((t: any) => t.ref)).toEqual(['2026-10-01_1/01-dark-mode', '2026-10-02_1/01-login']);
     expect(json(run(root, 'todo', 'list', '--for', 'hq,anyone', '--state', 'open', '--json')).todos).toHaveLength(3);
     expect(run(root, 'todo', 'list', '--for', 'paperclip').stdout).toBe('todos — none open for paperclip\n');
+    // a lead's view: the team's todos, each of its actors', and the ones with no recipient — never another recipient's
+    expect(json(run(root, 'todo', 'recipient', 'dark-mode', 'paperclip/tester', '--by', 'human:filipp')).changed).toBe(true);
+    expect(json(run(root, 'todo', 'list', '--for', 'paperclip,anyone', '--json')).todos.map((t: any) => [t.todo, t.recipient])).toEqual([['01-dark-mode', 'paperclip/tester'], ['01-login', null]]);
+    expect(run(root, 'todo', 'list', '--for', 'paperclip/dev').stdout).toBe('todos — none open for paperclip/dev\n');
     const bad = run(root, 'todo', 'list', '--for', 'two words');
     expect(bad.code).toBe(1);
     expect(json(bad).error).toContain('--for "two words": not a recipient');
@@ -306,9 +313,10 @@ describe('sync and doctor', () => {
 
   test('a "recipients" setting novadev cannot read is a problem, and until it is fixed that entry names nobody', () => {
     const root = three({ recipients: { hq: HQ, 'two words': 'x', paperclip: 7 } });
+    // … but a recipient whose description cannot be read is still a recipient: its todos keep it
     expect(readRecipients(`${root}/.novadev`)).toEqual({
-      known: [{ name: 'hq', about: HQ }],
-      error: '"two words" is not a name (a team\'s name (like `hq`: every actor `hq/…`), or one actor (`paperclip/tester` for an agent, `human:<id>` for a person)); what belongs to "paperclip" must be a short text',
+      known: [{ name: 'hq', about: HQ }, { name: 'paperclip', about: null }],
+      error: '"two words" is not a name (a team\'s name (like `hq`: every actor `hq/…`), or one actor (`paperclip/tester` for an agent, `human:<id>` for a person)); what belongs to "paperclip" must be a text',
     });
     const sync = run(root, 'sync');
     expect(sync.code).toBe(1);
@@ -325,5 +333,150 @@ describe('sync and doctor', () => {
     const sync = run(root, 'sync');
     expect(sync.code).toBe(1);
     expect(sync.stdout).toContain('✗ todos/2026-10-01_1/02-dev-env/todo.json: "recipient" must be a team\'s name');
+  });
+});
+
+// The independent review of batch 2026-11-24_1 (2026-11-24): eleven findings, one test each, kept as written.
+describe('review of 2026-11-24', () => {
+  test('1 — a recipient\'s own todo in work here keeps its sync round open: it is a NEXT ACTION, not only an addressed line', () => {
+    const root = three();
+    write(root, '.novadev/todos/2026-10-01_1/01-dark-mode/ai_completed.md', completed('01-dark-mode'));
+    write(root, '.novadev/todos/2026-10-02_1/01-login/ai_completed.md', completed('01-login'));
+    expect(json(run(root, 'work', 'start', '2026-10-01_1/02', '--agent', 'hq/claude-opus-5-5')).taken).toBe(true);
+    write(root, '.novadev/todos/2026-10-01_1/02-dev-env/ai_progress.md', '# ai_progress — 02-dev-env\n\nHalf done.\n');
+    const sync = run(root, 'sync').stdout;
+    expect(sync).toContain('  → 2026-10-01_1/02-dev-env (for hq, in work here) is mid-flight — finish it or update ai_progress.md\n');
+    expect(sync).not.toContain('ADDRESSED TO A RECIPIENT');
+    expect(sync).not.toContain('sync: clean');
+    // released, it is its recipient's again and no longer this session's action
+    expect(json(run(root, 'work', 'stop', '2026-10-01_1/02')).state).toBe('released');
+    const after = run(root, 'sync').stdout;
+    expect(after).toContain('  ✉ 2026-10-01_1/02-dev-env — for hq: mid-flight\n');
+    expect(after).toContain('sync: clean — everything left is addressed to its recipient.');
+  });
+
+  test('2 — an argument in the wrong place never becomes a recipient: a payload file, a todo\'s ref', () => {
+    const root = three();
+    write(root, 'why.json', JSON.stringify({ by: 'hq/claude-opus-5-5', reason: 'x' }));
+    write(root, 'payloads/why.json', JSON.stringify({ by: 'hq/claude-opus-5-5' }));
+    expect(json(run(root, 'todo', 'recipient', 'dark-mode', 'why.json', '--by', 'hq/claude-opus-5-5')).error).toBe(
+      '"why.json" is a file, not a recipient: name the recipient before the payload (`novadev todo recipient <ref> <recipient> why.json`), or pass --clear to make the todo anyone\'s.',
+    );
+    expect(json(run(root, 'todo', 'recipient', 'dark-mode', 'why.json')).error).toContain('"why.json" is a file, not a recipient');
+    expect(json(run(root, 'todo', 'recipient', 'dark-mode', 'payloads/why.json', '--by', 'hq/claude-opus-5-5')).error).toContain('is a file, not a recipient');
+    expect(json(run(root, 'todo', 'recipient', 'dark-mode', 'missing.json', '--by', 'hq/claude-opus-5-5')).error).toContain('"missing.json" is not a recipient');
+    // the arguments swapped: `hq` is a word only one todo's title has, the todo's ref is not a name
+    expect(json(run(root, 'todo', 'recipient', 'second', '2026-10-01_1/01', '--by', 'paperclip/dev')).error).toContain('"2026-10-01_1/01" is not a recipient');
+    expect(parseRecipient('2026-10-01_1')).toBeNull();
+    expect(exists(root, '.novadev/todos/2026-10-01_1/01-dark-mode/todo.json')).toBe(false);
+    expect(readJson(root, '.novadev/todos/2026-10-01_1/02-dev-env/todo.json').recipient).toBe('hq');
+    // the payload's own `by` is read when the recipient is named
+    expect(json(run(root, 'todo', 'recipient', 'dark-mode', 'hq', 'why.json'))).toMatchObject({ changed: true, by: 'hq/claude-opus-5-5' });
+  });
+
+  test('3 — a lock at the batch root that covers another\'s todo: the refusal says the way on that works', () => {
+    const root = three();
+    expect(json(run(root, 'todo', 'recipient', 'dev-env', '--clear', '--by', 'human:filipp')).changed).toBe(true);
+    expect(json(run(root, 'work', 'start', '2026-10-01_1', '--agent', 'paperclip/dev')).taken).toBe(true);
+    expect(json(run(root, 'todo', 'recipient', 'dev-env', 'hq', '--by', 'human:filipp')).changed).toBe(true);
+    const resume = run(root, 'work', 'start', '2026-10-01_1', '--agent', 'paperclip/dev');
+    expect(resume.code).toBe(1);
+    expect(json(resume).error).toContain(
+      'The lock this worktree holds at the root of 2026-10-01_1 covers it and cannot be narrowed: write down where you are (`novadev work waypoint 2026-10-01_1 <payload.json>`), release that lock (`novadev work stop 2026-10-01_1`), then start your own todos by name (`novadev work start 2026-10-01_1/<todo>`).',
+    );
+    expect(json(resume).error).not.toContain('--todo <nn>');
+    expect(json(run(root, 'work', 'stop', '2026-10-01_1')).state).toBe('released');
+    expect(json(run(root, 'work', 'start', '2026-10-01_1/01', '--agent', 'paperclip/dev')).taken).toBe(true);
+  });
+
+  test('4 — a recipient in todo.json that is no name can be replaced or cleared, on the record, and no other writer drops it', () => {
+    const root = three();
+    const path = '.novadev/todos/2026-10-01_1/02-dev-env/todo.json';
+    write(root, path, JSON.stringify({ recipient: 'the headquarters', history: [] }));
+    expect(json(run(root, 'todo', 'priority', 'dev-env', 'high', '--by', 'human:filipp')).changed).toBe(true);
+    expect(json(run(root, 'todo', 'after', 'dev-env', '2026-10-01_1/01', '--by', 'human:filipp')).changed).toBe(true);
+    expect(readJson(root, path)).toMatchObject({ priority: 'high', recipient: 'the headquarters' });
+    expect(run(root, 'sync').stdout).toContain('✗ todos/2026-10-01_1/02-dev-env/todo.json: "recipient" must be a team\'s name');
+    expect(json(run(root, 'todo', 'recipient', 'dev-env', '--clear', '--by', 'human:filipp'))).toMatchObject({ recipient: null, from: 'the headquarters', changed: true });
+    const cleared = readJson(root, path);
+    expect(cleared.recipient).toBeUndefined();
+    expect(cleared.history.at(-1)).toMatchObject({ change: 'recipient', from: 'the headquarters', to: null, by: 'human:filipp' });
+    expect(run(root, 'sync').stdout).not.toContain('"recipient" must be');
+    write(root, path, JSON.stringify({ recipient: 'the headquarters', history: [] }));
+    expect(json(run(root, 'todo', 'recipient', 'dev-env', 'hq', '--by', 'human:filipp'))).toMatchObject({ recipient: 'hq', from: 'the headquarters', changed: true });
+  });
+
+  test('5 — a todo.json that cannot be read and names a recipient: nobody starts the todo, and sync does not say "do the work"', () => {
+    const root = three();
+    write(root, '.novadev/todos/2026-10-01_1/02-dev-env/todo.json', '<<<<<<< HEAD\n{ "recipient": "hq" }\n=======\n{ "recipient": "paperclip/tester" }\n>>>>>>> other\n');
+    const start = run(root, 'work', 'start', '2026-10-01_1/02', '--agent', 'paperclip/dev');
+    expect(start.code).toBe(1);
+    expect(json(start).error).toBe(
+      'Not started — todos/2026-10-01_1/02-dev-env/todo.json cannot be read (it is not valid JSON (a merge conflict?)), and it names a recipient: whose the todo is cannot be told. Fix the file first (after a merge conflict: keep one side), then start again.',
+    );
+    const sync = run(root, 'sync');
+    expect(sync.code).toBe(1);
+    expect(sync.stdout).toContain('  → 2026-10-01_1/02-dev-env: its todo.json cannot be read and names a recipient — whose the todo is cannot be told. Fix the file first (PROBLEMS, above); do not start it\n');
+    expect(sync.stdout).not.toContain('02-dev-env has no record yet');
+    // a broken file that names no recipient starts as it always did
+    write(root, '.novadev/todos/2026-10-01_1/01-dark-mode/todo.json', '<<<<<<< HEAD\n{ "priority": "urgent" }\n');
+    expect(json(run(root, 'work', 'start', '2026-10-01_1/01', '--agent', 'paperclip/dev')).taken).toBe(true);
+  });
+
+  test('6 — a long description in "recipients" is no problem, in the main checkout or a worktree; messages show its start', () => {
+    const long = `${'The headquarters session keeps the tools. '.repeat(12)}End.`;
+    const root = three({ recipients: { hq: long, paperclip: 'The company.' } });
+    git(root, 'init', '-q', '-b', 'main');
+    commitAll(root);
+    expect(readRecipients(`${root}/.novadev`)).toEqual({ known: [{ name: 'hq', about: long }, { name: 'paperclip', about: 'The company.' }], error: null });
+    expect(run(root, 'sync', '--check').stdout).not.toContain('"recipients"');
+    expect(json(run(root, 'file-todo', 'plan')).recipients.hq).toBe(long);
+    const refused = json(run(root, 'todo', 'recipient', 'dark-mode', 'headquarters', '--by', 'human:filipp')).error as string;
+    expect(refused).toContain(`hq (${long.slice(0, 160).trimEnd()}…), paperclip (The company.)`);
+    expect(json(run(root, 'todo', 'recipient', 'dark-mode', 'hq', '--by', 'human:filipp')).changed).toBe(true);
+  });
+
+  test('7 — one count per recipient, however its name is capitalised; a team\'s name is kept in lower case', () => {
+    const root = three();
+    expect(json(run(root, 'todo', 'recipient', 'dark-mode', 'HQ', '--by', 'human:filipp')).recipient).toBe('hq');
+    expect(json(run(root, 'todo', 'recipient', '2026-10-02_1/01', 'Paperclip/Tester', '--by', 'human:filipp')).recipient).toBe('Paperclip/Tester');
+    todo(root, '2026-10-03_1/01-more', { 'prompt.md': BRIEF('More'), 'todo.json': JSON.stringify({ recipient: 'paperclip/tester' }) });
+    expect((statusData(`${root}/.novadev`) as any).addressed).toEqual({ hq: 2, 'Paperclip/Tester': 2 });
+    expect(readTodoMeta(`${root}/.novadev/todos/2026-10-01_1/02-dev-env`).recipient).toBe('hq');
+  });
+
+  test('8 — `human` and `process` open an actor and are no team: refused as a recipient', () => {
+    const root = three();
+    expect(parseRecipient('human')).toBeNull();
+    expect(parseRecipient('Process')).toBeNull();
+    expect(json(run(root, 'todo', 'recipient', 'dark-mode', 'human', '--by', 'human:filipp')).error).toContain('"human" is not a recipient — write a team\'s name');
+    expect(json(run(root, 'todo', 'recipient', 'dark-mode', 'human:filipp', '--by', 'human:filipp')).recipient).toBe('human:filipp');
+  });
+
+  test('9 — a recipient beside `parts` addresses every part that names none; a word that is no name is refused before anything is written', () => {
+    const root = project();
+    const filed = json(run(root, 'file-todo', 'file', payload(root, 'f.json', { by: 'paperclip/minifil', recipient: 'hq', parts: [{ slug: 'one', title: 'One', request: 'do one' }, { slug: 'two', title: 'Two', request: 'do two', recipient: 'paperclip/tester' }] }))).filed;
+    expect(filed.map((f: any) => f.recipient)).toEqual(['hq', 'paperclip/tester']);
+    const bad = run(root, 'file-todo', 'file', payload(root, 'g.json', { recipient: 'the headquarters', parts: [{ slug: 'three', title: 'Three', request: 'do three' }] }));
+    expect(bad.code).toBe(1);
+    expect(json(bad).error).toContain('The payload\'s \'recipient\' must be a team\'s name');
+    expect(json(run(root, 'todo', 'list', '--json')).todos).toHaveLength(2);
+  });
+
+  test('10 — `--for=hq` is `--for hq`: an option written with "=" is never dropped', () => {
+    const root = three();
+    expect(run(root, 'todo', 'list', '--for=hq').stdout).toBe('2026-10-01_1/02-dev-env  (open, for hq)  The dev tool forgets the second login\n');
+    expect(run(root, 'todo', 'list', '--for=anyone', '--state=open').stdout).toBe('2026-10-01_1/01-dark-mode  (open)  Dark mode\n2026-10-02_1/01-login  (open)  Magic link\n');
+    expect(json(run(root, 'todo', 'recipient', 'dark-mode', 'hq', '--by=human:filipp')).by).toBe('human:filipp');
+    expect(json(run(root, 'todo', 'list', '--for=')).error).toContain('--for needs a value.');
+  });
+
+  test('11 — sync does not tell anybody to do another\'s todo first: a todo that waits for an addressed one waits for its recipient', () => {
+    const root = three();
+    expect(json(run(root, 'todo', 'after', 'dark-mode', '2026-10-01_1/02', '--by', 'human:filipp')).changed).toBe(true);
+    expect(run(root, 'sync').stdout).toContain('  → 2026-10-01_1/01-dark-mode has no record yet — it waits for 02-dev-env (open, for hq): its recipient does that first\n');
+    // … and one that waits for an unaddressed todo reads as before
+    expect(json(run(root, 'todo', 'after', 'dark-mode', '2026-10-02_1/01', '--clear', '--by', 'human:filipp')).changed).toBe(true);
+    expect(run(root, 'sync').stdout).toContain('  → 2026-10-01_1/01-dark-mode has no record yet — it waits for 2026-10-02_1/01-login (open): do that first\n');
   });
 });
