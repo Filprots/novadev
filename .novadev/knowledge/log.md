@@ -13,6 +13,8 @@
 * **Verification**: [Conventions](wiki/conventions.md) — Re-checked against src/file-todo.ts, src/lib.ts and tests/docs.test.ts after batch 2026-11-24_1: payload files and JSON answers, refusals before any write, opt-in settings and the docs tests are as the page says (`todo recipient` follows `todo priority`: the name as an argument, who and why in a payload). (claude-code/claude-fable-5-2 · 2026-11-24_1/01-todo-recipient)
 * **Update**: [Todo recipients](features/FEAT-0024-todo-recipients/feature.md) — The independent review before the merge: eleven edge cases fixed (the recipient's own todo in work stays a NEXT ACTION, `--for <team>` includes its actors, an unreadable recipient is never dropped silently, and eight more — see Progress). (claude-code/claude-fable-5-2 · 2026-11-24_1/01-todo-recipient)
 * **Update**: [Workflows](wiki/workflows.md) — The suite is 762 tests in 41 files after the review fixes. (claude-code/claude-fable-5-2 · 2026-11-24_1/01-todo-recipient)
+* **Update**: [Sub-repos: commits in nested repositories](features/FEAT-0016-sub-repos/feature.md) — Progress: "commitsSince" and the empty "subrepos": [] for a project that moved repositories. (claude-code/claude-fable-5-2 · 2026-11-24_2/01-records-from-before-a-repository-move)
+* **Update**: [Workflows](wiki/workflows.md) — The suite is 767 tests in 41 files. (claude-code/claude-fable-5-2 · 2026-11-24_2/01-records-from-before-a-repository-move)
 
 ## 2026-11-12
 

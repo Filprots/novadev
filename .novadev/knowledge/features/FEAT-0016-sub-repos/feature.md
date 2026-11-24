@@ -15,8 +15,8 @@ superseded-by: []
 conflicts-with: []
 sources:
   - resource: todo:2026-11-10_1/02-multi-repo-commits
-generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T16:13:07+01:00 }
-stale_after: 2027-11-10T16:13:07+01:00
+generated: { by: claude-code/claude-fable-5-2, at: 2026-11-24T15:00:49+01:00 }
+stale_after: 2027-11-24T15:00:49+01:00
 ---
 
 # FEAT-0016 — Sub-repos: commits in nested repositories
@@ -47,6 +47,8 @@ Git is asked of a sub-repo without the variables a hook exports, so the sub-repo
 
 - 2026-11-10 — built: `2026-11-10_1/02-multi-repo-commits`
 - 2026-11-10 — fixes from the independent review of batch 2026-11-10_1, before the 0.16.0 release (`2026-11-10_1/07-worktree-command`)
+
+- 2026-11-24 — a project that moved repositories: `"commitsSince": "<day>"` (older records are not asked for their commits or Repos names) and an empty `"subrepos": []` (no sub-repos: `**Repos:**` is free text) (`2026-11-24_2/01-records-from-before-a-repository-move`)
 
 ---
 

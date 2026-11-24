@@ -13,6 +13,18 @@
 // A bare hash is a commit of the project's own repository, as always. `**Repos:**` names the
 // sub-repos the todo changed; `novadev links` checks both lines against the setting and asks each
 // commit of the repository it names.
+//
+// Two things a project may say about its own history, both opt-in:
+//
+//   "subrepos": []                  an EMPTY list says "this project has no sub-repos" (one repository,
+//                                   its parts are plain folders): a record's `**Repos:**` line is then
+//                                   free text — which folders the todo touched — and is not judged. A
+//                                   project that never set "subrepos" is still told when a record names one.
+//   "commitsSince": "2026-11-18"    the day from which the records' commits are in THIS repository. A
+//                                   project that moved (several repositories into one, a history that
+//                                   was not carried over) has older records whose commits live in the
+//                                   old place: a record dated before that day is not asked for its
+//                                   commits, nor for its `**Repos:**` names. Absent: every record is.
 import { join } from 'node:path';
 import { commitPaths, isRepositoryTop } from './git.ts';
 import { type Parsed, byCodePoint, comparablePath, listDirs, novadevDir, readManifest, refuse } from './lib.ts';
@@ -39,7 +51,21 @@ export function parseSubreposSetting(value: unknown): Parsed<string[]> {
   return { ok: true, value: out };
 }
 
-export type SubrepoList = { repos: Subrepo[]; problems: string[]; notes: string[] };
+export type SubrepoList = { repos: Subrepo[]; problems: string[]; notes: string[]; /** `"subrepos": []`: the project says it has none. */ declaredNone: boolean };
+
+export const COMMITS_SINCE_SETTING = 'commitsSince';
+
+/** "commitsSince" in novadev.json: a day (YYYY-MM-DD), or null / absent for every record. */
+export function parseCommitsSince(raw: unknown): Parsed<string | null> {
+  if (raw === undefined || raw === null) return { ok: true, value: null };
+  if (typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const day = new Date(`${raw}T00:00:00Z`);
+    if (!Number.isNaN(day.getTime()) && day.toISOString().slice(0, 10) === raw) return { ok: true, value: raw };
+  }
+  return refuse(
+    `"${COMMITS_SINCE_SETTING}" must be a day like "2026-11-18" — the day from which the records' commits are in this repository; a record dated before it is not asked for its commits — or null to ask every record`,
+  );
+}
 
 const cache = new Map<string, SubrepoList>();
 
@@ -47,8 +73,9 @@ const cache = new Map<string, SubrepoList>();
 export function listSubrepos(root: string): SubrepoList {
   const known = cache.get(root);
   if (known) return known;
-  const out: SubrepoList = { repos: [], problems: [], notes: [] };
-  const setting = parseSubreposSetting(readManifest(novadevDir(root))?.subrepos);
+  const raw = readManifest(novadevDir(root))?.subrepos;
+  const out: SubrepoList = { repos: [], problems: [], notes: [], declaredNone: Array.isArray(raw) && raw.length === 0 };
+  const setting = parseSubreposSetting(raw);
   if (!setting.ok) {
     out.problems.push(`novadev.json: ${setting.error}`);
   } else {

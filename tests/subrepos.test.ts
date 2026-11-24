@@ -110,3 +110,79 @@ describe('placement across repositories', () => {
     expect(run(root, 'sync').stdout).not.toContain('changed the hub');
   });
 });
+
+// A project that moved repositories (todo 2026-11-24_2/01): IRRISketch became one repository on 2026-11-18. Its older
+// records name commits of the repositories it came from, and its records still say which folders a todo touched —
+// 1,455 of the 1,594 NEXT ACTIONS of its `novadev sync` were these two notes.
+describe('a project that moved repositories', () => {
+  /** One repository, no sub-repos; a record of before the move, one of after it, both naming a commit nobody has. */
+  function moved(manifest: Record<string, unknown>): { root: string; own: string } {
+    const root = project(manifest);
+    feature(root, 'FEAT-0001', 'layouting');
+    git(root, 'init', '-q', '-b', 'main');
+    commitAll(root, 'the first commit of the new repository');
+    const own = git(root, 'rev-parse', '--short', 'HEAD').stdout.trim();
+    const rec = (date: string, commits: string, repos: string) => `# ai_completed — x\n\n**Date:** ${date}\n**Feature:** FEAT-0001\n**Commits:** ${commits}\n**Repos:** ${repos}\n\n## What I did\nThe work.\n`;
+    todo(root, '2026-10-07_2/01-old', { 'ai_completed.md': rec('2026-10-07', '1234567, irrippr@abcdef0', 'irrippr, irrisketch_locales') });
+    todo(root, '2026-11-20_1/01-new', { 'ai_completed.md': rec('2026-11-20', `${own}, 7654321`, 'project (.paperclip/scripts), irris') });
+    // a record with no day of its own is its batch's day
+    todo(root, '2026-09-29_3/01-undated', { 'ai_completed.md': '# ai_completed — y\n\n**Feature:** FEAT-0001\n**Commits:** fedcba9\n\n## What I did\nThe work.\n' });
+    forgetSubrepos();
+    return { root, own };
+  }
+
+  test('without the settings every record is asked, as before', () => {
+    const { root } = moved({});
+    const out = run(root, 'sync').stdout;
+    for (const line of [
+      "commit 1234567 (2026-10-07_2/01-old) is not in this repository's history",
+      "commit fedcba9 (2026-09-29_3/01-undated) is not in this repository's history",
+      "commit 7654321 (2026-11-20_1/01-new) is not in this repository's history",
+      'commit irrippr@abcdef0 (2026-10-07_2/01-old) names the repository "irrippr", which is not a sub-repo',
+      '2026-10-07_2/01-old: **Repos:** names "irrippr", which is not a sub-repo',
+      '2026-11-20_1/01-new: **Repos:** names "project", which is not a sub-repo',
+    ]) expect(out).toContain(line);
+  });
+
+  test('"commitsSince": a record dated before that day is not asked for its commits or its Repos names; a later one still is', () => {
+    const { root } = moved({ commitsSince: '2026-11-18' });
+    const out = run(root, 'sync').stdout;
+    expect(out).not.toContain('01-old');
+    expect(out).not.toContain('01-undated');
+    expect(out).toContain("commit 7654321 (2026-11-20_1/01-new) is not in this repository's history");
+    expect(out).toContain('2026-11-20_1/01-new: **Repos:** names "project", which is not a sub-repo');
+    // the old record's commits stay in the feature's history as they were written
+    const work = read(root, '.novadev/knowledge/features/FEAT-0001-layouting/work.md');
+    expect(work).toContain('- `1234567` — 2026-10-07_2/01-old\n- `irrippr@abcdef0` — 2026-10-07_2/01-old');
+    // the day itself is "since": a record of that day is asked
+    setManifest(root, { commitsSince: '2026-11-20' });
+    expect(run(root, 'sync').stdout).toContain("commit 7654321 (2026-11-20_1/01-new) is not in this repository's history");
+    setManifest(root, { commitsSince: '2026-11-21' });
+    expect(run(root, 'sync').stdout).not.toContain('7654321');
+  });
+
+  test('"subrepos": [] says the project has none: a Repos line is free text; a commit that is missing is still named', () => {
+    const { root } = moved({ subrepos: [], commitsSince: '2026-11-18' });
+    forgetSubrepos();
+    expect(listSubrepos(root).declaredNone).toBe(true);
+    const out = run(root, 'sync').stdout;
+    expect(out).not.toContain('**Repos:** names');
+    expect(out).toContain("commit 7654321 (2026-11-20_1/01-new) is not in this repository's history");
+    expect(out.match(/is not in this repository's history|not a sub-repo/g)).toHaveLength(1);
+    // … and a project that never set "subrepos" (or set it to null) has not said so
+    setManifest(root, { subrepos: null });
+    forgetSubrepos();
+    expect(listSubrepos(root).declaredNone).toBe(false);
+    expect(run(root, 'sync').stdout).toContain('2026-11-20_1/01-new: **Repos:** names "project", which is not a sub-repo');
+  });
+
+  test('a "commitsSince" that is no day is a problem, and every record is asked until it is fixed', () => {
+    const { root } = moved({ commitsSince: 'the switch' });
+    const out = run(root, 'sync');
+    expect(out.code).toBe(1);
+    expect(out.stdout).toContain('✗ novadev.json: "commitsSince" must be a day like "2026-11-18" — the day from which the records\' commits are in this repository; a record dated before it is not asked for its commits — or null to ask every record');
+    expect(out.stdout).toContain("commit 1234567 (2026-10-07_2/01-old) is not in this repository's history");
+    setManifest(root, { commitsSince: '2026-02-30' });
+    expect(run(root, 'sync').code).toBe(1);
+  });
+});
