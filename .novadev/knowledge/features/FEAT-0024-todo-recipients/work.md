@@ -20,6 +20,7 @@ The work that built [FEAT-0024 — Todo recipients](feature.md).
 ## Commits
 
 - `c107377` — 2026-11-24_1/01-todo-recipient
+- `0e88111` — 2026-11-24_1/01-todo-recipient
 
 _Linked by `**Feature:** FEAT-0024` in each todo's record._
 <!-- novadev:work:end -->

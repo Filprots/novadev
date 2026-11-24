@@ -26,6 +26,7 @@ The work that built [FEAT-0015 — novadev todo: one todo at a time, away from t
 - `fb0170f` — 2026-11-10_2/15-history-todo-command
 - `772a96c` — 2026-11-10_2/15-history-todo-command
 - `c107377` — 2026-11-24_1/01-todo-recipient
+- `0e88111` — 2026-11-24_1/01-todo-recipient
 
 _Linked by `**Feature:** FEAT-0015` in each todo's record._
 <!-- novadev:work:end -->

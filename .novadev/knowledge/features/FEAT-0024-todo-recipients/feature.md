@@ -13,8 +13,8 @@ depends-on: [FEAT-0020, FEAT-0015, FEAT-0009, FEAT-0014]
 supersedes: []
 superseded-by: []
 conflicts-with: []
-generated: { by: claude-code/claude-fable-5-2, at: 2026-11-24T13:06:51+01:00 }
-stale_after: 2027-11-24T13:06:51+01:00
+generated: { by: claude-code/claude-fable-5-2, at: 2026-11-24T13:28:32+01:00 }
+stale_after: 2027-11-24T13:28:32+01:00
 ---
 
 # FEAT-0024 — Todo recipients
@@ -33,13 +33,16 @@ One team leaves work, a note or a remark for another in the same todo queue, and
 - **The lists**: `todo list` and `status` print `for <recipient>` on an addressed todo that is not finished; `todo list
   --json`, `status --json` and `todo show` carry `recipient` on every todo (`null` = anyone); `status --json` counts in
   `addressed` the addressed todos still to be worked, per recipient. `novadev todo list --for <who>[,<who>…]` keeps the
-  todos `<who>` may take because they are addressed to it or its team; `anyone` stands for the ones with no recipient.
+  todos addressed to `<who>`, to the team `<who>` is an actor of, or — when `<who>` is a team — to one of its actors (a
+  lead's view); `anyone` stands for the ones with no recipient.
 - **`novadev work start` refuses anybody but the recipient** and says whose the todo is, who addressed it and when. Who
   starts is the `--agent` actor; a start without one is refused on an addressed todo; a person (`human:<id>`) is never
   refused. A start covering several todos judges each one still to be worked, so a whole-batch start is refused while
   the batch holds somebody else's open todo.
 - **sync** lists addressed todos still to be worked under ADDRESSED TO A RECIPIENT, not in NEXT ACTIONS; a tree whose only
-  open work is addressed comes back clean ("everything left is addressed to its recipient").
+  open work is addressed comes back clean ("everything left is addressed to its recipient"). One that a lock in this
+  worktree holds stays a NEXT ACTION (`(for hq, in work here)`): its recipient's round is not over while it is open. A
+  todo that waits for an addressed one is told "its recipient does that first".
 - **`"recipients"` in novadev.json** (optional, read from the main checkout): the names that can be addressed, each with
   what belongs to it (`{ "hq": "…" }`, or a list of names). With it, a filing or re-addressing to a name outside the list
   (and not an actor of a listed team) is refused with the list, the project's spelling is stored, and `file-todo plan`
@@ -63,6 +66,14 @@ the lock says who took an addressed todo, the history says who addressed it.
 ## Progress
 
 - 2026-11-24 — built (`2026-11-24_1/01-todo-recipient`), on the board's word in the IRRISketch headquarters session
+- 2026-11-24 — the independent review before the merge: nothing important, eleven edge cases, all fixed with one test
+  each (`describe('review of 2026-11-24')`): the recipient's own in-flight todo keeps its sync round open; a payload file
+  or a todo's ref is never taken for a recipient; the refusal on a batch-root lock names the way on that works; an
+  unreadable `recipient` value is kept by every writer and replaced only by `todo recipient`; a `todo.json` that cannot
+  be read and names a recipient blocks the start; a long description in `"recipients"` is no problem and a bad one does
+  not drop the name; team names are lower case and `addressed` counts once per recipient; `human` and `process` are no
+  teams; a `recipient` beside `parts` addresses every part; `--for=hq` works; sync never says "do that first" about
+  another's todo
 
 ## Open questions
 
