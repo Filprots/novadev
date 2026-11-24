@@ -1,7 +1,7 @@
 ---
 type: Work History
 title: FEAT-0010 — work history
-description: Every todo, record and commit that built FEAT-0010 (Recording a person's test results).
+description: Every todo, record and commit that built FEAT-0010 (Recording test results — the tester's, and a person's).
 generated: { by: process:novadev-sync }
 ---
 
@@ -11,13 +11,14 @@ generated: { by: process:novadev-sync }
      Do not hand-edit inside the markers; anything outside them is preserved. -->
 
 <!-- novadev:work:begin -->
-The work that built [FEAT-0010 — Recording a person's test results](feature.md).
+The work that built [FEAT-0010 — Recording test results — the tester's, and a person's](feature.md).
 
 ## Todos
 
 - `2026-11-10_2/10-history-test-result-recording` — completed · 2026-11-10 · archived
 - `2026-11-12_1/02-totest-skip-scenarios-and-close-round` — completed · 2026-11-12
 - `2026-11-24_1/02-scenario-numbers-above-99` — completed · 2026-11-24
+- `2026-11-24_3/01-tester-agent-testing` — completed · 2026-11-24
 
 ## Commits
 

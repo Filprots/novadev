@@ -1,7 +1,7 @@
 ---
 type: Test History
 title: FEAT-0010 — test history
-description: "The human test rounds of FEAT-0010 (Recording a person's test results): the open one, and every completed round with its verdict."
+description: "The human test rounds of FEAT-0010 (Recording test results — the tester's, and a person's): the open one, and every completed round with its verdict."
 generated: { by: process:novadev-sync }
 ---
 
@@ -11,7 +11,7 @@ generated: { by: process:novadev-sync }
      Do not hand-edit inside the markers; anything outside them is preserved. -->
 
 <!-- novadev:tests:begin -->
-The human testing of [FEAT-0010 — Recording a person's test results](feature.md).
+The human testing of [FEAT-0010 — Recording test results — the tester's, and a person's](feature.md).
 
 ## Open round
 

@@ -16,9 +16,12 @@ exists, a closed `ai_needstest.md`) are **bookkeeping, and recoverable from git*
 is why they are safe to do without asking. Deleting anything OUTSIDE `.novadev/`, or
 anything untracked, is NOT covered by this playbook: ask first.
 
-**The division of labour is the whole point.** The human writes todo briefs and walks
-the tests only a person can walk. YOU do everything else — the work, the records, the
-feature registry, the wiki, the memories, the archiving, the checks. They should never
+**The division of labour is the whole point.** The human writes todo briefs. YOU do
+everything else — the work, the records, the feature registry, the wiki, the memories, the
+archiving, the checks. **Testing is an agent's job too:** what your own tests cannot show
+goes to a TESTER — an agent that did not build the work (`/novadev-test`) — which builds the
+tools it needs, runs the plan and closes the round. The human is asked only for what the
+tester truly cannot run, and only the smallest part of it. They should never
 have to remember a **novadev** command or an archive step. If you find yourself about to
 write "you should now run `novadev …`" or "don't forget to file the record", stop: that
 bookkeeping is your job.
@@ -53,30 +56,32 @@ This is the playbook for the work itself. Everything below is one loop.
   archive/     finished work by year: archive/<year>/todos/ and archive/<year>/totest/
   postponed/   deferred work with an explicit wake-up trigger
   sparks/      raw unshaped ideas — not yet tasks
-  totest/      the ACTIVE queue of tests waiting on a HUMAN (archived once reviewed)
+  totest/      the ACTIVE queue of test rounds waiting on a TESTER agent (archived once reviewed)
   metrics/     latest.json — the project's own numbers, written by `novadev sync` (if set)
-  skills/      this playbook and its three companions (managed by `novadev deploy`)
+  skills/      this playbook and its five companions (managed by `novadev deploy`)
 ```
 
 `knowledge/` holds what is TRUE about the project; everything else is the WORK — the
 history the knowledge is drawn from, which it cites by stable id.
 
-## The five playbooks
+## The six playbooks
 
-This one is the loop. Four companions sit beside it — three for the human's own entry
-points, one for stopping the loop where it is — and each is a slash command of the same
-name. Use them rather than re-deriving what they say:
+This one is the loop. Five companions sit beside it — the tester's, three for the human's
+own entry points, one for stopping the loop where it is — and each is a slash command of
+the same name. Use them rather than re-deriving what they say:
 
 | When | Playbook |
 |---|---|
 | doing the work — any todo, batch or chat request | **`/novadev-work`** — this file |
+| testing a round somebody ELSE built: build the tools, run it, review it, close it | `/novadev-test` |
 | they describe work they want done later ("file this", a bug from a phone) | `/novadev-file-a-todo` |
-| they want to test: "what should I test", walking one scenario with them | `/novadev-what-to-test` |
+| they want to test: "what should I test" — the scenarios the tester escalated to them | `/novadev-what-to-test` |
 | they report testing they already did ("scenario 3 broke, here is a shot") | `/novadev-test-review` |
 | they say "pause", "stop here", "continue tomorrow" — or the session must end with work in flight | `/novadev-pause` |
 
-Phase 1 below routes to the first; phases 5 and 6 sit either side of the next two; phase
-10 says when the last one applies instead of a close-out.
+Phase 1 below routes to `/novadev-file-a-todo`; phase 5 hands a round to `/novadev-test`,
+and phase 6 says how the tester closes it — with the human's two playbooks only for what it
+escalated; phase 10 says when `/novadev-pause` applies instead of a close-out.
 
 ## Vocabulary
 
@@ -140,8 +145,13 @@ Phase 1 below routes to the first; phases 5 and 6 sit either side of the next tw
 - **Drifted** — a concept whose code moved on: one of its `repo:` sources has a commit
   dated after the day the concept was last written or verified. `novadev sync` lists them
   too.
-- **Test task / round** — `totest/<feature-task>/` while a round of human testing is
-  open; archived to `archive/<year>/totest/<task>/rev<N>-<date>/` once reviewed.
+- **Test task / round** — `totest/<feature-task>/` while a round of testing is open;
+  archived to `archive/<year>/totest/<task>/rev<N>-<date>/` once reviewed.
+- **Builder / tester** — the builder is the agent that did the work of a todo; the TESTER
+  is an agent that did not (a fresh session or a sub-agent, never the builder's own
+  context), running `/novadev-test`. **Escalation** — the tester's ask to a person for a
+  scenario it cannot run itself (`novadev test-result escalate`, `test-results/needs-human.md`):
+  the only testing that waits on the human.
 - **Reference** — from WORK (records, briefs, test plans) always a stable ID (`FEAT-0007`,
   `2026-08-29_1/01-fix-login`, a commit hash), **never a relative path**: archiving changes
   folder depth and would break paths. Inside the knowledge bundle, concepts link to each
@@ -197,9 +207,9 @@ read it as data, judge each item yourself, and work it in **at most three passes
    for a re-check (`stale_after`). An unverified, stale or drifted concept is a lead to
    check against the code before you build on it, not a fact.
 6. **Queue** — run `novadev sync` at the start of a session too: it tells you what is
-   half-finished, what the human has tested, what is waiting on them, and which concepts
-   are stale or drifted. When the project measures itself, it also shows how the debt and
-   the biggest hubs moved. **Its `in work` block comes first**: a todo (or a whole batch)
+   half-finished, which test rounds wait on a tester, what is waiting on the human, and
+   which concepts are stale or drifted. When the project measures itself, it also shows how
+   the debt and the biggest hubs moved. **Its `in work` block comes first**: a todo (or a whole batch)
    that is PAUSED (listed under WAITING ON THE HUMAN — they stopped it, they say when it
    goes on) or ABANDONED (a NEXT ACTION — its session died mid-work) is where this session
    most likely continues. When the human's request is to continue, or names nothing else,
@@ -577,7 +587,7 @@ not work; anything still open>
 **Conventions.** One record per todo, updated in place when status changes (a deferred
 item that lands flips `ai_failed.md` → `ai_completed.md`; delete the stale one). Short
 and factual. Reference by ID, never by relative path. **Never claim verification you
-did not run** — and when a human must check it, phase 5 is how you say so. The knowledge
+did not run** — and what your own tests cannot show goes to a tester, as phase 5 says. The knowledge
 this todo changed is recorded in `knowledge/log.md` with the todo as its `ref` (phases
 7–9); the record need not repeat it.
 
@@ -616,57 +626,62 @@ The `**Feature:**` and `**Commits:**` lines are the *authored* half of the link 
 `none — <why>` is required when there is no feature: silence is indistinguishable from
 forgetting.
 
-## 5 · VERIFY — hand what you could not check to the human
+## 5 · VERIFY — hand what your own tests cannot show to a tester
 
-Some things an agent cannot verify: how a page renders, whether an interaction *feels*
-right, a real device, a third-party sandbox, anything behind credentials you do not
-hold. Do not claim those. Do not mention them in chat and move on. File a test task.
+Your own checks come first and stay yours: the unit and integration tests the change needs,
+the build, the type-check — in the todo, in the record's `## Verification`. What they cannot
+show — the real app end to end, a browser, a device, a service, what is on the screen,
+timing — you do not claim, and you do not test yourself either: **a builder never tests its
+own round.** You hand it to a TESTER: an agent that did not build it, with a fresh context,
+whose whole job is to break it. You write the plan FOR THAT AGENT.
 
-**Do NOT file one for work you could have verified and simply did not** — write the
-test instead. A `totest/` folder full of things a unit test should have covered trains
-the human to ignore it, and that costs you the one channel that catches real
-regressions. If you are about to write "please double-check it works", you have not
-identified a scenario: name the specific thing you could not observe, or drop it.
+**Do NOT file a round for work you could have covered with a test and simply did not** —
+write the test instead. If you are about to write "please double-check it works", you
+have not identified a scenario: name the specific thing your tests could not observe, or
+drop it.
 
 One task per feature. Check both open and archived first — `novadev totest --all`:
 
 - **Tested before** → `novadev totest --round <task-id>` revives it from its newest
-  archived round, bringing back the plan that was actually walked, and bumps `revision:`.
+  archived round, bringing back the plan that was actually run, and bumps `revision:`.
 - **First time** → `novadev totest --new FEAT-NNNN --todos <batch>/<todo> --scope "…"`.
   It refuses a second task for a feature that already has one; that refusal is the rule.
 
 **Revising a plan is the part that matters most.** A scenario describing behaviour that
-no longer exists is *worse than no scenario*: the human walks it, hits the old
+no longer exists is *worse than no scenario*: the tester runs it, hits the old
 expectation, and reports a failure that is really just a stale plan. So per scenario:
 still valid → keep; expectations moved → **rewrite**; behaviour removed → **delete**;
 now covered by an automated test → **delete** and say which test; new behaviour →
 **add**. Log it under `## Revisions` (`- 2026-09-15 (rev 3) — TTL cut to 5min:
 Scenario 2 updated. Scenario 4 deleted, that path was removed. New: Scenario 5.`) so
-the human knows what changed since they last tested. Refresh the setup too.
+the tester knows what changed since the last round. Refresh the setup too.
 
-Write scenarios a stranger could execute — one concrete action per step, **both**
-outcomes named:
+Write scenarios another agent can execute without asking you anything — one concrete action
+per step, **both** outcomes named, and what to drive it with:
 
 ```markdown
 ## Scenario 2 — Expired magic link is refused
 
 **Priority:** critical
 **Steps:**
-1. Request a login link for `demo@example.com`.
-2. Wait 20 minutes without opening it (or set `MAGIC_TTL=1m` and wait 2).
-3. Open the link.
+1. Request a login link for `demo@example.com` (`POST /auth/magic`, or the login page).
+2. Set `MAGIC_TTL=1m` and wait 2 minutes without opening it.
+3. Open the link in the browser driver.
 
 **Expect (pass):** the "link expired" screen with a working "send me a new one";
-no session cookie is set; you are still logged out afterwards.
+no session cookie is set; still logged out afterwards.
 **Watch for (fail):** it logs you in anyway; a raw stack trace or blank page; the
 resend button does nothing; a redirect loop.
 ```
 
-Observable outcomes only ("what is on screen", not "the token is validated"). Priority
-per scenario so ten minutes is enough for the important ones. Cheapest setup first,
-destructive last. The header carries **why a human is needed**, **what you already
-verified automatically** (so they don't redo machine work), and the exact **setup**.
-`## Out of scope` says what this round does not cover.
+Observable outcomes only ("what is on screen", "what the response holds", not "the token is
+validated"). Priority per scenario. Cheapest setup first, destructive last. The header
+carries **why a tester is needed** (what your own tests could not show), **what you already
+verified automatically** (so the tester does not redo machine work), the exact **setup**,
+and the **tools**: what the project already has to drive it with (its test harness, scripts,
+a browser driver, fixtures, seed data) and what is missing — the tester builds what is
+missing. `## Out of scope` says what this round does not cover. Do not write scenarios for
+a person: if one truly needs a person, the tester finds that out by trying, and asks.
 
 Then gate the todo — `ai_needstest.md` beside `ai_completed.md`:
 
@@ -676,9 +691,10 @@ Then gate the todo — `ai_needstest.md` beside `ai_completed.md`:
 **Date:** <YYYY-MM-DD>
 **Test:** <task id, e.g. FEAT-0007-magic-link>
 **Feature:** <FEAT-NNNN, or `none — <why>`>
+**Built by:** <your actor>
 
-## Why a human is needed
-<the specific thing you could not observe>
+## Why a tester is needed
+<the specific thing your own tests could not observe>
 
 ## Verified automatically already
 <tests/build/typecheck that passed — actual results>
@@ -691,36 +707,45 @@ Add the todo's ref to the task's `todos:` list — both sides must name each oth
 the gate exists the todo is NOT terminal and `novadev sync` will not archive its batch.
 Several todos can share one round; list them all.
 
-## 6 · REVIEW — read the human's results when they land
+**Then hand it over.** `novadev sync` lists the round under **WAITING ON A TESTER**. When
+your harness can start another agent — a sub-agent, a separate session — start the tester
+now with `/novadev-test <task-id>`, giving it the task id and nothing of your reasoning: it
+reads the plan, not your mind. Otherwise the round waits for the next agent that did not
+build it. Either way it is never yours to run, and never the human's to walk unless the
+tester escalates.
 
-The human writes those results either by hand or through `/novadev-what-to-test` (one
-scenario at a time) and `/novadev-test-review` (a whole round at once). Reviewing them
-is this phase, and it is yours.
+## 6 · REVIEW — the tester closes the round; you act on what it found
 
-`novadev sync` tells you when a task has results. **Trigger: results exist.** A task
-whose `test-results/` holds only the seeded `README.md` has NOT been tested — leave it
-open and never infer a pass from silence. But once the human has written something,
-reviewing it is your job, not theirs to request.
+The TESTER runs the round end to end with `/novadev-test`: it builds the tools it needs,
+runs every scenario, records each result with evidence (`novadev test-result write`, with
+`by` naming it), escalates to the human only what it truly cannot run, and — once every
+scenario has a result or was skipped by the owner — reviews the round and closes the gate.
+Its playbook holds the details; the rules of the close are here, because they bind every
+reviewer of a round:
+
+`novadev sync` tells you where a round is. **Trigger: every scenario has a result** (sync:
+"every scenario has a result — review the round"). A round with scenarios still open is
+not reviewed — never infer a pass from silence, from a missing result, or from an
+escalation nobody answered.
 
 1. Read `test-plan.md` — judge against what each scenario's pass/fail were *defined*
    to be, not what you would expect. Check `## Revisions`: a scenario whose
-   expectations moved is the one most likely walked against the old assumption.
-2. Read **everything** in `test-results/`, images included. When a screenshot
+   expectations moved is the one most likely run against the old assumption.
+2. Read **everything** in `test-results/`, images and logs included. When a screenshot
    contradicts the sentence next to it, the screenshot wins.
 3. Past rounds (`archive/<year>/totest/<task>/`, indexed in the feature's `tests.md`)
-   often explain a note that makes no sense against the current plan alone.
+   often explain a result that makes no sense against the current plan alone.
 
-Human notes are informal by nature — "kinda slow", "looked weird", "had to click
-twice" are real findings; treat them as such rather than discarding them for being
-unquantified. If a note is genuinely ambiguous about whether something passed, **ask**
-— a wrong `passed` costs far more than one question. Reproduce what you can: a
-confirmed mechanism turns a vague note into a fixable todo. Read across scenarios for
-off-script observations and environment-specific behaviour; that is usually the most
-valuable content in the folder.
+A person's notes, where they answered an escalation, are informal by nature — "kinda slow",
+"looked weird", "had to click twice" are real findings; treat them as such. If a note is
+genuinely ambiguous about whether something passed, **ask** — a wrong `passed` costs far
+more than one question. Reproduce what you can: a confirmed mechanism turns a vague note
+into a fixable todo. Read across scenarios for off-script observations; that is usually
+the most valuable content in the folder.
 
 Then close the gate **on every todo in the task's `todos:` list** — delete each
-`ai_needstest.md`, write `ai_confirmed.md`. "Confirmed" means human verification
-happened and was reviewed; the verdict says whether it worked.
+`ai_needstest.md`, write `ai_confirmed.md`. "Confirmed" means the round was run and
+reviewed; the verdict says whether it worked.
 
 ```markdown
 # ai_confirmed — <todo slug>
@@ -729,12 +754,20 @@ happened and was reviewed; the verdict says whether it worked.
 **Test:** <task id>
 **Verdict:** passed | passed-with-followups | failed
 **Feature:** <FEAT-NNNN, or `none — <why>`>
+**Tested by:** <the tester's actor; and `human:<id>` for scenarios a person answered>
 
-## What the human reported
-<per scenario: verdict + the evidence, including which files/screenshots>
+## What the tester found
+<per scenario: verdict + the evidence, including which files/screenshots/logs>
+
+## Tools built for it
+<the harnesses, scripts or fixtures the tester added or extended, with their paths and
+commits — or "none, the existing <tool> was enough">
+
+## Escalated to the human
+<per escalated scenario: the ask, and what the person reported — or "none">
 
 ## Off-script findings
-<what they noticed that the plan did not ask about — or "none">
+<what was noticed that the plan did not ask about — or "none">
 
 ## Conclusion
 <what this means for the work>
@@ -744,17 +777,22 @@ happened and was reviewed; the verdict says whether it worked.
 ```
 
 Failures become a NEW batch of todos (phase 1), one per coherent problem, each brief
-carrying the scenario, the human's exact words, the evidence file, and your
-reproduction. Cross-link both ways. Never silently reopen the original todo — its
-record stays true about what it did. Anything the human could not test is not a pass:
-keep it in the next round, or `postponed/` it with the trigger that makes it testable.
+carrying the scenario, what was seen (the person's exact words where it was them), the
+evidence file, and the reproduction. Cross-link both ways. Never silently reopen the
+original todo — its record stays true about what it did. Anything nobody could test is not
+a pass: keep it in the next round, or `postponed/` it with the trigger that makes it
+testable.
 
 Finally set `status: reviewed`, `verdict: <…>`, `last-tested: <date>` in the plan's
 frontmatter, clear `todos:`, and add a line to `## Revisions`. Phase 10 archives the
 round and links it into the feature's `tests.md`.
 
-**Skipped — the owner decided a person will not test it.** When the human says a round (or
-some scenarios) is not worth testing, never close it with `ai_confirmed.md`: nobody verified
+**When the round comes back to you, the builder**: its follow-up todos are ordinary todos —
+take them through this loop like any other; a round that failed is tested again in a new
+round (`novadev totest --round`) once the fix lands.
+
+**Skipped — the owner decided it will not be tested.** When the human says a round (or some
+scenarios) is not worth testing, never close it with `ai_confirmed.md`: nobody verified
 anything. Record their decision with the command, `by` naming THEM and `reason` quoting them:
 
 ```sh
@@ -765,18 +803,19 @@ JSON
 novadev test-result skip "$payload"
 ```
 
-`scenarios` is a list of numbers or `"rest"` (every scenario without a verdict). A verdict a
-person recorded is kept — never list it. When nothing is left open the command closes the round
-itself (plan `reviewed`, verdict `skipped` or `partly-skipped`, a `## Revisions` line) and gives
-every gated todo `ai_testskipped.md` — **not tested by a human**: the todo is `completed`, never
-`confirmed`. Results a person did record still get this phase's review: a failure among them
-becomes a follow-up todo (the answer's `next` says so). Never skip on your own judgement, and
+`scenarios` is a list of numbers or `"rest"` (every scenario without a verdict). A verdict
+already recorded is kept — never list it. When nothing is left open the command closes the
+round itself (plan `reviewed`, verdict `skipped` or `partly-skipped`, a `## Revisions` line)
+and gives every gated todo `ai_testskipped.md` — **not tested**: the todo is `completed`,
+never `confirmed`. Results already recorded still get this phase's review: a failure among
+them becomes a follow-up todo (the answer's `next` says so). Never skip on your own
+judgement — a tester that cannot run a scenario escalates it, it does not skip it — and
 never mark a scenario skipped by writing the file by hand. Then phase 10 archives the round.
 
-Then read the feature's `feature.md` against what the round showed. Where the human saw
+Then read the feature's `feature.md` against what the round showed. Where the round saw
 behaviour the document describes differently, the document is wrong: fix it and record an
 `update`. Where the round confirmed it, you may record a `verify` — by YOU, citing the round
-in the note: a person walking scenarios checked the software, not the document.
+in the note: running scenarios checked the software, not the document.
 
 ## 7 · REGISTER — keep the features registry true
 
@@ -790,7 +829,7 @@ gets the wrong verdict.
   its creation (*Recording a change*, event `create`).
 - **Status** lives in `feature-status`: `planned` → `in-progress` when real work starts →
   `shipped` when it works end to end **and** the verification behind it actually passed
-  (including the human round, if there was one) → `deprecated` when removed or superseded.
+  (including the tester's round, if there was one) → `deprecated` when removed or superseded.
   The OKF `status` beside it (draft / stable / deprecated) is derived from it by
   `novadev sync` — never set it yourself.
 - **Every change to `feature.md` is recorded** — event `update`, with the todo as `ref`.
@@ -924,7 +963,8 @@ novadev sync
 It regenerates every derived file (`work.md`, `tests.md`, the knowledge bundle's
 `index.md` files, each feature's OKF `status`), archives what is finished, validates the
 whole tree, the link graph and the knowledge bundle, and prints two lists: **NEXT
-ACTIONS** (yours) and **WAITING ON THE HUMAN**. Todos that name a recipient are listed
+ACTIONS** (yours), **WAITING ON A TESTER** (open test rounds — never the builder's to run)
+and **WAITING ON THE HUMAN** (a paused todo, a tester's escalated ask). Todos that name a recipient are listed
 apart, under **ADDRESSED TO A RECIPIENT**: they are theirs, they do not keep your round
 open, and they are yours only when you are that recipient.
 
@@ -1019,8 +1059,8 @@ paused lock travels with the branch into its todo's folder. If the working tree 
 about to commit. A project may narrow this further; it may not widen it.
 
 Finally, **report to the human** in plain language: what landed, what you verified,
-what is now waiting on them, where the scenarios are, and anything you stopped on to ask
-them about. That report is the only thing they should HAVE to read — never the only thing
+what is now with a tester and what (if anything) is waiting on them, and anything you
+stopped on to ask them about. That report is the only thing they should HAVE to read — never the only thing
 they are allowed to see: name the records and commits so they can look at any of it.
 
 ---

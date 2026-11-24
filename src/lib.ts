@@ -68,9 +68,13 @@ export const BATCH_RE = /^(\d{4})-(\d{2})-(\d{2})_(\d+)$/;
 export const RECORD_COMPLETED = 'ai_completed.md';
 export const RECORD_FAILED = 'ai_failed.md';
 export const RECORD_PROGRESS = 'ai_progress.md';
-/** Human-verification gate: work landed, but a person must still test it. */
+/**
+ * The testing gate: work landed, but a TESTER (an agent that did not build it) must still test it —
+ * and, only for what the tester cannot run itself, a person (an escalation, `novadev test-result
+ * escalate`).
+ */
 export const RECORD_NEEDSTEST = 'ai_needstest.md';
-/** The gate, closed: a person tested it and the results were reviewed. */
+/** The gate, closed: the tester tested it (a person too, where it escalated) and reviewed the round. */
 export const RECORD_CONFIRMED = 'ai_confirmed.md';
 /**
  * The gate, closed WITHOUT a human test: the owner skipped the round's scenarios (`novadev
@@ -121,16 +125,16 @@ export const LOOP_PHASES = [
 /**
  * Canonical skill playbooks shipped into <root>/skills/, and the slash commands that route to them.
  *
- * All five are named `novadev-*` so typing `/novadev` in an agent's chat offers the whole set:
- * `-work` is the development loop, `-pause` stops it where it is, the other three are the human's
- * own entry points into it.
+ * All six are named `novadev-*` so typing `/novadev` in an agent's chat offers the whole set:
+ * `-work` is the development loop, `-test` is the tester's (an agent that did not build the work),
+ * `-pause` stops a loop where it is, the other three are the human's own entry points into it.
  */
 export const SKILLS = [
   {
     file: 'novadev-work.md',
     slug: 'novadev-work',
     description:
-      'The novadev development loop — the single always-applied playbook for this project. Covers the pre-context ritual (the knowledge bundle in .novadev/knowledge/, an Open Knowledge Format bundle: wiki, memories, features), executing todo briefs, writing ai_ records, the features registry, handing untestable work to the human via totest, reviewing their results, recording every knowledge change with provenance and trust, and the `novadev sync` close-out. Invoke it for any development work here; the human writes todo briefs and this drives everything else.',
+      'The novadev development loop — the single always-applied playbook for this project. Covers the pre-context ritual (the knowledge bundle in .novadev/knowledge/, an Open Knowledge Format bundle: wiki, memories, features), executing todo briefs, writing ai_ records, the features registry, handing what your own tests cannot show to a tester agent via totest, recording every knowledge change with provenance and trust, and the `novadev sync` close-out. Invoke it for any development work here; the human writes todo briefs and this drives everything else.',
   },
   {
     file: 'novadev-file-a-todo.md',
@@ -142,7 +146,13 @@ export const SKILLS = [
     file: 'novadev-what-to-test.md',
     slug: 'novadev-what-to-test',
     description:
-      'Show the human-testing queue, help the user pick one scenario, walk them through it, and record what they found. Use when they say "/novadev-what-to-test", "what should I test", "what is waiting for me", "let\'s test something", or when they report the result of a test walk ("it worked", "scenario 2 failed"). Works in a terminal chat and through a phone-side chat plugin, where an attached screenshot lands beside the verdict.',
+      'Show the user what the tester agent escalated to them — the scenarios it could not run itself, each with the smallest thing they must do — help them pick one, walk them through it, and record what they found. Use when they say "/novadev-what-to-test", "what should I test", "what is waiting for me", "let\'s test something", or when they report the result of a test walk ("it worked", "scenario 2 failed"). Works in a terminal chat and through a phone-side chat plugin, where an attached screenshot lands beside the verdict.',
+  },
+  {
+    file: 'novadev-test.md',
+    slug: 'novadev-test',
+    description:
+      'Be the TESTER of a novadev test round: an agent that did not build the work takes an open round in .novadev/totest/, builds the testing tools it needs (harnesses, drivers, fixtures, scripts — kept in the project), runs every scenario itself, records results with evidence, escalates to the human only the scenarios it truly cannot run (the smallest ask), then reviews the round and closes the gate (ai_confirmed.md, follow-up todos for failures). Use when they say "/novadev-test", "test it", "run the test round", or when `novadev sync` lists WAITING ON A TESTER and you did not build that work.',
   },
   {
     file: 'novadev-test-review.md',
@@ -333,14 +343,14 @@ export function nextFeatureId(nd: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// totest — the human-verification queue
+// totest — the testing queue: a tester agent walks it; a person only what the tester escalates
 // ---------------------------------------------------------------------------
 
 /**
  * One LIVING test task per feature — named after it, never date-stamped. New work on a
  * feature revises the existing plan in place (old scenarios that the change invalidated
  * are rewritten or dropped) rather than piling up a second folder: a plan describing
- * behaviour that no longer exists is worse than no plan, because the human walks it,
+ * behaviour that no longer exists is worse than no plan, because the tester walks it,
  * hits the old expectation, and reports a failure that is really just a stale scenario.
  */
 export const TEST_TASK_RE = /^(FEAT-\d{4}-)?[a-z0-9][a-z0-9-]*$/;
@@ -348,6 +358,11 @@ export const TEST_TASK_RE = /^(FEAT-\d{4}-)?[a-z0-9][a-z0-9-]*$/;
 export const LEGACY_TEST_TASK_RE = /^\d{4}-\d{2}-\d{2}_/;
 export const TEST_PLAN_FILE = 'test-plan.md';
 export const TEST_RESULTS_DIR = 'test-results';
+/**
+ * The tester's asks to a person, in test-results/: the scenarios it could not run itself, and the
+ * smallest thing the person must do (`novadev test-result escalate`). An ask, not a result.
+ */
+export const ESCALATIONS_FILE = 'needs-human.md';
 /** Pre-0.6.0 rounds lived inside the task; they now archive out. */
 export const TEST_HISTORY_DIR = 'history';
 /** Completed round folder: rev<N>-<YYYY-MM-DD>, under archive/<year>/totest/<task>/. */
@@ -366,7 +381,7 @@ export type TestTask = {
   revision: number;
   lastTested: string;
   scenarios: number;
-  /** Files a human dropped in test-results/ — README.md is the seeded guide, not a result. */
+  /** Files the tester (or a person) left in test-results/ — README.md is the seeded guide and needs-human.md an ask, not results. */
   results: string[];
   hasResults: boolean;
   /** Pre-0.6.0 in-task history/ folders, if any are still lying around. */
@@ -432,7 +447,8 @@ export function listTestRounds(nd: string, taskId?: string): TestRound[] {
 /**
  * OPEN test tasks only. `totest/` is an active queue: a task folder exists while a
  * round is in flight and is archived on review, so anything listed here is genuinely
- * waiting on a person. Completed rounds come from `listTestRounds`.
+ * waiting — on a tester, or on a person where the tester escalated (test-queue.ts says which).
+ * Completed rounds come from `listTestRounds`.
  */
 export function listTestTasks(nd: string): TestTask[] {
   const out: TestTask[] = [];
@@ -441,7 +457,7 @@ export function listTestTasks(nd: string): TestTask[] {
     const planPath = join(taskDir, TEST_PLAN_FILE);
     const fm = existsSync(planPath) ? (readFrontmatter(planPath) ?? {}) : {};
     const plan = existsSync(planPath) ? readFileSync(planPath, 'utf8') : '';
-    const results = listFiles(join(taskDir, TEST_RESULTS_DIR)).filter((f) => f !== 'README.md');
+    const results = listFiles(join(taskDir, TEST_RESULTS_DIR)).filter((f) => f !== 'README.md' && f !== ESCALATIONS_FILE);
     out.push({
       id,
       dir: taskDir,
@@ -876,7 +892,7 @@ export type TodoState =
 
 /**
  * `needstest` outranks everything: the gate coexists with the work record it gates,
- * and while it is open the todo is waiting on a person, not on an agent. Then the review gate
+ * and while it is open the todo is waiting on its tester (or a person it escalated to), not on its builder. Then the review gate
  * (review.ts): a completed todo whose `ai_review.md` asks for CHANGES is `changes`; in team mode
  * one not yet approved is `review`, and one approved but not on the default branch `unmerged`.
  * `{ merged: false }` leaves the merge out — what the FILES say, the same in every clone: derived

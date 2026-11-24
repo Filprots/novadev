@@ -11,7 +11,7 @@ usage:
                             THE close-out: run the metrics hook (if set), regenerate derived
                             links and the knowledge indexes, archive what is finished, validate
                             (the knowledge bundle and its log included), and print what the agent
-                            + the human still have to do; --check writes nothing and fails on
+                            , a tester + the human still have to do; --check writes nothing and fails on
                             problems, stale derived files (the metrics snapshot and the wiki
                             block included), an unreadable snapshot, a budget raise sync has not
                             written yet, a debt budget it cannot check, or known debt over budget;
@@ -88,16 +88,20 @@ usage:
                             --new <slug> scaffolds an entry
   novadev links [--fix]     validate the link graph (records ↔ features ↔ commits);
                             --fix regenerates each feature's derived work.md and tests.md
-  novadev totest [--all] [--json]   what still needs YOUR hands-on testing, and what is ready
-                            for review (--json: as data); --new <slug> scaffolds a test task
+  novadev totest [--all] [--json]   the open test rounds: what a tester (an agent that did not build
+                            the work) still has to run or close, and the asks it escalated to a
+                            person (--json: as data); --new <slug> scaffolds a test task,
+                            --round <task> opens a new round from the archived one
   novadev file-todo …       the command half of /novadev-file-a-todo: "plan" says which batch
                             a chat request lands in, "file <payload.json>" writes the folders
                             (a part may carry "priority": urgent|high|normal|later, "after": the todos it waits for,
                             and "recipient": who it is addressed to)
-  novadev test-result …     the command half of /novadev-what-to-test and /novadev-test-review:
-                            "tasks [query]" resolves the queue, "write" records one scenario,
-                            "review" records a whole round of a human's testing, "skip" marks
-                            scenarios (or the rest) skipped on the owner's word and closes the round
+  novadev test-result …     the command half of /novadev-test, /novadev-what-to-test and
+                            /novadev-test-review: "tasks [query]" resolves the queue, "write"
+                            records one scenario, "review" a whole round (both with "by": who
+                            tested), "escalate" hands scenarios the tester cannot run itself to a
+                            person (the smallest ask), "skip" marks scenarios (or the rest) skipped
+                            on the owner's word and closes the round
   novadev migrate-repo      upgrade this repo's .novadev/ layout to the installed version
                             (stepwise, version-aware; --dry-run to preview, --force if dirty)
   novadev doctor            validate structure; non-zero exit on problems

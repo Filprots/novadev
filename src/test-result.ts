@@ -1,13 +1,17 @@
-// `novadev test-result` — the command half of /novadev-what-to-test and /novadev-test-review.
+// `novadev test-result` — the command half of /novadev-test (the tester), /novadev-what-to-test and
+// /novadev-test-review (a person).
 //
-//   novadev test-result tasks [query]     the open queue as JSON, with each task's scenarios
+//   novadev test-result tasks [query]     the open queue as JSON, with each task's scenarios and
+//                                         the asks the tester escalated to a person
 //   novadev test-result write <payload>   one scenario's verdict, appended to scenario-<N>.txt
 //   novadev test-result review <payload>  a whole round, appended to review.md
+//   novadev test-result escalate <payload> the tester hands scenarios it cannot run itself to a
+//                                         person: the smallest ask, in needs-human.md
 //   novadev test-result skip <payload>    the owner skips scenarios (or the rest of the round):
 //                                         recorded as skipped, and the round closed when nothing
 //                                         is left — never as a confirmation
 //
-// Payloads are JSON FILES because the content is a person's own multi-line words, and quoting that
+// Payloads are JSON FILES because the content is multi-line words (a person's own, often), and quoting that
 // through a shell is how it gets mangled. Answers are JSON on stdout; errors are `{ "error": … }`
 // with a non-zero exit.
 //
@@ -22,12 +26,14 @@ import {
   requireProjectRoot,
   totestDir,
 } from './lib.ts';
-import { type ReviewScenario, scenariosIn, skipScenarios, writeResult, writeReview } from './test-results.ts';
+import { roundState } from './test-queue.ts';
+import { type ReviewScenario, escalate, scenariosIn, skipScenarios, writeResult, writeReview } from './test-results.ts';
 
 const USAGE =
   'usage: novadev test-result tasks [query]\n' +
-  '       novadev test-result write <payload.json>\n' +
-  '       novadev test-result review <payload.json>\n' +
+  '       novadev test-result write <payload.json>    ({ taskId, scenario, text, title?, attachments?, by? })\n' +
+  '       novadev test-result review <payload.json>   ({ taskId, verdict, summary?, scenarios?, notes?, environment?, attachments?, by? })\n' +
+  '       novadev test-result escalate <payload.json> ({ taskId, scenarios: [n,…], by: <tester actor>, ask, tried })\n' +
   '       novadev test-result skip <payload.json>     ({ taskId, scenarios: [n,…] | "rest", by: human:<id> | "human", reason })';
 
 export function testResult(args: string[]): void {
@@ -54,11 +60,28 @@ export function testResult(args: string[]): void {
       }), null, 2));
       return;
     }
+    if (command === 'escalate') {
+      if (argument === undefined) throw new Error(USAGE);
+      const payload = readPayload(argument);
+      const raw = payload['scenarios'];
+      if (!(Array.isArray(raw) && raw.length > 0 && raw.every((n) => Number.isInteger(n) && (n as number) > 0))) {
+        throw new Error("'scenarios' must be a list of the scenario numbers the tester cannot run itself.");
+      }
+      console.log(JSON.stringify(escalate(nd, {
+        taskId: requireString(payload, 'taskId'),
+        scenarios: raw as number[],
+        by: requireString(payload, 'by'),
+        ask: requireString(payload, 'ask'),
+        tried: requireString(payload, 'tried'),
+      }), null, 2));
+      return;
+    }
     if (command === 'write' || command === 'review') {
       if (argument === undefined) throw new Error(USAGE);
       const payload = readPayload(argument);
       const attachments = stringList(payload['attachments'] ?? payload['attachmentIds']);
       const taskId = requireString(payload, 'taskId');
+      const by = typeof payload['by'] === 'string' && payload['by'].trim() !== '' ? { by: payload['by'] } : {};
       if (command === 'write') {
         const written = writeResult(nd, {
           taskId,
@@ -66,6 +89,7 @@ export function testResult(args: string[]): void {
           ...(typeof payload['title'] === 'string' ? { title: payload['title'] } : {}),
           text: requireString(payload, 'text'),
           attachments,
+          ...by,
         });
         report(written, missingIn([...attachments]));
         return;
@@ -79,6 +103,7 @@ export function testResult(args: string[]): void {
         ...(typeof payload['environment'] === 'string' ? { environment: payload['environment'] } : {}),
         scenarios,
         attachments,
+        ...by,
       });
       report(written, missingIn([...attachments, ...scenarios.flatMap((s) => s.attachments ?? [])]));
       return;
@@ -129,6 +154,10 @@ function describeTasks(nd: string, query: string | undefined): unknown[] {
         scenarios: scenariosIn(plan),
         results: task.results,
         hasResults: task.hasResults,
+        ...(() => {
+          const state = roundState(task);
+          return { tester: state.tester, untested: state.untested, needsHuman: state.asks.map((a) => ({ scenarios: a.open, ask: a.ask, by: a.by, date: a.date })) };
+        })(),
       };
     })
     .filter((task) => {

@@ -1,7 +1,7 @@
 ---
 type: Work History
 title: FEAT-0006 — work history
-description: Every todo, record and commit that built FEAT-0006 (The human-testing queue (totest)).
+description: Every todo, record and commit that built FEAT-0006 (The testing queue (totest), walked by a tester agent).
 generated: { by: process:novadev-sync }
 ---
 
@@ -11,12 +11,13 @@ generated: { by: process:novadev-sync }
      Do not hand-edit inside the markers; anything outside them is preserved. -->
 
 <!-- novadev:work:begin -->
-The work that built [FEAT-0006 — The human-testing queue (totest)](feature.md).
+The work that built [FEAT-0006 — The testing queue (totest), walked by a tester agent](feature.md).
 
 ## Todos
 
 - `2026-11-10_2/06-history-totest-queue` — completed · 2026-11-10 · archived
 - `2026-11-12_1/02-totest-skip-scenarios-and-close-round` — completed · 2026-11-12
+- `2026-11-24_3/01-tester-agent-testing` — completed · 2026-11-24
 
 ## Commits
 

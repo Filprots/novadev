@@ -165,7 +165,7 @@ export function auditLinks(root: string): Audit {
     }
   }
 
-  // --- totest: the human-verification gate must never dangle in either direction ---
+  // --- totest: the testing gate must never dangle in either direction ---
   const tasks = listTestTasks(nd);
   const taskById = new Map(tasks.map((t) => [t.id, t]));
   const todoByRef = new Map(todos.map((t) => [t.todo.ref, t]));
@@ -241,8 +241,8 @@ export function auditLinks(root: string): Audit {
       const rev = task.revision ? ` rev ${task.revision},` : '';
       notes.push(
         task.hasResults
-          ? `${where}:${rev} results are in (${task.results.join(', ')}) — run /novadev-work`
-          : `${where}:${rev} waiting on a human to test it (${task.scenarios} scenario(s))`,
+          ? `${where}:${rev} results are in (${task.results.join(', ')}) — its tester closes it (/novadev-test)`
+          : `${where}:${rev} waiting on a tester (${task.scenarios} scenario(s)) — /novadev-test`,
       );
     }
   }

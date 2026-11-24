@@ -1,7 +1,7 @@
 ---
 type: Test History
 title: FEAT-0006 — test history
-description: "The human test rounds of FEAT-0006 (The human-testing queue (totest)): the open one, and every completed round with its verdict."
+description: "The human test rounds of FEAT-0006 (The testing queue (totest), walked by a tester agent): the open one, and every completed round with its verdict."
 generated: { by: process:novadev-sync }
 ---
 
@@ -11,7 +11,7 @@ generated: { by: process:novadev-sync }
      Do not hand-edit inside the markers; anything outside them is preserved. -->
 
 <!-- novadev:tests:begin -->
-The human testing of [FEAT-0006 — The human-testing queue (totest)](feature.md).
+The human testing of [FEAT-0006 — The testing queue (totest), walked by a tester agent](feature.md).
 
 ## Open round
 

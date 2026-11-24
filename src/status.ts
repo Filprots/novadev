@@ -23,6 +23,7 @@ import { queueLockHolder, queueOrder, readQueue } from './queue.ts';
 import { type WipHolder, parseWipSettings, wipHolders } from './wip.ts';
 import { ruleRoot } from './claim-policy.ts';
 import { metricsStatusLine } from './metrics-audit.ts';
+import { askLines, roundJson, roundState, testQueue, testerLine } from './test-queue.ts';
 import { batchesInWorkElsewhere, insideWorktree, lockRef, registryLocks } from './registry.ts';
 import { stateText, todosInOrder, usesLinks } from './todo.ts';
 import { batchesByPriority } from './todo-meta.ts';
@@ -43,7 +44,8 @@ const STATE_MARK = {
 /**
  * `novadev status --json`: the same stock-take as data, for a tool that answers a person away from the repository
  * (a chat bot): the batches in work with their holder and newest waypoint, every open todo with its title and state,
- * the human-test queue, postponed items, and the counts.
+ * the testing queue (who each round waits on: a tester, or the human for an escalated ask), postponed items,
+ * and the counts.
  */
 /**
  * The repository's worktrees (git worktree list), each with its branch and the locks held there —
@@ -133,7 +135,7 @@ export function statusData(nd: string, now: Date = new Date()): Record<string, u
     const key = Object.keys(addressed).find((name) => name.toLowerCase() === t.recipient!.toLowerCase()) ?? t.recipient;
     addressed[key] = (addressed[key] ?? 0) + 1;
   }
-  const tasks = listTestTasks(nd).map((t) => ({ id: t.id, features: t.featureIds, scenarios: t.scenarios, revision: t.revision || 1, lastTested: t.lastTested || null, readyForReview: t.hasResults, results: t.results, todos: t.todoRefs }));
+  const tasks = listTestTasks(nd).map((t) => roundJson(roundState(t)));
   const postponed = listFiles(join(nd, 'postponed')).filter((f) => f.endsWith('.md') && f !== 'README.md').map((file) => {
     const fm = readFrontmatter(join(nd, 'postponed', file)) ?? {};
     return { file, title: fm.title ?? null, doWhen: fm['do-when'] ?? null, discardIf: fm['discard-if'] ?? null };
@@ -261,18 +263,16 @@ export function status(args: string[] = []): void {
   }
   if (batches.length === 0) console.log('  (none)');
 
-  // The human-verification queue comes first — it is the only thing here that is
-  // blocked on the person reading this.
-  const tasks = listTestTasks(nd);
-  if (tasks.length > 0) {
-    const ready = tasks.filter((t) => t.hasResults);
-    console.log(`\ntotest — ${tasks.length} awaiting YOU (${ready.length} ready for review)`);
-    for (const t of tasks) {
-      const state = t.hasResults ? 'READY FOR REVIEW' : 'needs your test';
-      console.log(`  ${t.hasResults ? '◆' : '○'} ${t.id}  — ${state}, ${t.scenarios} scenario(s)`);
-      if (t.todoRefs.length) console.log(`      todos: ${t.todoRefs.join(', ')}`);
-    }
-    if (ready.length > 0) console.log('  → run `/novadev-work` to close the loop');
+  // The testing queue: a tester (an agent that did not build the work) runs it; the person reading
+  // this is waited on only for what the tester escalated — that comes first.
+  const rounds = testQueue(nd).filter((r) => r.task.status !== 'reviewed');
+  if (rounds.length > 0) {
+    const asks = rounds.flatMap(askLines);
+    const forTester = rounds.map((r) => ({ r, line: testerLine(r) })).filter((x) => x.line !== null);
+    console.log(`\ntotest — ${rounds.length} open round(s): ${forTester.length} for a tester, ${asks.length} ask(s) waiting on YOU`);
+    for (const a of asks) console.log(`  ⧗ ${a}`);
+    for (const { line } of forTester) console.log(`  ◎ ${line}`);
+    if (forTester.length > 0) console.log('  → a tester runs `/novadev-test` — an agent with a fresh context, never the one that built it');
   }
 
   // Postponed with triggers.
@@ -318,3 +318,4 @@ export function status(args: string[] = []): void {
   }
   console.log(`archive — ${archived} batch(es)`);
 }
+

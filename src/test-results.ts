@@ -1,10 +1,16 @@
-// The MECHANICS of recording what a HUMAN found into `.novadev/totest/<task>/test-results/`.
+// The MECHANICS of recording what a test round found into `.novadev/totest/<task>/test-results/`.
+// The TESTER — an agent that did not build the work (/novadev-test) — records most of it; a person
+// records only what the tester escalated to them, or testing they did of their own accord.
 //
-// Two shapes, because a person reports in two ways:
-// - `writeResult` — one scenario at a time, the /novadev-what-to-test walk. Appends to
-//   `scenario-<N>.txt`.
-// - `writeReview` — a whole round in one go, the /novadev-test-review dump: a verdict, per-scenario
-//   notes, change requests, screenshots. Appends a dated block to `review.md`.
+// Two shapes:
+// - `writeResult` — one scenario at a time: the tester's run, or the /novadev-what-to-test walk of
+//   an escalated scenario. Appends to `scenario-<N>.txt`.
+// - `writeReview` — a whole round in one go (/novadev-test-review, or a tester's summary): a
+//   verdict, per-scenario notes, change requests, screenshots. Appends a dated block to `review.md`.
+// Both carry who tested (`by`) when the caller names them: `**Tested by:**`.
+//
+// `escalate` is not a result either: the tester's ask to a person for the scenarios it cannot run
+// itself, in needs-human.md. It is the only part of a round that waits on a human.
 //
 // The rule worth putting in code rather than in prose is the first one: a second pass APPENDS.
 // Replacing would quietly erase the first walk, and a skill writing the file by hand would replace.
@@ -14,9 +20,10 @@
 // the plan, the round's results and every gated todo at once, and because the one thing it must
 // never do — write `ai_confirmed.md` for a test nobody ran — is easy to get wrong by hand.
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { humanActor } from './knowledge-log.ts';
 import {
+  ESCALATIONS_FILE,
   RECORD_CONFIRMED,
   RECORD_NEEDSTEST,
   RECORD_TESTSKIPPED,
@@ -30,7 +37,7 @@ import {
   todayStamp,
   totestDir,
 } from './lib.ts';
-import { actorKind } from './okf.ts';
+import { ACTOR_FORMAT, actorKind } from './okf.ts';
 import { numbered } from './todo-filing.ts';
 
 const TASK_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
@@ -62,6 +69,8 @@ export function writeResult(
     readonly title?: string;
     readonly text: string;
     readonly attachments?: readonly string[];
+    /** Who tested: the tester's actor, or `human:<id>` for a person. */
+    readonly by?: string;
   },
 ): WrittenResult {
   const { taskId, scenario } = input;
@@ -69,7 +78,8 @@ export function writeResult(
   if (!Number.isSafeInteger(scenario) || scenario < 1) {
     throw new Error(`Scenario number must be a whole number from 1 up, got '${scenario}'.`);
   }
-  const body = requireBody(input.text);
+  // The verdict stays the first line of the text (recordedVerdicts reads it); who tested follows it.
+  const body = requireBody(input.text) + testedBy(nd, input.by, '\n\n');
   const dir = join(taskDir(nd, taskId), TEST_RESULTS_DIR);
   mkdirSync(dir, { recursive: true });
   const file = `scenario-${scenario}.txt`;
@@ -105,6 +115,8 @@ export type ReviewInput = {
   readonly notes?: string;
   readonly environment?: string;
   readonly attachments?: readonly string[];
+  /** Who tested: the tester's actor, or `human:<id>` for a person. */
+  readonly by?: string;
 };
 
 /**
@@ -130,6 +142,8 @@ export function writeReview(nd: string, input: ReviewInput): WrittenResult {
   const revision = planRevision(nd, input.taskId);
   const lines: string[] = [`## Review — ${today}${revision ? ` (rev ${revision})` : ''}`, ''];
   lines.push(`**Verdict:** ${verdict}`);
+  const tester = testedBy(nd, input.by, '');
+  if (tester !== '') lines.push(tester);
   if ((input.environment ?? '').trim() !== '') lines.push(`**Environment:** ${input.environment!.trim()}`);
   lines.push('');
   if ((input.summary ?? '').trim() !== '') lines.push(requireBody(input.summary!), '');
@@ -168,6 +182,22 @@ export function writeReview(nd: string, input: ReviewInput): WrittenResult {
     writeFileSync(path, `# Test results — ${input.taskId}\n\n${block}`);
   }
   return { written: `${input.taskId}/${TEST_RESULTS_DIR}/${REVIEW_FILE}`, attachments: all };
+}
+
+/**
+ * `**Tested by:** <actor>` (after `lead`), or '' when nobody was named. `human` is the person in git's
+ * user.name (`human:<id>`); a malformed actor is refused.
+ */
+function testedBy(nd: string, by: string | undefined, lead: string): string {
+  let who = (by ?? '').trim();
+  if (who === '') return '';
+  if (who === 'human') {
+    const human = humanActor(dirname(nd));
+    if (human === null) throw new Error('"by": "human" needs git\'s user.name — set it, or write human:<id>.');
+    who = human;
+  }
+  if (actorKind(who) === null) throw new Error(`'by' must be an actor — ${ACTOR_FORMAT} — got '${who}'.`);
+  return `${lead}**Tested by:** ${who}`;
 }
 
 function requireBody(text: string): string {
@@ -237,7 +267,7 @@ export function scenariosIn(plan: string): { scenario: number; title: string; pr
 export function recordedVerdicts(resultsDir: string): Map<number, string> {
   const out = new Map<number, string>();
   for (const file of listFiles(resultsDir)) {
-    if (file === 'README.md' || file === SKIPPED_FILE || !(file.endsWith('.md') || file.endsWith('.txt'))) continue;
+    if (file === 'README.md' || file === SKIPPED_FILE || file === ESCALATIONS_FILE || !(file.endsWith('.md') || file.endsWith('.txt'))) continue;
     const text = readFileSync(join(resultsDir, file), 'utf8').replace(/\r\n?/g, '\n');
     const parts = text.split(/^#{2,3}\s+(?=Scenario\s+\d+)/m).slice(1);
     for (const part of parts) {
@@ -380,7 +410,7 @@ export function skipScenarios(nd: string, root: string, input: SkipInput): Recor
 }
 
 /** The scenarios a round's skipped.md already marks. */
-function readSkipped(resultsDir: string): Set<number> {
+export function readSkipped(resultsDir: string): Set<number> {
   const path = join(resultsDir, SKIPPED_FILE);
   if (!existsSync(path)) return new Set();
   return new Set([...readFileSync(path, 'utf8').matchAll(/^- Scenario (\d+)\b.*\*\*Verdict:\*\* skipped\s*$/gm)].map((m) => Number(m[1])));
@@ -440,4 +470,107 @@ function testSkippedRecord(o: {
     `- tested by a person before the skip: ${o.recorded.length > 0 ? o.recorded.map((r) => `${r.scenario} ${r.verdict}`).join(', ') : 'none'}`,
     '',
   ].join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// Escalating — the tester's ask to a person, for what it cannot run itself
+// ---------------------------------------------------------------------------
+
+export type EscalateInput = {
+  readonly taskId: string;
+  readonly scenarios: readonly number[];
+  /** The tester: an agent's actor. A person does not escalate to themselves. */
+  readonly by: string;
+  /** The smallest thing the person must do — the step only they can take, or the input only they have. */
+  readonly ask: string;
+  /** What the tester built and tried, and why it still cannot run these scenarios. */
+  readonly tried: string;
+};
+
+export type Escalation = {
+  readonly date: string;
+  readonly by: string;
+  readonly scenarios: readonly number[];
+  readonly ask: string;
+  /** The scenarios of this ask that still have no result and are not skipped. */
+  readonly open: readonly number[];
+};
+
+/**
+ * Hand scenarios the tester cannot run itself to a person: a dated block in test-results/needs-human.md
+ * — who asks, which scenarios, the ask, and what was tried. A scenario that already has a verdict is
+ * refused (there is nothing left to ask), and so is a person as `by`. The ask stays open until each
+ * of its scenarios has a result (the person's, or the tester's once the person did their part) or is
+ * skipped by the owner.
+ */
+export function escalate(nd: string, input: EscalateInput): Record<string, unknown> {
+  const dir = taskDir(nd, input.taskId);
+  const planPath = join(dir, TEST_PLAN_FILE);
+  if (!existsSync(planPath)) throw new Error(`totest/${input.taskId} has no ${TEST_PLAN_FILE}.`);
+  const fm = readFrontmatter(planPath) ?? {};
+  if ((fm.status ?? '').trim() === 'reviewed') throw new Error(`totest/${input.taskId} is closed already (status: reviewed).`);
+  const by = input.by.trim();
+  const kind = actorKind(by);
+  if (kind === null) throw new Error(`'by' must be the tester's actor — ${ACTOR_FORMAT} — got '${by}'.`);
+  if (kind === 'human') throw new Error("'by' is the tester that escalates — an agent, never a person. A person who tests records a result (`novadev test-result write`).");
+  const ask = requireBody(input.ask);
+  const tried = requireBody(input.tried);
+  const plan = scenariosIn(readFileSync(planPath, 'utf8'));
+  const known = new Set(plan.map((s) => s.scenario));
+  const unknown = input.scenarios.filter((n) => !known.has(n));
+  if (unknown.length > 0) throw new Error(`The plan has no scenario ${unknown.join(', ')} (it has ${plan.map((s) => s.scenario).join(', ') || 'none'}).`);
+  const resultsDir = join(dir, TEST_RESULTS_DIR);
+  const verdicts = recordedVerdicts(resultsDir);
+  const skipped = readSkipped(resultsDir);
+  const done = input.scenarios.filter((n) => verdicts.has(n) || skipped.has(n));
+  if (done.length > 0) {
+    throw new Error(`Scenario ${done.map((n) => `${n} (${skipped.has(n) ? 'skipped' : verdicts.get(n)})`).join(', ')} already has a result — there is nothing to ask a person for. Leave it out.`);
+  }
+  const chosen = [...new Set(input.scenarios)].sort((a, b) => a - b);
+  const revision = (fm.revision ?? '').trim();
+  const title = (n: number) => plan.find((s) => s.scenario === n)?.title ?? '';
+  const block = [
+    `## Escalated — ${todayStamp()}${revision ? ` (rev ${revision})` : ''}`,
+    '',
+    `**By:** ${by}`,
+    `**Scenarios:** ${chosen.join(', ')}`,
+    ...chosen.map((n) => `- Scenario ${n}${title(n) ? ` — ${title(n)}` : ''}`),
+    '',
+    '### Ask',
+    '',
+    ask,
+    '',
+    '### Tried',
+    '',
+    tried,
+  ].join('\n');
+  mkdirSync(resultsDir, { recursive: true });
+  const path = join(resultsDir, ESCALATIONS_FILE);
+  if (existsSync(path) && readFileSync(path, 'utf8').trim() !== '') appendFileSync(path, `\n---\n\n${block}\n`);
+  else writeFileSync(path, `# Needs a person — ${input.taskId}\n\n<!-- Written by \`novadev test-result escalate\`: the scenarios the tester could not run itself, and the smallest thing a person must do. An ask, not a result. -->\n\n${block}\n`);
+  return {
+    taskId: input.taskId,
+    escalated: chosen,
+    written: `${input.taskId}/${TEST_RESULTS_DIR}/${ESCALATIONS_FILE}`,
+    next: 'it is listed under WAITING ON THE HUMAN until each scenario has a result or is skipped by the owner; test every other scenario meanwhile',
+  };
+}
+
+/** The asks of a round's needs-human.md, each with the scenarios still open (no result, not skipped). */
+export function escalations(resultsDir: string): Escalation[] {
+  const path = join(resultsDir, ESCALATIONS_FILE);
+  if (!existsSync(path)) return [];
+  const verdicts = recordedVerdicts(resultsDir);
+  const skipped = readSkipped(resultsDir);
+  const text = readFileSync(path, 'utf8').replace(/\r\n?/g, '\n');
+  const out: Escalation[] = [];
+  for (const part of text.split(/^## Escalated\b/m).slice(1)) {
+    const block = part.split(/^---\s*$/m)[0] ?? part;
+    const date = /\d{4}-\d{2}-\d{2}/.exec(block.split('\n', 1)[0] ?? '')?.[0] ?? '';
+    const by = (/^\*\*By:\*\*\s*(.+)$/m.exec(block)?.[1] ?? '').trim();
+    const scenarios = ((/^\*\*Scenarios:\*\*\s*(.+)$/m.exec(block)?.[1] ?? '').match(/\d+/g) ?? []).map(Number);
+    const ask = (/^### Ask\s*\n([\s\S]*?)(?=^### Tried\b|$(?![\s\S]))/m.exec(block)?.[1] ?? '').trim();
+    out.push({ date, by, scenarios, ask, open: scenarios.filter((n) => !verdicts.has(n) && !skipped.has(n)) });
+  }
+  return out;
 }

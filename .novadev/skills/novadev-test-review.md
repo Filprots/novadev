@@ -3,7 +3,9 @@
 <!-- managed by `novadev deploy` — local edits will be overwritten on the next deploy.
      Project-specific rules belong in the wiki (conventions page), not here. -->
 
-The human has been testing. Now they are telling you what happened — in one go, in their
+Testing here is a tester agent's job (`/novadev-test`), and a person is asked only for
+what it cannot run. But the human has been testing anyway — an ask the tester escalated, or
+on their own accord. Now they are telling you what happened — in one go, in their
 own order, in their own words: what they tried, what passed, what broke, what they want
 changed, with a screenshot or two attached. They name the feature by its number or just
 by a word ("the selection thing", "16", "pipe laying").
@@ -23,8 +25,8 @@ wanted to be guided scenario by scenario they would have used `/novadev-what-to-
 3. **File a todo** for anything they want CHANGED — with `/novadev-file-a-todo`.
 
 You may **NOT** edit a test plan, change its `status`, `revision` or `verdict`, mark a
-task done, or archive a round. An agent reviews the results and closes the loop in phase
-6 of `/novadev-work`; your part ends when the file is written. So never say "task
+task done, or archive a round. The round's tester (an agent, `/novadev-test`) reviews the
+results and closes the loop by phase 6 of `/novadev-work`; your part ends when the file is written. So never say "task
 closed" or "round complete" — say which file you wrote.
 
 **Never claim a write you did not make**, and never invent a verdict they did not give.
@@ -100,6 +102,7 @@ cat > /tmp/review.json <<'JSON'
       "attachments": ["/abs/path/shot.png"] }
   ],
   "notes": "…anything they want added or changed…",
+  "by": "human",
   "attachments": ["/abs/path/general.png"] }
 JSON
 novadev test-result review /tmp/review.json
@@ -124,7 +127,7 @@ which images landed in it. Then, if they asked for changes or something failed:
 - Offer to file it with **`/novadev-file-a-todo`** — show the split, wait for their yes.
   Their words go in verbatim; add the context this conversation carries (which scenario,
   what they saw, which screenshot shows it).
-- Say plainly that an agent will read this round and close it (phase 6 of
+- Say plainly that the round's tester will read this and close the round (phase 6 of
   `/novadev-work`) — they do not have to do anything else with the folder.
 
 Do not run `novadev sync` yourself for this; writing evidence into an open round changes

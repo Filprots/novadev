@@ -1,11 +1,14 @@
-# novadev-what-to-test — walk one scenario with the human
+# novadev-what-to-test — walk what the tester escalated, one scenario with the human
 
 <!-- managed by `novadev deploy` — local edits will be overwritten on the next deploy.
      Project-specific rules belong in the wiki (conventions page), not here. -->
 
-The human is the person who tests this software by hand. Your job is to make one test
-round easy for them: show what is waiting, help them choose, tell them what to do, and
-write down what they find.
+Testing in this project is done by a TESTER agent (`/novadev-test`): it builds the tools it
+needs and runs the plans itself. It comes to the human only for what it truly cannot run —
+a real device, a login only they hold, a judgement only a person can make — and writes each
+such ask, the smallest it could make it, into the round's `test-results/needs-human.md`
+(`novadev test-result escalate`). Your job is to make those asks easy: show what is waiting
+on them, help them choose, tell them what to do, and write down what they find.
 
 This is the guided one, scenario by scenario. If they have ALREADY tested and are just
 reporting what happened, that is `/novadev-test-review` — do not make them walk a menu
@@ -20,8 +23,8 @@ first.
 
 You may **NOT**: mark a scenario "done", close or complete a task, change a plan's
 `status` or `revision`, edit a test plan, or decide a round is over. That is not yours to
-decide — an agent reviews the results and closes the round afterwards, in phase 6 of
-`/novadev-work`. Writing a result is the whole of your part.
+decide — the round's tester (an agent, `/novadev-test`) reviews the results and closes the
+round afterwards, by phase 6 of `/novadev-work`. Writing a result is the whole of your part.
 
 So never write sentences like "task closed", "✅ scenario 1 — DONE", or "test completion
 logged". Say what you actually did: *"Written to
@@ -39,21 +42,25 @@ their round is recorded.
 novadev test-result tasks
 ```
 
-It answers with every open task: its id, its feature, the revision, whether results are
-already in, and each scenario's number, title and priority. Present the waiting tasks in
-a short numbered list: feature and scope in one line, then the scenarios as sub-items.
+It answers with every open task: its id, its feature, the revision, each scenario's number,
+title and priority, and `needsHuman` — the tester's open asks, each with its scenarios, the
+ask itself and who asked. **The asks are the menu.** Present them in a short numbered list:
+feature and scope in one line, then the ask in plain words and the scenario(s) it is for.
+Rounds without an open ask are the tester's, not theirs — do not offer them; if there are
+none at all, say plainly that nothing is waiting on them and stop.
 When the feature's name alone says little, its one-line description in
 `.novadev/knowledge/features/index.md` says what it is, in the words the project uses.
-Put the tasks with NO results first — nobody has walked those. Where results exist, say
-which scenarios are already recorded so they do not repeat one. Keep it short: a menu,
-not a wall of text. End by asking which number they want.
+Keep it short: a menu, not a wall of text. End by asking which number they want.
 
-**2. When they choose**, read that scenario carefully — the whole `test-plan.md`,
-including `## Revisions`, which says what changed since they last tested this feature.
+**2. When they choose**, read the ask in `test-results/needs-human.md` (its *Ask* and what
+the tester *Tried*) and the scenario it is for in `test-plan.md`, with `## Revisions`.
 Then tell them what to do, as a short numbered walk-through in their own screen's terms:
-what to open, what to click, what to watch for, and what "pass" looks like. Take the
-pass/fail wording from the scenario — it was written for exactly this moment. Mention the
-plan's **Setup** line so they start in the right place.
+exactly what the tester asked — no more. When the ask is for something the tester needs
+(credentials, a device plugged in, a setting) rather than a walk, tell them how to provide
+it, and that the tester runs the scenario once they have; there is no verdict to record
+then — say in one sentence what they provided (never the secret itself) as a result note
+only if they want it on record. When it is a walk, take the pass/fail wording from the
+scenario and mention the plan's **Setup** line so they start in the right place.
 
 **3. When they report back** — "it worked", "it failed, the hose stayed on the old pipe",
 "partly: X was fine but Y flickered" — write it down:
@@ -64,11 +71,14 @@ cat > /tmp/result.json <<'JSON'
   "scenario": 1,
   "title": "Drag the pill out of the way, and it stays there",
   "text": "pass — …their words…",
+  "by": "human",
   "attachments": ["/abs/path/photo.jpg"] }
 JSON
 novadev test-result write /tmp/result.json
 ```
 
+- `by` is `"human"` (the person in git's user.name) or `human:<id>` — it is written as
+  **Tested by**, so the review knows a person, not the tester, saw this.
 - `text` is THEIR words, kept as they said them, with a first line that states the verdict
   plainly ("pass", "fail", "partial"). Add anything they mentioned that the scenario did
   not ask about — that off-script observation is usually the most valuable part of a round.
@@ -109,8 +119,10 @@ for it.
 - If they name a feature instead of a number ("let's test the connect thing"), pass it to
   `novadev test-result tasks <query>` — it matches on the id, the feature number, the
   scope and the scenario titles — then confirm which one you picked.
-- If nothing is `awaiting-test`, say plainly that the queue is empty and stop. A task whose
-  `status` is `reviewed` is closed (reviewed, or skipped by the owner) — never offer it.
+- If no round has an open ask, say plainly that nothing is waiting on them and stop. A task
+  whose `status` is `reviewed` is closed (reviewed, or skipped by the owner) — never offer it.
+- If they want to test something the tester did NOT ask about, they may: record it the same
+  way. It is a result like any other, and the tester reviews it with the rest.
 - A scenario marked **skipped** (in `test-results/skipped.md`) is not waiting on them — do not
   offer it. If they say a scenario or the rest of a round is not worth testing ("skip it",
   "close the rest"), that is the owner's decision to record, not a verdict: tell them an agent

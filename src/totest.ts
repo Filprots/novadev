@@ -1,17 +1,19 @@
-// `novadev totest` — the human-verification queue.
+// `novadev totest` — the testing queue. A TESTER — an agent that did not build the work — walks
+// it (/novadev-test): builds the tools it needs, runs every scenario, records the results and
+// closes the round. A person is waited on only for the scenarios the tester escalated.
 //
 // One LIVING task per feature: `--new` refuses to create a second folder for a feature
-// that already has one, and `--round` opens a fresh testing round on the existing task
-// (rotating the last round's plan + results into history/). The plan itself is revised
-// by an agent — stale scenarios rewritten or dropped — never accumulated.
+// that already has one, and `--round` opens a fresh testing round on the existing task,
+// reviving the plan from the newest archived round. The plan itself is revised by the
+// builder — stale scenarios rewritten or dropped — never accumulated.
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { type RoundState, askLines, roundJson, roundState } from './test-queue.ts';
 import {
   TEST_PLAN_FILE,
   TEST_RESULTS_DIR,
   TEST_TASK_RE,
   type TestRound,
-  type TestTask,
   fail,
   featureIdsIn,
   listFeatures,
@@ -37,51 +39,58 @@ export function totest(args: string[]): void {
   if (opts.json) {
     // The queue as data (a chat bot answering "what is waiting for me to test?"); the plan's scenarios: `test-result tasks`.
     console.log(JSON.stringify({
-      tasks: tasks.map((t) => ({ id: t.id, features: t.featureIds, status: t.status, scenarios: t.scenarios, revision: t.revision || 1, lastTested: t.lastTested || null, readyForReview: t.hasResults, results: t.results, todos: t.todoRefs, scope: (t.fm['scope'] ?? '').trim() })),
+      tasks: tasks.map((t) => ({ ...roundJson(roundState(t)), status: t.status, scope: (t.fm['scope'] ?? '').trim() })),
       ...(opts.all ? { rounds: rounds.map((r) => ({ task: r.taskId, round: r.round, verdict: r.verdict || null, year: r.year })) } : {}),
     }, null, 2));
     return;
   }
   if (tasks.length === 0) {
-    console.log('totest — nothing waiting on you. ✓');
+    console.log('totest — no open test round. ✓');
     if (opts.all && rounds.length > 0) printRounds(rounds);
     else if (rounds.length > 0) {
-      console.log(`  (${rounds.length} completed round(s) in the archive — \`novadev totest --all\`)`);
+      console.log(`  (${rounds.length} completed round(s) in the archive — \`novadev totest --all\``);
     }
     return;
   }
 
   // A round closed (reviewed, or skipped by the owner) waits only for `novadev sync` to archive it.
+  const states = tasks.map(roundState);
   const closed = tasks.filter((t) => t.status === 'reviewed');
-  const ready = tasks.filter((t) => t.hasResults && t.status !== 'reviewed');
-  console.log(`totest — ${tasks.length - closed.length} awaiting you, ${ready.length} ready for review`);
-  for (const t of tasks) print(t);
+  const forTester = states.filter((r) => r.tester !== null);
+  const asks = states.flatMap(askLines);
+  console.log(`totest — ${tasks.length - closed.length} open round(s): ${forTester.length} for a tester, ${asks.length} ask(s) waiting on a person`);
+  for (const r of states) print(r);
   if (opts.all && rounds.length > 0) printRounds(rounds);
 
-  if (ready.length > 0) {
+  if (forTester.length > 0) {
     console.log(
-      `\n${ready.length} task(s) have results waiting — run \`/novadev-work\` so an agent` +
-        '\nreads them and closes the loop (ai_confirmed.md, or follow-up todos for the failures).',
+      `\n${forTester.length} round(s) wait on a TESTER: an agent that did not build the work runs` +
+        '\n`/novadev-test` — it builds the tools it needs, runs every scenario, records the results' +
+        '\nand closes the round (ai_confirmed.md, or follow-up todos for the failures).',
+    );
+  }
+  if (asks.length > 0) {
+    console.log(
+      `\n${asks.length} ask(s) need a PERSON — scenarios the tester could not run itself:` +
+        `\n${asks.map((a) => `  ⧗ ${a}`).join('\n')}` +
+        '\n`/novadev-what-to-test` walks one with them and records what they found.',
     );
   }
   if (closed.length > 0) console.log(`\n${closed.length} round(s) are closed — \`novadev sync\` archives them.`);
-  const untested = tasks.filter((t) => !t.hasResults && t.status !== 'reviewed');
-  if (untested.length > 0) {
-    console.log(
-      `\n${untested.length} task(s) still need YOUR hands: open the ${TEST_PLAN_FILE}, walk the` +
-        `\nscenarios, and write what happened into that task's ${TEST_RESULTS_DIR}/ folder —` +
-        '\nor just say what you found and let `/novadev-test-review` write it up for you.',
-    );
-  }
 }
 
-function print(t: TestTask): void {
+function print(r: RoundState): void {
+  const t = r.task;
   if (t.status === 'reviewed') {
     const skipped = Number(t.fm.skipped ?? '') || 0;
     console.log(`  ✓ ${t.id}  — CLOSED (${(t.fm.verdict ?? '').trim() || 'reviewed'}${skipped > 0 ? `, ${skipped} scenario(s) skipped by the owner` : ''}), waiting for \`novadev sync\` to archive it`);
     return;
   }
-  console.log(`  ${t.hasResults ? '◆' : '○'} ${t.id}  — ${t.hasResults ? 'READY FOR REVIEW' : 'awaiting your test'}`);
+  const state =
+    r.tester === 'test' ? `for a tester: ${r.untested.length || t.scenarios} scenario(s) to test`
+      : r.tester === 'close' ? 'for a tester: every scenario has a result — review and close'
+        : 'waiting on a person (escalated)';
+  console.log(`  ${r.tester === 'close' ? '◆' : r.tester === null ? '⧗' : '○'} ${t.id}  — ${state}`);
   const meta = [
     `${t.scenarios} scenario(s)`,
     `rev ${t.revision || 1}`,
@@ -89,6 +98,7 @@ function print(t: TestTask): void {
   ].filter(Boolean);
   console.log(`      ${meta.join(' · ')}`);
   if (t.todoRefs.length) console.log(`      todos: ${t.todoRefs.join(', ')}`);
+  for (const a of r.asks) console.log(`      needs a person: scenario ${a.open.join(', ')} (test-results/needs-human.md)`);
   if (t.hasResults) console.log(`      results: ${t.results.join(', ')}`);
   if (!existsSync(t.planPath)) console.log(`      ✗ missing ${TEST_PLAN_FILE}`);
   if (t.legacyRounds.length) {
@@ -206,8 +216,9 @@ function scaffold(nd: string, opts: Options): void {
 
   console.log(`created totest/${id}/`);
   console.log(`  ${TEST_PLAN_FILE}            (write the scenarios — steps, pass, fail)`);
-  console.log(`  ${TEST_RESULTS_DIR}/README.md   (how the human records what happened)`);
+  console.log(`  ${TEST_RESULTS_DIR}/README.md   (how the tester records what happened)`);
   console.log(`\nNow add ai_needstest.md to each originating todo with:  **Test:** ${id}`);
+  console.log('Then hand the round to a tester: an agent that did not build it runs `/novadev-test`.');
 }
 
 /**
@@ -234,8 +245,8 @@ function newRound(nd: string, input: string): void {
     if (open.hasResults) {
       fail(
         `totest/${id} still holds unreviewed results (${open.results.join(', ')}).\n` +
-          '  Run `/novadev-work` to close that round first — starting a new one now\n' +
-          '  would bury testing the human already did.',
+          '  Its tester closes that round first (`/novadev-test`) — starting a new one now\n' +
+          '  would bury testing already done.',
       );
     }
     console.log(`totest/${id} is already open — reopening it at revision ${revision}.`);
@@ -273,7 +284,7 @@ function newRound(nd: string, input: string): void {
     `\ntotest/${id} is open at revision ${revision}.\n` +
       `Now REVISE ${TEST_PLAN_FILE} for what changed: rewrite scenarios whose expectations moved,\n` +
       'delete ones the change made irrelevant, add ones for the new behaviour, and log it under\n' +
-      '"## Revisions" so the human knows what is different since they last tested.',
+      '"## Revisions" so the tester knows what is different since the last round.',
   );
 }
 
@@ -303,15 +314,17 @@ scope: ${o.scope ?? ''}
      scenarios below (rewrite what moved, delete what no longer applies) and log it under
      "## Revisions" — never leave a scenario describing behaviour that no longer exists. -->
 
-**Why this needs a human:** <what could NOT be verified automatically, and why —
-rendering, real device/browser, a third-party service, visual or perceptual
-judgement, timing and "feel", anything behind a login the agent cannot hold>
+**Why this needs a tester:** <what your own tests in the todo could NOT show — the
+real app end to end, a browser or a device, a service, timing, what is on the screen>
 
 **Already verified automatically:** <tests/build/typecheck that DID pass, so the
-human does not redo machine work>
+tester does not redo machine work>
 
-**Setup:** <exact preconditions — branch, build command, URL, account, seed data,
+**Setup:** <exact preconditions — branch, build/start command, URL, account, seed data,
 device/browser matrix>
+
+**Tools:** <what the tester drives it with: the project's test harness, scripts, fixtures,
+a browser driver — and what is MISSING, which the tester builds before it runs the plan>
 
 ## Revisions
 
@@ -325,7 +338,7 @@ device/browser matrix>
 2. <…>
 
 **Expect (pass):** <the observable good outcome — what should be on screen/in the
-response, in enough detail that "looks fine" is not a judgement call>
+response/in the output, in enough detail that "looks fine" is not a judgement call>
 **Watch for (fail):** <the specific bad outcomes that mean broken: the wrong state,
 the visual glitch, the slow path, the error copy>
 
@@ -349,38 +362,37 @@ function resultsGuide(id: string): string {
 
 <!-- Seeded by novadev. Leave this file; add your own files next to it. -->
 
-Walk the scenarios in \`../${TEST_PLAN_FILE}\` and write down what actually happened.
-Anything you add here counts as results, which is what flips this task to
-**ready for review**: a \`results.md\`, screenshots, screen recordings, logs, exports.
+A TESTER — an agent that did not build this work — runs the scenarios in
+\`../${TEST_PLAN_FILE}\` (\`/novadev-test\`) and records what actually happened, one
+scenario at a time, with \`novadev test-result write\` — never by hand: the command appends,
+so a second run never erases the first. Evidence goes beside it: logs, screenshots, the
+output of the tools it built.
 
-Check \`## Revisions\` at the top of the plan first — if you have tested this feature
-before, that line tells you what changed since, so you know which scenarios are new or
-have different expectations this time.
+Check \`## Revisions\` at the top of the plan first — it says what changed since the last
+round, so you know which scenarios are new or have different expectations this time.
 
-A simple \`results.md\` is enough — per scenario:
+A scenario the tester cannot run itself — a real device, a login only a person holds, a
+judgement of how something feels — is escalated with \`novadev test-result escalate\`: the
+smallest thing a person must do, in \`needs-human.md\` here. That is the only part of a
+round that waits on a person. They answer through \`/novadev-what-to-test\`, or give the
+tester what it was missing so it can run the scenario itself.
+
+Per scenario, a result reads:
 
 \`\`\`markdown
 ## Scenario 1 — <name>
-**Verdict:** pass | fail | partial | skipped
-**What I saw:** <what actually happened, in your words>
-**Evidence:** <screenshot filename, if any>
-**Environment:** <browser/device/OS, if it matters>
+pass | fail | partial — <what actually happened>
+**Tested by:** <actor>
 \`\`\`
 
-Then add anything the plan did not ask about but you noticed anyway — that
-off-script observation is usually the most valuable thing in the folder, so write
-it down even when it feels unrelated.
+Write down what the plan did not ask about but you noticed anyway — that off-script
+observation is usually the most valuable thing in the folder.
 
-You do not have to write it yourself. Say what you found — "scenario 2 passed, 3 broke,
-here is a screenshot" — and \`/novadev-test-review\` writes this file for you, with your
-images copied in beside it. \`/novadev-what-to-test\` does the same one scenario at a time,
-walking you through the plan first.
-
-When you are done, run \`/novadev-work\`: an agent reads this folder, judges
-each scenario against its expected outcome, writes \`ai_confirmed.md\` on the
-originating todo(s), and files follow-up todos for whatever failed. This whole round —
-the plan you walked and the results you wrote — is then archived to
-\`archive/<year>/totest/${id}/rev<N>-<date>/\`, and the feature's \`tests.md\` links to
-it. So this folder is always just the round in front of you.
+When every scenario has a result (or is skipped by the owner), the tester reviews the
+round: judges each scenario against its expected outcome, writes \`ai_confirmed.md\` on the
+originating todo(s), files follow-up todos for whatever failed, and closes the plan. The
+round — plan and results — is then archived to \`archive/<year>/totest/${id}/rev<N>-<date>/\`,
+and the feature's \`tests.md\` links to it. So this folder is always just the round in
+front of you.
 `;
 }

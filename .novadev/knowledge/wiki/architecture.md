@@ -12,8 +12,8 @@ sources:
   - resource: repo:src/knowledge.ts
   - resource: repo:src/links.ts
   - resource: repo:src/work.ts
-generated: { by: claude-code/claude-fable-5-2, at: 2026-11-24T13:06:51+01:00 }
-stale_after: 2027-02-22T13:06:51+01:00
+generated: { by: claude-code/claude-opus-5-5, at: 2026-11-24T19:17:08+01:00 }
+stale_after: 2027-02-22T19:17:08+01:00
 ---
 
 # Architecture
@@ -39,8 +39,8 @@ walking up from the cwd to the folder that contains `.novadev/` (`requireProject
 | `work …` (the lock on a todo, or on a whole batch) | `src/work.ts` (also `auditWork`); the registry every worktree reads, and claims: `src/registry.ts` |
 | `file-todo …` | `src/file-todo.ts` (CLI) → `src/todo-filing.ts` (mechanics) |
 | `todo …` | `src/todo.ts` (reuses `todo-filing.ts` and the lock from `work.ts`) |
-| `totest` | `src/totest.ts` |
-| `test-result …` | `src/test-result.ts` (CLI) → `src/test-results.ts` (mechanics) |
+| `totest` | `src/totest.ts`; who an open round waits on (tester / human): `src/test-queue.ts` |
+| `test-result …` | `src/test-result.ts` (CLI) → `src/test-results.ts` (mechanics, incl. `escalate`) |
 | `features` (`--touching`, `--new`) / `--hubs` | `src/features.ts` / `src/feature-hubs.ts` |
 | `links [--fix]`, derived `work.md`/`tests.md` | `src/links.ts` (`auditLinks`) |
 | knowledge bundle: format layer | `src/okf.ts` (OKF 0.2 only — imports no novadev module) |
@@ -88,9 +88,10 @@ the fixes and reports them as "stale" instead of writing.
    other branch the moves are listed as "not archived here". Skipped under `--check`.
 5. **Validate** — links and knowledge are audited again on the moved tree; `auditWork`
    reads the locks. Prints PROBLEMS, *in work*, batches held for grace.
-6. **Lists** — NEXT ACTIONS (locks, knowledge, todos without records, review of walked
-   tests, link notes, postponed triggers, metrics growth, placement), WAITING ON THE
-   HUMAN (tests to walk, paused batches), WAITING ON REVIEW OR MERGE, and ADDRESSED TO A
+6. **Lists** — NEXT ACTIONS (locks, knowledge, todos without records, link notes,
+   postponed triggers, metrics growth, placement), WAITING ON THE HUMAN (paused batches,
+   the asks a tester escalated), WAITING ON A TESTER (open test rounds: scenarios to run, or
+   a round to close — `src/test-queue.ts`), WAITING ON REVIEW OR MERGE, and ADDRESSED TO A
    RECIPIENT (open todos that name a recipient: theirs, never a NEXT ACTION). Exit 1 on problems (or, with `--check`, on any
    stale file, unwritten raise, uncheckable or exceeded budget).
 

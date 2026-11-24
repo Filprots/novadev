@@ -1,7 +1,7 @@
 ---
 type: Wiki Page
 title: Workflows
-description: "Exact commands to install (bun link), run (bun bin/novadev.ts vs the linked novadev, which is this working tree), test (bun test, ~110 s, 767 tests), and release a version (the bump places, migrations, migrate-repo + deploy here and in consumer projects); no CI, no hooks, no secrets."
+description: "Exact commands to install (bun link), run (bun bin/novadev.ts vs the linked novadev, which is this working tree), test (bun test, ~110 s, 776 tests), and release a version (the bump places, migrations, migrate-repo + deploy here and in consumer projects); no CI, no hooks, no secrets."
 tags: [workflows, install, run, test, release, version, deploy, dogfooding]
 sources:
   - resource: repo:package.json
@@ -12,8 +12,8 @@ sources:
   - resource: repo:src/sync.ts
   - resource: repo:src/deploy.ts
   - resource: repo:README.md
-generated: { by: claude-code/claude-fable-5-2, at: 2026-11-24T15:00:49+01:00 }
-stale_after: 2027-02-22T15:00:49+01:00
+generated: { by: claude-code/claude-opus-5-5, at: 2026-11-24T19:17:08+01:00 }
+stale_after: 2027-02-22T19:17:08+01:00
 ---
 
 # Workflows
@@ -41,7 +41,7 @@ No build step, no install step: there are no dependencies. Bun >= 1.4 is require
 ## Test
 
 ```sh
-bun test                     # the whole suite: 767 tests in 41 files, ~110 s (verified 2026-11-24, branch todo-recipient)
+bun test                     # the whole suite: 776 tests in 42 files, ~110 s (verified 2026-11-24, master)
 bun test tests/work.test.ts  # one file
 bun test -t "novadev work stop"   # by test name
 ```
@@ -102,6 +102,11 @@ open worktree of a consumer project until it merges the stamped default branch, 
 had about twenty open worktrees mid-run. Such a change needs no `migrate-repo`; `novadev deploy`
 in each consumer project refreshes the playbooks (until then `novadev doctor` there says the
 playbooks differ from the installed novadev).
+
+Batch 2026-11-24_3 (testing by a tester agent: `/novadev-test`, `test-result escalate`, WAITING ON
+A TESTER) went live on 0.18.0 the same way, and for the same reason; it also left the derived
+`tests.md` wording ("Human test rounds") as it was, because changing derived text makes
+`novadev sync --check` — the worktree gate — fail in every open consumer worktree until it syncs.
 
 ## Editing the playbooks
 

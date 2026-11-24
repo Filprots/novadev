@@ -94,7 +94,7 @@ export function doctor(): void {
           `todos/${batch}/${todo}: stale ${RECORD_PROGRESS} beside a terminal record — delete it (the record replaces it)`,
         );
       }
-      // The human-verification gate: open XOR closed, and never without work behind it.
+      // The testing gate: open XOR closed, and never without work behind it.
       if (files.includes(RECORD_NEEDSTEST) && files.includes(RECORD_CONFIRMED)) {
         problems.push(
           `todos/${batch}/${todo}: BOTH ${RECORD_NEEDSTEST} and ${RECORD_CONFIRMED} present — the review replaces the gate, delete ${RECORD_NEEDSTEST}`,
@@ -183,7 +183,7 @@ export function doctor(): void {
       problems.push(`totest/${task}: name must be <FEAT-NNNN->? <kebab-slug>, after the feature it tests`);
     }
     if (!existsSync(join(taskDir, TEST_RESULTS_DIR))) {
-      problems.push(`totest/${task}: missing ${TEST_RESULTS_DIR}/ — the human has nowhere to report`);
+      problems.push(`totest/${task}: missing ${TEST_RESULTS_DIR}/ — the tester has nowhere to record results`);
     }
   }
 

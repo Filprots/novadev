@@ -8,8 +8,8 @@ sources:
   - resource: repo:package.json
   - resource: repo:bin/novadev.ts
   - resource: repo:templates/skills/novadev-work.md
-generated: { by: claude-code/claude-fable-5-2, at: 2026-11-24T13:07:11+01:00 }
-stale_after: 2027-02-22T13:07:11+01:00
+generated: { by: claude-code/claude-opus-5-5, at: 2026-11-24T19:17:08+01:00 }
+stale_after: 2027-02-22T19:17:08+01:00
 verified:
   - { by: claude-code/claude-opus-5-5, at: 2026-11-12T08:15:41+01:00 }
 ---
@@ -19,10 +19,11 @@ verified:
 ## What it is
 
 **novadev** is a framework-, language- and agent-agnostic *structured development system*.
-One command (`novadev deploy`) puts a git-tracked folder tree, `.novadev/`, plus five agent
+One command (`novadev deploy`) puts a git-tracked folder tree, `.novadev/`, plus six agent
 playbooks and thin agent adapters into any project. From then on a human writes task
 briefs; an AI coding agent runs one fixed loop (ORIENT → … → CLOSE) that does the work,
-writes records, keeps a features registry, hands untestable work to the human, keeps the
+writes records, keeps a features registry, hands what its own tests cannot show to a tester
+agent (which builds the tools it needs and asks the human only what it cannot run), keeps the
 project's knowledge true, and archives what is finished. The folder becomes the project's
 development history.
 
@@ -32,8 +33,8 @@ with who wrote it, who checked it, and when it is due for a re-check.
 
 ## Who uses it
 
-- **The human** (a developer): writes todo briefs, walks the hand tests only a person can
-  walk, answers decisions. Never has to remember a novadev command.
+- **The human** (a developer): writes todo briefs, answers the rare ask a tester agent
+  escalates (`test-result escalate`), answers decisions. Never has to remember a novadev command.
 - **AI coding agents** (Claude Code first — it gets native skills — Cursor via a rule,
   anything else via `AGENTS.md`): run the loop and every novadev command.
 - **Tools away from the repo** (a chat bot / phone-side plugin on the same computer):
@@ -62,8 +63,8 @@ templates, never the copies.
 | File a chat request as a todo, attachments included | `file-todo plan/file` |
 | One todo at a time from outside the repo | `todo list/show/addendum/edit/cancel` |
 | Address a todo to a recipient (a team like `hq`, or one actor): only that one works it | a part's `recipient` in `file-todo`, `todo recipient`, `todo list --for` |
-| Human-testing queue, one living task per feature | `totest` |
-| Record a human's test results (append-only) | `test-result tasks/write/review` |
+| Testing queue, one living task per feature, walked by a tester agent | `totest` |
+| Record test results (append-only, with who tested); the tester's asks to a person | `test-result tasks/write/review/escalate/skip` |
 | Features registry + record↔feature↔commit link graph | `features`, `links` |
 | Knowledge bundle: search, trust, staleness, drift, change log | `knowledge`, `knowledge log` |
 | Metrics hook, debt budget, wiki budgets block | inside `sync` (opt-in) |

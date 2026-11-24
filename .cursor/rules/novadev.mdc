@@ -9,14 +9,19 @@ This project uses novadev (`.novadev/`). Read
 `.novadev/skills/novadev-work.md` — the development playbook — and run THE LOOP
 it defines for any development work here: load pre-context (`.novadev/knowledge/index.md`
 first — the project's knowledge is an Open Knowledge Format bundle: wiki, memories, features)
-→ plan → work → write the ai_ record → hand what you could not verify to the human as
-a `totest/` task → review their results when they land → update the feature →
-memories → wiki, recording every knowledge change with `novadev knowledge log` → close out
-with `novadev sync`.
+→ plan → work → write the ai_ record → hand what your own tests cannot show to a TESTER as
+a `totest/` task → update the feature → memories → wiki, recording every knowledge change
+with `novadev knowledge log` → close out with `novadev sync`.
 
-Four companion playbooks sit beside it:
+Testing is an agent's job. The tester — an agent that did not build the work — follows
+`novadev-test.md`: it builds the testing tools it needs, runs every scenario itself, records
+the results, reviews the round and closes the gate. A person is asked only for the scenarios
+the tester truly cannot run (`novadev test-result escalate`), and only the smallest thing.
+
+Five companion playbooks sit beside it:
+`novadev-test.md` (the tester's playbook),
 `novadev-file-a-todo.md` (turn a chat request into a todo folder),
-`novadev-what-to-test.md` (walk the testing queue with them),
+`novadev-what-to-test.md` (walk what the tester escalated with them),
 `novadev-test-review.md` (write up testing they already did) and
 `novadev-pause.md` (stop the loop where it is, so the next session resumes from there).
 

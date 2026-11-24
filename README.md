@@ -3,7 +3,8 @@
 A **framework/language/IDE/agent/LLM-agnostic structured development system**.
 One command deploys a git-tracked folder tree + one agent playbook into any project.
 From then on you write task briefs; the agent runs a fixed loop that does the work,
-records it, registers the feature, hands you what only a human can test, keeps the
+records it, registers the feature, hands what its own tests cannot show to a tester agent
+(which builds the tools it needs and asks you only for what it truly cannot run), keeps the
 knowledge true, and archives what is finished. The folder becomes the development history.
 
 The project's knowledge — its wiki, its memories, its features — is one
@@ -59,9 +60,10 @@ novadev migrate-repo                  # upgrade an older .novadev/ layout to thi
 ```
 
 Most of the time you do not type any of these — you talk to the agent, and it runs
-them. Five slash commands come with the deploy: `/novadev-work` (do the work),
-`/novadev-file-a-todo` (file what you just said), `/novadev-what-to-test` (walk the
-queue with me), `/novadev-test-review` (write up testing you already did),
+them. Six slash commands come with the deploy: `/novadev-work` (do the work),
+`/novadev-test` (be the tester of a round another agent built),
+`/novadev-file-a-todo` (file what you just said), `/novadev-what-to-test` (walk what the
+tester asked of me), `/novadev-test-review` (write up testing you already did),
 `/novadev-pause` (stop where we are; the next `/novadev-work` picks up from there).
 
 ## Upgrading
@@ -175,6 +177,16 @@ and a project that addresses none prints as before. The JSON outputs gain `recip
 todo and `addressed` in `status --json`. And `novadev test-result write` takes any scenario
 number a plan has (it stopped at 99). See *Recipients* below.
 
+Also since 2026-11-24 (still 0.18.0; run `novadev deploy`): **testing is a tester agent's job,
+not the human's.** An open test round waits on a TESTER — an agent that did not build the work,
+running the new `/novadev-test` playbook — and `novadev sync` lists it under **WAITING ON A
+TESTER**, no longer under WAITING ON THE HUMAN nor as a REVIEW in the builder's NEXT ACTIONS. The
+human is waited on only for what the tester escalates: `novadev test-result escalate`
+(`test-results/needs-human.md`). `test-result write` and `review` take `"by"` (who tested); the
+JSON of `totest --json`, `status --json` and `test-result tasks` gains `tester`, `untested` and
+`needsHuman`, and `readyForReview` now means *every scenario has a result*. Open rounds of an
+existing project keep their layout and go to a tester as they are. See *Testing* below.
+
 Also since 2026-11-24, for a project that moved repositories: `"commitsSince": "<day>"` (records
 dated before it are not asked for their commits) and the meaning of an empty `"subrepos": []`
 (the project has no sub-repos: a `**Repos:**` line is free text). Both opt-in; see *Sub-repos*.
@@ -195,9 +207,9 @@ dated before it are not asked for their commits) and the meaning of an empty `"s
   archive/     finished work by year — <year>/todos/<batch>/ and <year>/totest/<task>/<round>/
   postponed/   deferred work with do-when / discard-if triggers
   sparks/      raw unshaped ideas
-  totest/      the ACTIVE queue of tests waiting on a human (rounds archive once reviewed)
+  totest/      the ACTIVE queue of test rounds, walked by a tester agent (rounds archive once reviewed)
   metrics/     latest.json — the newest snapshot of the project's own numbers (when a metrics command is set)
-  skills/      the five canonical playbooks, novadev-*.md (agent-agnostic; managed by deploy)
+  skills/      the six canonical playbooks, novadev-*.md (agent-agnostic; managed by deploy)
 ```
 
 **Archiving has a grace period.** A batch whose todos are all recorded gets an
@@ -223,36 +235,46 @@ why) into the todo folder; long-running work carries `ai_progress.md`. One recor
 per todo, updated in place if status changes. Every record also says where its new
 code went, in a `## Placement` section (see *Placement* below).
 
-**Human testing.** Agent-verified is not human-verified. When work lands that an
-agent could not check itself — how it renders, how it feels, a real device, a
-third-party sandbox — it does not say "please double-check this" in chat, where the
-hand-off scrolls away. It files a task in `totest/` with a stepped `test-plan.md`
-(every scenario carrying an explicit **Expect (pass)** and **Watch for (fail)**) plus
-an empty `test-results/` for your notes and screenshots, and gates the todo with
-`ai_needstest.md`.
+**Testing.** What the builder's own tests cannot show — the real app end to end, a
+browser, a device, a service, what is on the screen — it does not claim, and it does not
+test itself either: **a builder never tests its own round.** It files a task in `totest/`
+with a stepped `test-plan.md` written for a TESTER (every scenario carrying an explicit
+**Expect (pass)** and **Watch for (fail)**, the header naming the setup and the tools to
+drive it with), gates the todo with `ai_needstest.md` (`**Built by:**` its actor), and hands
+the round over.
+
+The tester is an agent that did not build the work — a fresh session or a sub-agent,
+running `/novadev-test`. **Its main work is the tooling**: it builds the harnesses, drivers,
+fixtures, fakes and scripts it needs (filed and recorded as their own todo, documented in the
+wiki), runs every scenario itself, records each result with evidence (`novadev test-result
+write`, `"by"` naming it), then reviews the round and closes the gate on every todo it gated
+(`ai_confirmed.md` with **Tested by**, **Tools built for it**, **Escalated to the human**),
+filing a follow-up todo for every failure.
+
+**You are asked only for what the tester truly cannot run** — a real device nobody
+connected, a login only you hold, a judgement only a person can make — and only the smallest
+part of it. The tester writes the ask with `novadev test-result escalate payload.json`
+(`{ "taskId", "scenarios": [n,…], "by": <tester>, "ask", "tried" }`) into the round's
+`test-results/needs-human.md`; `novadev sync` lists it under **WAITING ON THE HUMAN** until the
+scenario has a result — yours (`/novadev-what-to-test` walks it with you), or the tester's once
+you gave it what it was missing — or you skip it.
 
 Tasks are named after the feature (`totest/FEAT-0007-magic-link/`), one per feature,
-and `totest/` holds only **open** rounds — so everything in it is genuinely waiting on
-you. A reviewed round archives to `archive/<year>/totest/<task>/rev<N>-<date>/` with
-its plan and your evidence intact, and the feature's `tests.md` lists it with its
-verdict.
+and `totest/` holds only **open** rounds. A reviewed round archives to
+`archive/<year>/totest/<task>/rev<N>-<date>/` with its plan and its evidence intact, and the
+feature's `tests.md` lists it with its verdict.
 
-When later work changes that feature, the agent revives the task from its last
+When later work changes that feature, the builder revives the task from its last
 archived round and revises the plan: rewriting scenarios whose expectations moved,
 deleting ones the change made irrelevant, adding ones for the new behaviour, and
-logging what changed under `## Revisions` so you know what is different since you last
-tested. That rule exists because a scenario describing behaviour that no longer exists
-is worse than no scenario — you would walk it, hit the old expectation, and report a
-failure that is really just a stale plan.
+logging what changed under `## Revisions`. That rule exists because a scenario describing
+behaviour that no longer exists is worse than no scenario — the tester would run it, hit the
+old expectation, and report a failure that is really just a stale plan.
 
 That gate is **not terminal**: `novadev sync` refuses to archive the batch while it is
-open, so a pending test cannot be forgotten. `novadev totest` (and the top of
-`novadev status`) shows what is waiting on you. You test and write results into the
-folder — that is your whole part. The next `novadev sync` sees them and puts the
-review on the agent's list: it reads your notes and screenshots, judges each scenario
-against its written expectation, writes `ai_confirmed.md` with the verdict on every
-todo the round gated, and files follow-up todos for whatever failed. An agent never
-reviews a task with an empty results folder — silence is never read as a pass.
+open, so a pending test cannot be forgotten. `novadev totest` (and `novadev status`) shows
+every open round and who it waits on. A round is reviewed only once every scenario has a
+result or was skipped — a missing result, or an ask nobody answered, is never read as a pass.
 
 **Skipping a test.** Sometimes a round is not worth a person's time: the result matters
 little, or the backlog of scenarios is too long. Only you decide that. Say so, and the agent
@@ -265,7 +287,8 @@ really tested), `skipped:` and `skipped-by:` in its frontmatter, a line under `#
 and every todo it gated gets `ai_testskipped.md` in place of `ai_needstest.md`: **not tested by
 a human**, never `ai_confirmed.md`, so the todo is `completed`, not `confirmed`. `novadev sync`
 archives the round, and the feature's `tests.md` lists it as skipped by the owner. `by` must be a
-person: an agent relays the owner's decision, it never makes it.
+person: an agent relays the owner's decision, it never makes it — a tester that cannot run a
+scenario escalates it, it does not skip it.
 
 **Chat-initiated work.** When the human asks an agent in chat to
 implement/fix/change something that no open todo already covers, the agent must
@@ -290,7 +313,7 @@ time-wasting.
 **Features + links.** `knowledge/features/` registers every capability as a folder
 `FEAT-NNNN-<slug>/` — you write `feature.md` (its `feature-status`, area, tags, the code it
 `touches`, and `depends-on`/`supersedes`/`conflicts-with` relations), and `work.md` (every todo,
-record and commit that built it) plus `tests.md` (every human test round and its
+record and commit that built it) plus `tests.md` (every test round and its
 verdict) are generated beside it. Before anything new is designed, the registry is
 searched — `novadev features --touching src/auth` answers "what already owns this
 code?" — so duplicates and conflicts get caught at proposal time rather than in review.
@@ -332,23 +355,27 @@ a single loop the agent runs for every round of work:
 `novadev sync` is the close-out and the engine: it runs the project's metrics command
 (when one is set), regenerates every derived file, archives finished batches and reviewed
 test rounds, validates the tree, the link graph and the knowledge bundle, and prints two
-lists — **NEXT ACTIONS** (the agent's) and **WAITING ON THE HUMAN**. The agent works its list and re-runs
-until it reports clean:
+lists — **NEXT ACTIONS** (the agent's), **WAITING ON A TESTER** (open test rounds) and
+**WAITING ON THE HUMAN**. The agent works its list and re-runs until it reports clean:
 
 ```
 $ novadev sync
 derived: regenerated 3 file(s)
 
 NEXT ACTIONS — you (1):
-  → REVIEW totest/FEAT-0001-login — the human left results (results.md); judge them,
-    close the gate, file follow-ups (loop phase 6)
+  → 2026-11-24_1/02-export has no record yet — do the work, then record it
 
 WAITING ON THE HUMAN (1):
-  ⧗ totest/FEAT-0002-export — 3 scenario(s) to walk; write what happens into its test-results/
+  ⧗ totest/FEAT-0002-export scenario 4 — the tester (claude-code/claude-opus-5-5) cannot run it
+    itself and asks you: Open the export on a real iPad — `/novadev-what-to-test` walks it with you
+
+WAITING ON A TESTER — an agent that did not build it runs `/novadev-test` (1):
+  ◎ totest/FEAT-0001-login — every scenario has a result for 2026-11-24_1/01-login: review
+    the round, close the gate, file follow-ups
 ```
 
-**You write todo briefs and walk the tests only a person can walk. That is the whole
-job.** No command to remember, no skill to pick, no archive step to run — if
+**You write todo briefs, and answer the rare ask a tester cannot do without you. That is
+the whole job.** No command to remember, no skill to pick, no archive step to run — if
 something needs doing and an agent can do it, `sync` says so and the agent does it.
 
 ## Priority and order — what to take first
@@ -1644,15 +1671,17 @@ the ones the placement check uses: the stored snapshot's, or else `hubs` in `nov
 command only reads files. It never runs the metrics command. With no hub paths, it says how to
 set them and exits with 1.
 
-## The four companion playbooks
+## The five companion playbooks
 
-The loop above is what an agent runs. Four more playbooks cover the moments when YOU
-start the conversation — or end it — and each deploys as a slash command of the same name:
+The loop above is what an agent runs. Five more playbooks sit beside it — the tester's, and
+four for the moments when YOU start the conversation, or end it — and each deploys as a slash
+command of the same name:
 
 | You say | Playbook | What it does |
 |---|---|---|
+| "test it", "run the round" — or sync lists WAITING ON A TESTER | **`/novadev-test`** | the TESTER's playbook, for an agent that did not build the work: takes the round, builds the tools it needs, runs every scenario, records results with evidence, escalates only what it cannot run, then reviews and closes the round |
 | "file this", a bug from your phone, "we should…" | **`/novadev-file-a-todo`** | turns what you just said into real todo folders — your words verbatim, your screenshots copied in — shows you the split, and waits for a yes before writing |
-| "what should I test?" | **`/novadev-what-to-test`** | shows the queue, helps you pick, walks you through one scenario, and writes the verdict down |
+| "what should I test?" | **`/novadev-what-to-test`** | shows what the tester asked of you, helps you pick, walks you through it, and writes the verdict down |
 | "I tested the selection thing — 3 broke, here is a shot" | **`/novadev-test-review`** | takes a whole round of testing you already did, in any order and any words, and files it as a formed review in that task's `test-results/` with every file attached |
 | "pause", "stop here", "let's continue tomorrow" | **`/novadev-pause`** | records the work that landed, then writes into the todo's lock exactly where things stopped — the step, the state of the tree, what is next, how to resume — and offers a commit of the work in progress; the next `/novadev-work` resumes from it |
 
@@ -1664,8 +1693,9 @@ novadev file-todo plan                  # which batch a chat request lands in, a
 novadev file-todo file payload.json     # write the folders, the briefs, and the attachments (a part's "priority" and "after" → its todo.json)
 
 novadev test-result tasks [query]       # resolve "16" / "the selection one" against the real queue
-novadev test-result write payload.json  # one scenario's verdict → scenario-<N>.txt   (APPENDS)
-novadev test-result review payload.json # a whole round → review.md                   (APPENDS)
+novadev test-result write payload.json  # one scenario's verdict ("by": who tested) → scenario-<N>.txt   (APPENDS)
+novadev test-result review payload.json # a whole round ("by": who tested) → review.md                 (APPENDS)
+novadev test-result escalate payload.json # the tester's ask to a person, for scenarios it cannot run → needs-human.md
 novadev test-result skip payload.json   # the owner skips scenarios / the rest → skipped.md; closes the round (ai_testskipped.md)
 
 novadev work pause <batch>/<todo> payload.json # the pause record, newest entry of the todo's lock
@@ -1690,8 +1720,8 @@ walk of a scenario must never erase the first.
 The playbooks are plain markdown any agent can follow. `novadev deploy`
 additionally generates thin native adapters that just route to them:
 
-- `.claude/skills/novadev-{work,file-a-todo,what-to-test,test-review,pause}/SKILL.md` —
-  the five Claude Code skills. They share the `novadev-` prefix on purpose: typing
+- `.claude/skills/novadev-{work,test,file-a-todo,what-to-test,test-review,pause}/SKILL.md` —
+  the six Claude Code skills. They share the `novadev-` prefix on purpose: typing
   `/novadev` offers the whole set
 - `.cursor/rules/novadev.mdc` — Cursor always-applied rule
 - managed marker sections in `AGENTS.md` and `CLAUDE.md` (created if missing;

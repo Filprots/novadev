@@ -12,8 +12,8 @@ sources:
   - resource: repo:src/debt-budget.ts
   - resource: repo:src/placement.ts
   - resource: repo:templates/skills/novadev-work.md
-generated: { by: claude-code/claude-fable-5-2, at: 2026-11-24T13:06:51+01:00 }
-stale_after: 2027-02-22T13:06:51+01:00
+generated: { by: claude-code/claude-opus-5-5, at: 2026-11-24T19:17:08+01:00 }
+stale_after: 2027-02-22T19:17:08+01:00
 ---
 
 # Glossary
@@ -35,10 +35,10 @@ wording for agents; this page maps each word to the code.
 - **Record** — the agent's file in a todo: `ai_completed.md`, `ai_failed.md` (deferred,
   cancelled, merged, blocked), `ai_progress.md`. Its `**Feature:**`, `**Commits:**` and
   `**Date:**` lines are the authored links (`readField`).
-- **Gate** — `ai_needstest.md`: work landed but a person must test it. Outranks every
+- **Gate** — `ai_needstest.md`: work landed but a tester must still test it (`**Built by:**` names the builder). Outranks every
   other record (`todoState`) and is *not* terminal, so the batch cannot archive. Closed by
   `ai_confirmed.md` after review — or by `ai_testskipped.md` (`RECORD_TESTSKIPPED`) when the owner
-  skipped the round (`novadev test-result skip`): not human-tested, the todo stays `completed`.
+  skipped the round (`novadev test-result skip`): not tested, the todo stays `completed`.
 - **Todo state** — `open · progress · completed · failed · needstest · confirmed`, and the review
   gate's `changes · review · unmerged` (`src/review.ts`); terminal = completed, failed, confirmed
   (`TERMINAL_STATES`).
@@ -70,7 +70,7 @@ wording for agents; this page maps each word to the code.
 - **Abandoned** — a `working` lock whose process is gone (same host) or with no heartbeat
   for 120 min (`STALE_AFTER_MINUTES`); `work start` takes it over without `--take`.
 
-## Human testing
+## Testing
 
 - **Test task** — `totest/<task>/` (usually `FEAT-NNNN-<slug>`): `test-plan.md` with
   `## Scenario` sections (Expect (pass) / Watch for (fail)) and `test-results/`. One
@@ -78,7 +78,17 @@ wording for agents; this page maps each word to the code.
 - **Round** — one pass of testing on a task (`revision`); a reviewed round archives as
   `rev<N>-<date>`. Status `awaiting-test` → `reviewed`.
 - **Scenario file / review** — `test-result write` appends to `scenario-<N>.txt`;
-  `test-result review` appends a dated block to `review.md`. Never overwritten.
+  `test-result review` appends a dated block to `review.md`. Never overwritten. Both carry
+  `**Tested by:**` when the payload names `by`.
+- **Builder / tester** — the builder did the todo's work; the TESTER is an agent that did not
+  (fresh session or sub-agent) and runs the round with `/novadev-test` (`templates/skills/novadev-test.md`):
+  builds the tools, runs every scenario, closes the round. Builder ≠ tester is a playbook rule,
+  not code: actors are `<tool>/<model>`, so two sessions of one model share an actor.
+- **Escalation** — the tester's ask to a person for scenarios it cannot run, `test-result escalate`
+  → `test-results/needs-human.md` (`ESCALATIONS_FILE`); open until each scenario has a result or
+  is skipped (`escalations()` in `src/test-results.ts`). The only testing that waits on the human.
+- **Round state** — `roundState()` in `src/test-queue.ts`: `tester` is `test` (scenarios left),
+  `close` (every scenario has a result or is skipped) or null (only the human's asks are left).
 
 ## Knowledge
 
@@ -150,6 +160,7 @@ wording for agents; this page maps each word to the code.
 - **Derived block / file** — content novadev regenerates (`<!-- novadev:<name>:begin -->`
   … `end`, or a whole file); never hand-edited.
 - **Managed file** — carries "managed by `novadev deploy`"; deploy overwrites it.
-- **NEXT ACTIONS / WAITING ON THE HUMAN** — the two lists `sync` prints.
+- **NEXT ACTIONS / WAITING ON A TESTER / WAITING ON THE HUMAN** — the lists `sync` prints
+  (beside WAITING ON REVIEW OR MERGE and ADDRESSED TO A RECIPIENT).
 - **Adapter** — a thin per-agent pointer to a playbook (`.claude/skills/*/SKILL.md`,
   `.cursor/rules/novadev.mdc`, the marked sections of `AGENTS.md`/`CLAUDE.md`).

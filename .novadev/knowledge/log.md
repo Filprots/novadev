@@ -15,6 +15,13 @@
 * **Update**: [Workflows](wiki/workflows.md) — The suite is 762 tests in 41 files after the review fixes. (claude-code/claude-fable-5-2 · 2026-11-24_1/01-todo-recipient)
 * **Update**: [Sub-repos: commits in nested repositories](features/FEAT-0016-sub-repos/feature.md) — Progress: "commitsSince" and the empty "subrepos": [] for a project that moved repositories. (claude-code/claude-fable-5-2 · 2026-11-24_2/01-records-from-before-a-repository-move)
 * **Update**: [Workflows](wiki/workflows.md) — The suite is 767 tests in 41 files. (claude-code/claude-fable-5-2 · 2026-11-24_2/01-records-from-before-a-repository-move)
+* **Update**: [The testing queue (totest), walked by a tester agent](features/FEAT-0006-totest-queue/feature.md) — Testing is a tester agent's job: an open round waits on a tester (/novadev-test, WAITING ON A TESTER), the human only for escalated asks; roundState in src/test-queue.ts. (claude-code/claude-opus-5-5 · 2026-11-24_3/01-tester-agent-testing)
+* **Update**: [Recording test results — the tester's, and a person's](features/FEAT-0010-test-result-recording/feature.md) — test-result escalate (needs-human.md) and "by" (Tested by) on write and review. (claude-code/claude-opus-5-5 · 2026-11-24_3/01-tester-agent-testing)
+* **Update**: [Overview](wiki/overview.md) — Six playbooks; the human answers a tester's escalations instead of walking hand tests. (claude-code/claude-opus-5-5 · 2026-11-24_3/01-tester-agent-testing)
+* **Update**: [Glossary](wiki/glossary.md) — Testing section: builder/tester, escalation, round state, WAITING ON A TESTER. (claude-code/claude-opus-5-5 · 2026-11-24_3/01-tester-agent-testing)
+* **Update**: [Architecture](wiki/architecture.md) — src/test-queue.ts and sync's WAITING ON A TESTER list; test reviews left NEXT ACTIONS. (claude-code/claude-opus-5-5 · 2026-11-24_3/01-tester-agent-testing)
+* **Update**: [Workflows](wiki/workflows.md) — 776 tests in 42 files; why batch 2026-11-24_3 shipped on 0.18.0 and left the derived tests.md wording. (claude-code/claude-opus-5-5 · 2026-11-24_3/01-tester-agent-testing)
+* **Creation**: ["The builder never tests its own round" is a playbook rule, not a code check — actors name a model, not a session](memories/builder-is-not-tester-by-session.md) — Builder never tests its own round is a playbook rule: actors name a model, not a session. (claude-code/claude-opus-5-5 · 2026-11-24_3/01-tester-agent-testing)
 
 ## 2026-11-12
 

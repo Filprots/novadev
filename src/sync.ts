@@ -2,7 +2,7 @@
 //
 // Run the project's metrics hook (when one is set), regenerate derived content, sweep
 // everything finished into the archive, validate, then print NEXT ACTIONS: exactly what
-// the agent still has to do and what is waiting on the human. The agent runs this after
+// the agent still has to do, what is waiting on a tester, and what on the human. The agent runs this after
 // every round of work and acts on the list until it comes back clean — so nobody has to
 // remember a sequence of commands.
 //
@@ -50,6 +50,7 @@ import { auditWip } from './wip.ts';
 import { auditOwners, waitingReviews } from './owners.ts';
 import { auditTodoMeta, orderByPriority, priorityLabel, readTodoMeta, todoPriority } from './todo-meta.ts';
 import { auditWork, lockHolding } from './work.ts';
+import { askLines, testQueue, testerLine } from './test-queue.ts';
 
 export async function sync(args: string[]): Promise<void> {
   const check = args.includes('--check');
@@ -179,6 +180,9 @@ export async function sync(args: string[]): Promise<void> {
   // the human — they stopped it, they say when it goes on.
   const agent = [...inWork.actions, ...knowledge.actions, ...agentActions(root, nd, audit.notes), ...todoLinks.actions, ...recipients.actions, ...metrics.actions, ...placement.actions];
   const human = [...inWork.waiting, ...humanActions(nd)];
+  // Open test rounds are a tester's (an agent that did not build the work: /novadev-test) — never the
+  // builder's NEXT ACTION, and never the human's unless the tester escalated (humanActions).
+  const testing = testQueue(nd).map(testerLine).filter((line): line is string => line !== null);
   const gated = reviewWaiting(root, nd);
   // The todos that name a recipient are that recipient's work, not whoever runs this sync — except the
   // ones a lock in this worktree holds: whoever works them here finds them in NEXT ACTIONS.
@@ -192,6 +196,10 @@ export async function sync(args: string[]): Promise<void> {
     console.log(`\nWAITING ON THE HUMAN (${human.length}):`);
     for (const h of human) console.log(`  ⧗ ${h}`);
   }
+  if (testing.length > 0) {
+    console.log(`\nWAITING ON A TESTER — an agent that did not build it runs \`/novadev-test\` (${testing.length}):`);
+    for (const t of testing) console.log(`  ◎ ${t}`);
+  }
   if (gated.length > 0) {
     console.log(`\nWAITING ON REVIEW OR MERGE (${gated.length}):`);
     for (const g of gated) console.log(`  ◇ ${g}`);
@@ -202,9 +210,9 @@ export async function sync(args: string[]): Promise<void> {
   }
 
   if (agent.length === 0 && problems.length === 0) {
-    const left = [human.length > 0 ? 'the human\'s to do' : '', addressed.length > 0 ? 'addressed to its recipient' : ''].filter(Boolean);
+    const left = [testing.length > 0 ? 'a tester\'s to do' : '', human.length > 0 ? 'the human\'s to do' : '', addressed.length > 0 ? 'addressed to its recipient' : ''].filter(Boolean);
     console.log(
-      human.length > 0 && addressed.length === 0
+      human.length > 0 && addressed.length === 0 && testing.length === 0
         ? '\nsync: clean — everything left is the human\'s to do.'
         : left.length > 0
           ? `\nsync: clean — everything left is ${left.join(', or ')}.`
@@ -271,14 +279,7 @@ function agentActions(root: string, nd: string, notes: string[]): string[] {
     );
   }
 
-  // Test rounds the human has already walked: reviewing them is the agent's job.
-  for (const task of listTestTasks(nd)) {
-    if (task.status !== 'reviewed' && task.hasResults) {
-      out.push(
-        `REVIEW totest/${task.id} — the human left results (${task.results.join(', ')}); judge them, close the gate, file follow-ups (loop phase 6)`,
-      );
-    }
-  }
+  // (Open test rounds are a tester's — WAITING ON A TESTER, test-queue.ts — not the builder's.)
 
   // The open todos, the highest priority first (todo-meta.ts), then in filing order; a priority other
   // than normal is named, so the list says what to take first.
@@ -355,16 +356,13 @@ function reviewWaiting(root: string, nd: string): string[] {
   return out;
 }
 
-/** Work only the human can do — never something the agent should pre-empt. */
+/**
+ * Work only the human can do — never something the agent should pre-empt. In testing that is only
+ * what the tester escalated: the scenarios it could not run itself (test-results/needs-human.md).
+ */
 function humanActions(nd: string): string[] {
   const out: string[] = [];
-  for (const task of listTestTasks(nd)) {
-    if (task.status === 'reviewed' || task.hasResults) continue;
-    const gated = task.todoRefs.length ? ` for ${task.todoRefs.join(', ')}` : '';
-    out.push(
-      `totest/${task.id} — ${task.scenarios} scenario(s) to walk${gated}; write what happens into its test-results/`,
-    );
-  }
+  for (const state of testQueue(nd)) out.push(...askLines(state));
   // A gate whose task does not exist is a broken hand-off, not something to wait on.
   const taskIds = new Set(listTestTasks(nd).map((t) => t.id));
   const orphaned = listAllTodos(nd).filter(
@@ -375,7 +373,7 @@ function humanActions(nd: string): string[] {
   );
   for (const t of orphaned) {
     out.push(
-      `${t.ref} is gated on human testing but its **Test:** task is missing from totest/ — see \`novadev links\``,
+      `${t.ref} is gated on testing but its **Test:** task is missing from totest/ — see \`novadev links\``,
     );
   }
   return out;

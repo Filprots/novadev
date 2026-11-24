@@ -28,8 +28,8 @@
 
 # testing
 
-* [● FEAT-0006 — The human-testing queue (totest)](FEAT-0006-totest-queue/feature.md) - shipped · Hand work an agent cannot check to a person as a stepped test plan in totest/<task>/, gate the todo with ai_needstest.md so the batch cannot archive, and see what is waiting with `novadev totest` (or `--json`).
-* [● FEAT-0010 — Recording a person's test results](FEAT-0010-test-result-recording/feature.md) - shipped · Walk the test queue with a person (`/novadev-what-to-test`) or take a round they already did (`/novadev-test-review`), and file what they found — verdicts, notes, change requests, screenshots — into the task's test-results/ with `novadev test-result tasks|write|review`, always appending.
+* [● FEAT-0006 — The testing queue (totest), walked by a tester agent](FEAT-0006-totest-queue/feature.md) - shipped · Hand what the builder's own tests cannot show to a TESTER agent as a stepped test plan in totest/<task>/, gate the todo with ai_needstest.md so the batch cannot archive, and see each open round and who it waits on — a tester, or the human for an escalated ask — with `novadev totest` (or `--json`) and `novadev sync`.
+* [● FEAT-0010 — Recording test results — the tester's, and a person's](FEAT-0010-test-result-recording/feature.md) - shipped · File what a test round found — the tester agent's verdicts and evidence, a person's walk of an escalated scenario (`/novadev-what-to-test`) or round (`/novadev-test-review`) — into the task's test-results/ with `novadev test-result tasks|write|review` (with who tested), always appending; and the tester's asks to a person with `test-result escalate`.
 
 # todos
 
