@@ -10,9 +10,9 @@ sources:
   - resource: repo:src/lib.ts
   - resource: repo:.gitignore
 generated: { by: claude-code/claude-opus-5-5, at: 2026-11-10T15:18:33+01:00 }
-stale_after: 2027-02-10T08:15:41+01:00
+stale_after: 2027-02-22T19:53:33+01:00
 verified:
-  - { by: claude-code/claude-opus-5-5, at: 2026-11-12T08:15:41+01:00 }
+  - { by: claude-code/claude-opus-5-5, at: 2026-11-24T19:53:33+01:00 }
 ---
 
 # Stack

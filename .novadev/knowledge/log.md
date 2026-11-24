@@ -22,6 +22,7 @@
 * **Update**: [Architecture](wiki/architecture.md) — src/test-queue.ts and sync's WAITING ON A TESTER list; test reviews left NEXT ACTIONS. (claude-code/claude-opus-5-5 · 2026-11-24_3/01-tester-agent-testing)
 * **Update**: [Workflows](wiki/workflows.md) — 776 tests in 42 files; why batch 2026-11-24_3 shipped on 0.18.0 and left the derived tests.md wording. (claude-code/claude-opus-5-5 · 2026-11-24_3/01-tester-agent-testing)
 * **Creation**: ["The builder never tests its own round" is a playbook rule, not a code check — actors name a model, not a session](memories/builder-is-not-tester-by-session.md) — Builder never tests its own round is a playbook rule: actors name a model, not a session. (claude-code/claude-opus-5-5 · 2026-11-24_3/01-tester-agent-testing)
+* **Verification**: [Stack](wiki/stack.md) — Re-checked after src/lib.ts gained ESCALATIONS_FILE and the novadev-test skill: still zero dependencies, Bun-only, version 0.18.0 — the page holds. (claude-code/claude-opus-5-5 · 2026-11-24_3/01-tester-agent-testing)
 
 ## 2026-11-12
 
