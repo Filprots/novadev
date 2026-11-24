@@ -26,6 +26,7 @@ The work that built [FEAT-0006 — The testing queue (totest), walked by a teste
 - `72e0194` — 2026-11-10_2/06-history-totest-queue
 - `fb0170f` — 2026-11-10_2/06-history-totest-queue
 - `d9caccd` — 2026-11-12_1/02-totest-skip-scenarios-and-close-round
+- `222ef48` — 2026-11-24_3/01-tester-agent-testing
 
 _Linked by `**Feature:** FEAT-0006` in each todo's record._
 <!-- novadev:work:end -->
