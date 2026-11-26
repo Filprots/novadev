@@ -9,9 +9,9 @@ sources:
   - resource: repo:bin/novadev.ts
   - resource: repo:templates/skills/novadev-work.md
 generated: { by: claude-code/claude-opus-5-5, at: 2026-11-24T19:17:08+01:00 }
-stale_after: 2027-02-22T19:17:08+01:00
+stale_after: 2027-02-24T13:38:06+01:00
 verified:
-  - { by: claude-code/claude-opus-5-5, at: 2026-11-12T08:15:41+01:00 }
+  - { by: claude-code/claude-opus-5-5, at: 2026-11-26T13:38:06+01:00 }
 ---
 
 # Overview

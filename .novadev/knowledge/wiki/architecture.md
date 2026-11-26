@@ -13,7 +13,9 @@ sources:
   - resource: repo:src/links.ts
   - resource: repo:src/work.ts
 generated: { by: claude-code/claude-opus-5-5, at: 2026-11-24T19:17:08+01:00 }
-stale_after: 2027-02-22T19:17:08+01:00
+stale_after: 2027-02-24T13:38:06+01:00
+verified:
+  - { by: claude-code/claude-opus-5-5, at: 2026-11-26T13:38:06+01:00 }
 ---
 
 # Architecture

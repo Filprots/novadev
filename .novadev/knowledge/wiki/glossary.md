@@ -12,8 +12,8 @@ sources:
   - resource: repo:src/debt-budget.ts
   - resource: repo:src/placement.ts
   - resource: repo:templates/skills/novadev-work.md
-generated: { by: claude-code/claude-opus-5-5, at: 2026-11-24T19:17:08+01:00 }
-stale_after: 2027-02-22T19:17:08+01:00
+generated: { by: claude-code/claude-opus-5-5, at: 2026-11-26T13:38:06+01:00 }
+stale_after: 2027-02-24T13:38:06+01:00
 ---
 
 # Glossary
@@ -103,7 +103,9 @@ wording for agents; this page maps each word to the code.
 - **Trust tier** — unverified / machine-confirmed / human-reviewed, from `verified`.
 - **Stale** — past `stale_after` (review days per folder in `novadev.json` `knowledge.reviewDays`).
 - **Drifted** — a `repo:` source has a commit dated after the concept was last written
-  or verified.
+  or verified, and — for code of the bundle's own repository — after the last merge that
+  changed the concept's file: that merge counts as its check (`sourceDrift` in
+  `src/knowledge.ts`; a plain commit, a squash or an import never does).
 - **Feature** — `knowledge/features/FEAT-NNNN-<slug>/feature.md`: one capability, with
   `feature-status` (planned → in-progress → shipped → deprecated; OKF `status` is derived
   from it), `area`, `tags`, `touches` (owned paths) and relations (`depends-on`,

@@ -1,5 +1,13 @@
 # Knowledge log
 
+## 2026-11-26
+
+* **Update**: [Glossary](wiki/glossary.md) — Drifted: a merge that changes the concept's file counts as its check for code of the bundle's own repository; a plain commit, a squash or an import never does (sourceDrift). (claude-code/claude-opus-5-5)
+* **Update**: [Workflows](wiki/workflows.md) — The suite is 782 tests in 42 files (156 s on a busy machine, branch drift-merge-date). (claude-code/claude-opus-5-5)
+* **Update**: [The knowledge bundle (OKF) and the knowledge log](features/FEAT-0013-knowledge-bundle/feature.md) — Progress: a merge that changes a concept's file counts as its check, so a re-check merged a day later no longer drifts (still 0.18.0; IRRISketch todo 2026-11-26_5/03, option A). (claude-code/claude-opus-5-5)
+* **Verification**: [Architecture](wiki/architecture.md) — Re-checked after the drift change in src/knowledge.ts, src/git.ts and src/sync.ts: the module map, the audit pattern and the read-only git boundary still hold (git.ts still imports nothing of novadev's; lastCommit and firstParentLine are read-only questions). (claude-code/claude-opus-5-5)
+* **Verification**: [Overview](wiki/overview.md) — Re-checked after README.md and templates/skills/novadev-work.md gained the merge rule for drift: the capabilities table still holds (drift is listed under the knowledge bundle). (claude-code/claude-opus-5-5)
+
 ## 2026-11-24
 
 * **Creation**: [Todo recipients](features/FEAT-0024-todo-recipients/feature.md) — A todo may name its recipient (a team like hq, or one actor): set when filing or with `novadev todo recipient`, shown and filtered by the lists, enforced by `work start`, listed apart by sync; `"recipients"` in novadev.json may name who can be addressed. (claude-code/claude-fable-5-2 · 2026-11-24_1/01-todo-recipient)
