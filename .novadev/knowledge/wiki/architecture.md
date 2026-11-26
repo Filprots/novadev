@@ -12,8 +12,8 @@ sources:
   - resource: repo:src/knowledge.ts
   - resource: repo:src/links.ts
   - resource: repo:src/work.ts
-generated: { by: claude-code/claude-opus-5-5, at: 2026-11-24T19:17:08+01:00 }
-stale_after: 2027-02-24T13:38:06+01:00
+generated: { by: claude-code/claude-opus-5-5, at: 2026-11-26T14:08:01+01:00 }
+stale_after: 2027-02-24T14:08:01+01:00
 verified:
   - { by: claude-code/claude-opus-5-5, at: 2026-11-26T13:38:06+01:00 }
 ---
@@ -125,9 +125,11 @@ what it regenerated in `.novadev/` (both in `src/merge-rules.ts`); `novadev work
 removes worktrees and branches and merges them (`src/worktree.ts`). Everything else is
 read-only and answers `null` when git cannot tell, and callers then fall back to
 the working tree. `src/git.ts` is the shared home of those questions (`lastCommitDate`,
-`headSummary`, `dirtyPaths`, `fileAtHead`, `unchangedSinceHead`, `commitPaths`).
-`lastCommitDate` alone asks the repository that *holds* the path (possibly one nested in
-the project) and strips `GIT_DIR`-style variables to do so; the rest ask the project's repo.
+`headSummary`, `dirtyPaths`, `fileAtHead`, `unchangedSinceHead`, `commitPaths`, and the drift
+check's `lastCommit`, `lastCommitBetween`, `filesAtCommits`, `renamedFrom`).
+`lastCommitDate` and the drift check's questions ask the repository that *holds* the path
+(possibly one nested in the project) and strip `GIT_DIR`-style variables to do so; most of
+the rest ask the project's repo.
 **But it is not the only caller**: `src/knowledge.ts`, `src/links.ts` (`cat-file
 --batch-check`), `src/migrations.ts` (`status --porcelain`), `src/knowledge-log.ts`
 (`config user.name`) and `src/knowledge-migration.ts` (`log`) each have a private

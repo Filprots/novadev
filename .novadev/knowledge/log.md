@@ -7,6 +7,10 @@
 * **Update**: [The knowledge bundle (OKF) and the knowledge log](features/FEAT-0013-knowledge-bundle/feature.md) — Progress: a merge that changes a concept's file counts as its check, so a re-check merged a day later no longer drifts (still 0.18.0; IRRISketch todo 2026-11-26_5/03, option A). (claude-code/claude-opus-5-5)
 * **Verification**: [Architecture](wiki/architecture.md) — Re-checked after the drift change in src/knowledge.ts, src/git.ts and src/sync.ts: the module map, the audit pattern and the read-only git boundary still hold (git.ts still imports nothing of novadev's; lastCommit and firstParentLine are read-only questions). (claude-code/claude-opus-5-5)
 * **Verification**: [Overview](wiki/overview.md) — Re-checked after README.md and templates/skills/novadev-work.md gained the merge rule for drift: the capabilities table still holds (drift is listed under the knowledge bundle). (claude-code/claude-opus-5-5)
+* **Update**: [Glossary](wiki/glossary.md) — Drifted: after review the merge rule is narrow — a merge counts only for a source whose newest commit it is, when it brought new stamps for the concept, its changes of the source are no newer than those stamps, and the line had not changed the source meanwhile (sourceDrift). (claude-code/claude-opus-5-5)
+* **Update**: [The knowledge bundle (OKF) and the knowledge log](features/FEAT-0013-knowledge-bundle/feature.md) — Drift: the merge rule narrowed after review (new stamps brought, its code no newer than them, nothing of the line's own); the progress line says so. (claude-code/claude-opus-5-5)
+* **Update**: [Architecture](wiki/architecture.md) — The git boundary: git.ts holds the drift check's questions lastCommit, lastCommitBetween, filesAtCommits and renamedFrom (firstParentLine is gone); they ask the repository that holds the path, like lastCommitDate. (claude-code/claude-opus-5-5)
+* **Update**: [Workflows](wiki/workflows.md) — The suite is 793 tests in 42 files (124 s, branch drift-merge-date). (claude-code/claude-opus-5-5)
 
 ## 2026-11-24
 

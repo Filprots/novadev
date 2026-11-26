@@ -12,8 +12,8 @@ sources:
   - resource: repo:src/debt-budget.ts
   - resource: repo:src/placement.ts
   - resource: repo:templates/skills/novadev-work.md
-generated: { by: claude-code/claude-opus-5-5, at: 2026-11-26T13:38:06+01:00 }
-stale_after: 2027-02-24T13:38:06+01:00
+generated: { by: claude-code/claude-opus-5-5, at: 2026-11-26T14:08:01+01:00 }
+stale_after: 2027-02-24T14:08:01+01:00
 ---
 
 # Glossary
@@ -103,9 +103,11 @@ wording for agents; this page maps each word to the code.
 - **Trust tier** — unverified / machine-confirmed / human-reviewed, from `verified`.
 - **Stale** — past `stale_after` (review days per folder in `novadev.json` `knowledge.reviewDays`).
 - **Drifted** — a `repo:` source has a commit dated after the concept was last written
-  or verified, and — for code of the bundle's own repository — after the last merge that
-  changed the concept's file: that merge counts as its check (`sourceDrift` in
-  `src/knowledge.ts`; a plain commit, a squash or an import never does).
+  or verified. One merge counts as a check too (`sourceDrift` in `src/knowledge.ts`): the
+  source's newest commit when that merge brought new stamps for the concept, brought only
+  changes of the source made no later than those stamps, and the line had not changed the
+  source since the branch left it. A plain commit, a squash, an import, a merge that changes
+  the page without a stamp, or code from another merge never counts.
 - **Feature** — `knowledge/features/FEAT-NNNN-<slug>/feature.md`: one capability, with
   `feature-status` (planned → in-progress → shipped → deprecated; OKF `status` is derived
   from it), `area`, `tags`, `touches` (owned paths) and relations (`depends-on`,
