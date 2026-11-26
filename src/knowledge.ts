@@ -28,7 +28,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { lastCommitDate } from './git.ts';
+import { type LineCommit, firstParentLine, lastCommit } from './git.ts';
 import {
   FEATURE_DIR_RE,
   FEATURE_STATUS_KEY,
@@ -698,12 +698,12 @@ const DRIFT_SHOWN = 5;
 /**
  * Judge the bundle. `now` decides what is stale; git (when the project is a repository) says which
  * concepts changed since the last commit, and which `repo:` sources changed since their concept was
- * last checked. `sourceDays` keeps git's answers about those sources: the audits of one run may share it.
+ * last checked. `sourceDays` and `sourceLines` keep git's answers about those sources: the audits of one run may share them.
  */
 export function auditKnowledge(
   root: string,
   nd: string,
-  opts: { now?: Date; sourceDays?: Map<string, string | null> } = {},
+  opts: { now?: Date; sourceDays?: Map<string, SourceChange | null>; sourceLines?: Map<string, LineCommit[] | null> } = {},
 ): KnowledgeAudit {
   const now = opts.now ?? new Date();
   const problems: string[] = [];
@@ -953,7 +953,7 @@ export function auditKnowledge(
   if (stale.length > STALE_SHOWN) {
     actions.push(`… and ${stale.length - STALE_SHOWN} more stale concept(s) — \`novadev knowledge --stale\` lists them all`);
   }
-  const drifted = sourceDrift(root, authored, opts.sourceDays);
+  const drifted = sourceDrift(root, authored, opts.sourceDays, opts.sourceLines);
   for (const drift of drifted.slice(0, DRIFT_SHOWN)) {
     const [newest, ...more] = drift.sources;
     actions.push(
@@ -977,7 +977,7 @@ export function auditKnowledge(
 /** A concept one of whose `repo:` sources has a commit dated after the concept was last checked. */
 export type Drift = {
   concept: Concept;
-  /** The day the concept was last written or verified (`lastChangeDay`). */
+  /** The day the concept was last written or verified (`lastChangeDay`): what its stamps say. */
   checked: string;
   /** Each source that changed since, with the day of its newest commit — the newest first. */
   sources: Array<{ resource: string; day: string }>;
@@ -994,16 +994,37 @@ function novadevOwn(rel: string): boolean {
   return rel.split('/')[0] === ROOT_DIR_NAME;
 }
 
+/** The newest commit of a `repo:` source: the day it was made on (in the committer's offset) and its hash. */
+export type SourceChange = { day: string; commit: string };
+
 /**
  * The concepts whose code moved on: a `repo:` source with a commit on a day after the concept was
- * last written or verified. Whole days are compared, never moments: a round commits its code after it
- * records its knowledge, on the same day. The commit is asked of the git repository that holds the
- * path (`lastCommitDate`), once per path — `sourceDays` keeps the answers, so the audits of one run
- * can share them. A path that is gone is skipped (the audit says it is gone), and so is a path inside
+ * last checked. Whole days are compared, never moments: a round commits its code after it records its
+ * knowledge, on the same day. The commit is asked of the git repository that holds the path
+ * (`lastCommit`), once per path — `sourceDays` keeps the answers, so the audits of one run can share
+ * them. A path that is gone is skipped (the audit says it is gone), and so is a path inside
  * `.novadev/` (the audit notes it: every round commits there, so it would never settle) and a
  * deprecated concept: it is kept for history, never re-checked. The newest change first.
+ *
+ * The last check is the later of two days. One is the concept's own stamps (`lastChangeDay`). The
+ * other is the day of the newest MERGE on the first-parent line that changed the concept's file.
+ * A re-check is often made in a branch and merged on a later day: the stamps keep the branch's day,
+ * while the code it re-checked counts from the merge's day. The merge brings the re-check in
+ * together with that code, so the merge is the check, on its own day. It counts as a check only for
+ * a source whose newest commit is on that same first-parent line, in the repository that holds the
+ * bundle. A source in a nested repository has no such merge, so only the stamps count for it. A
+ * commit that is not a merge never counts: its stamps are the check it carries. A commit that brings
+ * in a whole bundle at once — an import, a project's first commit — checked nothing. A squash merge
+ * or a rebase loses the branch's merge, so a re-check that lands that way still drifts until its
+ * next stamp. `sourceLines` keeps that first-parent line for the run (one call to git), as
+ * `sourceDays` keeps the sources'.
  */
-export function sourceDrift(root: string, concepts: readonly Concept[], sourceDays: Map<string, string | null> = new Map()): Drift[] {
+export function sourceDrift(
+  root: string,
+  concepts: readonly Concept[],
+  sourceDays: Map<string, SourceChange | null> = new Map(),
+  sourceLines: Map<string, LineCommit[] | null> = new Map(),
+): Drift[] {
   const cited = authoredConcepts(concepts).flatMap((concept) => {
     const checked = lastChangeDay(concept);
     if (checked === null || concept.status === 'deprecated') return [];
@@ -1024,22 +1045,55 @@ export function sourceDrift(root: string, concepts: readonly Concept[], sourceDa
       if (day === undefined || checked < day) earliest.set(rel, checked);
     }
   }
-  const newestDay = new Map<string, string | null>();
+  const newest = new Map<string, SourceChange | null>();
   for (const [rel, day] of earliest) {
     const key = `${rel}\0${day}`;
     if (!sourceDays.has(key)) {
-      const date = lastCommitDate(join(root, rel), `${addDays(day, -1)}T00:00:00Z`);
-      sourceDays.set(key, date === null ? null : timestampDay(date));
+      const found = lastCommit(join(root, rel), `${addDays(day, -1)}T00:00:00Z`);
+      sourceDays.set(key, found === null ? null : { day: timestampDay(found.date), commit: found.commit });
     }
-    newestDay.set(rel, sourceDays.get(key) ?? null);
+    newest.set(rel, sourceDays.get(key) ?? null);
+  }
+
+  // By the stamps alone: each concept with the sources whose newest commit is of a later day.
+  const byStamps = cited.flatMap(({ concept, checked, paths }) => {
+    const changed = paths.flatMap(({ resource, rel }) => {
+      const change = newest.get(rel) ?? null;
+      return change !== null && change.day > checked ? [{ resource, change }] : [];
+    });
+    return changed.length > 0 ? [{ concept, checked, changed }] : [];
+  });
+
+  // The bundle repository's first-parent line, asked only when the stamps leave something drifted.
+  // It reaches back as far as the searches above, so it holds every newest commit they found on it.
+  const mergedOn = new Map<string, string>();
+  const onLine = new Set<string>();
+  if (byStamps.length > 0) {
+    const from = byStamps.reduce((day, { checked }) => (checked < day ? checked : day), byStamps[0]!.checked);
+    const first = byStamps[0]!.concept;
+    // The bundle's folder on disk: the concept's file without its path inside the bundle.
+    const bundle = join(first.file, ...first.path.split('/').map(() => '..'));
+    if (!sourceLines.has(from)) sourceLines.set(from, firstParentLine(bundle, `${addDays(from, -1)}T00:00:00Z`));
+    for (const { commit, date, merge, paths } of sourceLines.get(from) ?? []) {
+      onLine.add(commit);
+      if (!merge) continue;
+      const day = timestampDay(date);
+      for (const path of paths) {
+        const seen = mergedOn.get(path);
+        if (seen === undefined || day > seen) mergedOn.set(path, day);
+      }
+    }
   }
 
   const out: Drift[] = [];
-  for (const { concept, checked, paths } of cited) {
+  for (const { concept, checked, changed } of byStamps) {
+    // The day a merge last brought a change of the concept's file: a check, for the sources on that line.
+    const merged = mergedOn.get(concept.path);
+    const lineChecked = merged !== undefined && merged > checked ? merged : checked;
     const sources = new Map<string, string>();
-    for (const { resource, rel } of paths) {
-      const day = newestDay.get(rel) ?? null;
-      if (day !== null && day > checked && !sources.has(resource)) sources.set(resource, day);
+    for (const { resource, change } of changed) {
+      if (onLine.has(change.commit) && change.day <= lineChecked) continue;
+      if (!sources.has(resource)) sources.set(resource, change.day);
     }
     if (sources.size === 0) continue;
     out.push({

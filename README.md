@@ -1340,6 +1340,13 @@ Commit dates decide, so know what they say:
   change shows up on the day it was merged. A fast-forward pull keeps the dates the commits
   were made on: what someone else committed before your last check, and you pulled after it,
   does not count.
+- A merge that also changes the concept's own file is a check of that concept on the merge's
+  day. A re-check made in a branch and merged a day later is therefore not listed again: not
+  for the code the merge brought in, and not for any earlier change on the same line. Only a
+  merge counts, and only for code in the repository that holds the knowledge. A plain commit's
+  check is its stamps, and a commit that brings in a whole bundle at once (an import) checked
+  nothing. A squash merge or a rebase leaves no merge. A nested repository's code is never
+  merged with the knowledge.
 - A concept that cites code not committed yet is checked again once that code is committed
   on a later day: it shows as drifted then, and a `verify` settles it.
 - A folder source drifts with any file in it, so a concept should cite the files it really

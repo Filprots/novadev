@@ -1,7 +1,7 @@
 // The read-only questions novadev asks git, on fixture repositories.
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { commitPaths, fileAtHead, unchangedSinceHead } from '../src/git.ts';
+import { commitPaths, fileAtHead, firstParentLine, unchangedSinceHead } from '../src/git.ts';
 import { commitAll, git, tempDir, write } from './helpers.ts';
 
 describe('unchangedSinceHead', () => {
@@ -140,5 +140,43 @@ describe('commitPaths', () => {
         [newer, ['b.txt']],
       ]),
     );
+  });
+});
+
+describe('firstParentLine', () => {
+  test('every commit of the first-parent line, newest first, with the files in the folder it changed — a merge with what it brought in', () => {
+    const root = tempDir();
+    write(root, 'kb/a.md', 'a');
+    write(root, 'other.txt', 'o');
+    commitAll(root, 'base');
+    git(root, 'checkout', '-q', '-b', 'side');
+    write(root, 'kb/b.md', 'b');
+    write(root, 'kb/deep/c.md', 'c');
+    write(root, 'other.txt', 'changed on the side');
+    commitAll(root, 'side work');
+    git(root, 'checkout', '-q', '-');
+    write(root, 'outside.txt', 'x');
+    commitAll(root, 'outside only');
+    git(root, 'merge', '-q', '--no-ff', 'side', '-m', 'merge side');
+    const line = firstParentLine(join(root, 'kb'), '2000-01-01T00:00:00Z');
+    // The side branch's own commit is not on the line: the merge stands for it.
+    expect(line?.map((commit) => commit.paths)).toEqual([['b.md', 'deep/c.md'], [], ['a.md']]);
+    expect(line?.map((commit) => commit.merge)).toEqual([true, false, false]);
+    expect(line?.[0]?.commit).toBe(git(root, 'rev-parse', 'HEAD').stdout.trim());
+    expect(line?.every((commit) => /^\d{4}-\d{2}-\d{2}T/.test(commit.date))).toBe(true);
+  });
+
+  test('null outside a repository; a shallow clone\'s oldest commit is left out — it seems to add every file', () => {
+    expect(firstParentLine(tempDir(), '2000-01-01T00:00:00Z')).toBeNull();
+    expect(firstParentLine(join(tempDir(), 'nope'), '2000-01-01T00:00:00Z')).toBeNull();
+    const upstream = tempDir();
+    write(upstream, 'kb/a.md', 'a');
+    commitAll(upstream, 'first');
+    write(upstream, 'kb/a.md', 'a, changed');
+    commitAll(upstream, 'second');
+    const shallow = join(tempDir(), 'shallow');
+    git(upstream, 'clone', '-q', '--depth', '1', `file://${upstream}`, shallow);
+    expect(firstParentLine(join(shallow, 'kb'), '2000-01-01T00:00:00Z')).toEqual([]);
+    expect(firstParentLine(join(upstream, 'kb'), '2000-01-01T00:00:00Z')?.map((commit) => commit.paths)).toEqual([['a.md'], ['a.md']]);
   });
 });

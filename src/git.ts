@@ -58,6 +58,17 @@ function discoveringEnv(): NodeJS.ProcessEnv {
  * that did is a shallow clone's oldest one: its parent was not fetched, so it seems to add every file.
  */
 export function lastCommitDate(path: string, since: string): string | null {
+  return lastCommit(path, since)?.date ?? null;
+}
+
+/** A commit as the drift check knows it: its full hash and its committer date (`%cI`). */
+export type CommitStamp = { commit: string; date: string };
+
+/**
+ * The newest commit that changed `path`, as `lastCommitDate` finds it — with its hash too, so the
+ * caller can tell which commit of a first-parent line it is (`firstParentLine`).
+ */
+export function lastCommit(path: string, since: string): CommitStamp | null {
   let real: string;
   let folder: boolean;
   try {
@@ -73,17 +84,69 @@ export function lastCommitDate(path: string, since: string): string | null {
   const out = git(
     cwd,
     [
-      '--literal-pathspecs', 'log', '-1', '--first-parent', `--since=${since}`, '--format=%x01%cI%x02%P',
+      '--literal-pathspecs', 'log', '-1', '--first-parent', `--since=${since}`, '--format=%x01%H%x02%cI%x02%P',
       '--', folder ? '.' : basename(real),
     ],
     undefined,
     env,
   );
-  const found = out === null ? null : /\x01(\d{4}-\d{2}-\d{2}T[^\x02\s]+)\x02([0-9a-f ]*)/.exec(out);
+  const found = out === null ? null : /\x01([0-9a-f]{40,64})\x02(\d{4}-\d{2}-\d{2}T[^\x02\s]+)\x02([0-9a-f ]*)/.exec(out);
   if (!found) return null;
   // No parent: the repository's first commit, or a shallow clone's oldest — which says nothing.
-  if (found[2]!.trim() === '' && git(cwd, ['rev-parse', '--is-shallow-repository'], undefined, env)?.trim() === 'true') return null;
-  return found[1]!;
+  if (found[3]!.trim() === '' && git(cwd, ['rev-parse', '--is-shallow-repository'], undefined, env)?.trim() === 'true') return null;
+  return { commit: found[1]!, date: found[2]! };
+}
+
+/** One commit of a first-parent line: is it a merge (more than one parent), and the files it changed against its first parent. */
+export type LineCommit = CommitStamp & { merge: boolean; paths: string[] };
+
+/**
+ * The first-parent line of the repository that holds the folder `dir`, newest first, back to `since`
+ * (an ISO 8601 instant, as in `lastCommitDate`): every commit of the line — also one that changed
+ * nothing in `dir` — with the files in `dir` it changed against its first parent (a merge: what it
+ * brought in), as paths relative to `dir`. One call to git, however long the line. Asked like
+ * `lastCommitDate`: in the folder (a symbolic link followed), without the variables a hook exports,
+ * so the repository that HOLDS the folder answers. A shallow clone's oldest commit is left out: its
+ * parent was not fetched, so it seems to add every file. Null when git cannot tell.
+ */
+export function firstParentLine(dir: string, since: string): LineCommit[] | null {
+  let real: string;
+  try {
+    real = realpathSync(dir);
+    if (!statSync(real).isDirectory()) return null;
+  } catch {
+    return null;
+  }
+  const env = discoveringEnv();
+  const out = git(
+    real,
+    [
+      '-c', 'core.quotePath=false',
+      'log', '--first-parent', '-m', `--since=${since}`, '-z', '--format=%x01%H%x02%cI%x02%P',
+      '--name-only', '--relative', '--no-renames',
+    ],
+    undefined,
+    env,
+  );
+  if (out === null) return null;
+  let shallow: boolean | null = null;
+  const line: LineCommit[] = [];
+  for (const chunk of out.split('\x01').slice(1)) {
+    const [head = '', ...names] = chunk.split('\0');
+    const [commit = '', date = '', parents = ''] = head.split('\x02');
+    if (!/^[0-9a-f]{40,64}$/.test(commit) || !/^\d{4}-\d{2}-\d{2}T/.test(date)) continue;
+    if (parents.trim() === '') {
+      shallow ??= git(real, ['rev-parse', '--is-shallow-repository'], undefined, env)?.trim() === 'true';
+      if (shallow) continue;
+    }
+    line.push({
+      commit,
+      date: date.trim(),
+      merge: parents.trim().split(/\s+/).length > 1,
+      paths: names.map((name) => name.replace(/^\n/, '')).filter((name) => name !== ''),
+    });
+  }
+  return line;
 }
 
 /** True when `root` is inside a git work tree (and git runs at all). */

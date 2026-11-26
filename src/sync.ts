@@ -35,7 +35,8 @@ import {
   requireProjectRoot,
   todoState,
 } from './lib.ts';
-import { auditKnowledge } from './knowledge.ts';
+import type { LineCommit } from './git.ts';
+import { type SourceChange, auditKnowledge } from './knowledge.ts';
 import { auditLinks } from './links.ts';
 import { displayCommand, refreshMetrics } from './metrics.ts';
 import { auditMetrics } from './metrics-audit.ts';
@@ -110,8 +111,9 @@ export async function sync(args: string[]): Promise<void> {
   // knowledge bundle's indexes (with each feature's derived lifecycle).
   const before = auditLinks(root);
   // Git is asked once per `repo:` source in this run: nothing below commits, so both audits share the answers.
-  const sourceDays = new Map<string, string | null>();
-  const knowledgeBefore = auditKnowledge(root, nd, { sourceDays });
+  const sourceDays = new Map<string, SourceChange | null>();
+  const sourceLines = new Map<string, LineCommit[] | null>();
+  const knowledgeBefore = auditKnowledge(root, nd, { sourceDays, sourceLines });
   const fixes = [...before.fixes, ...metrics.fixes, ...metricsAudit.fixes, ...knowledgeBefore.fixes];
   if (!check && fixes.length > 0) {
     for (const fix of fixes) applyFix(fix);
@@ -138,7 +140,7 @@ export async function sync(args: string[]): Promise<void> {
 
   // 3. Validate what is left. In `--check` nothing was written, so the knowledge is judged as it is.
   const audit = auditLinks(root);
-  const knowledge = check ? knowledgeBefore : auditKnowledge(root, nd, { sourceDays });
+  const knowledge = check ? knowledgeBefore : auditKnowledge(root, nd, { sourceDays, sourceLines });
   // The batches in work: who holds each lock, and whether they are still there.
   const inWork = auditWork(nd);
   // The todos' own settings (todo.json: priority, "do after" links): a file novadev cannot read.
