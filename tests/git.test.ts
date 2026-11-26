@@ -1,7 +1,7 @@
 // The read-only questions novadev asks git, on fixture repositories.
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { commitPaths, fileAtHead, firstParentLine, unchangedSinceHead } from '../src/git.ts';
+import { commitPaths, fileAtHead, filesAtCommits, lastCommit, lastCommitBetween, renamedFrom, unchangedSinceHead } from '../src/git.ts';
 import { commitAll, git, tempDir, write } from './helpers.ts';
 
 describe('unchangedSinceHead', () => {
@@ -143,40 +143,78 @@ describe('commitPaths', () => {
   });
 });
 
-describe('firstParentLine', () => {
-  test('every commit of the first-parent line, newest first, with the files in the folder it changed — a merge with what it brought in', () => {
+describe('the drift check\'s questions about a merge', () => {
+  /** A repository with a merge of `side` (which changed kb/a.md and src/s.ts) into the first branch, which changed other.txt meanwhile. */
+  function merged(): { root: string; merge: string; line: string; side: string } {
     const root = tempDir();
     write(root, 'kb/a.md', 'a');
+    write(root, 'src/s.ts', 's');
     write(root, 'other.txt', 'o');
     commitAll(root, 'base');
     git(root, 'checkout', '-q', '-b', 'side');
-    write(root, 'kb/b.md', 'b');
-    write(root, 'kb/deep/c.md', 'c');
-    write(root, 'other.txt', 'changed on the side');
+    write(root, 'kb/a.md', 'a — on the side ✓');
+    write(root, 'src/s.ts', 's, changed on the side');
     commitAll(root, 'side work');
     git(root, 'checkout', '-q', '-');
-    write(root, 'outside.txt', 'x');
-    commitAll(root, 'outside only');
+    write(root, 'other.txt', 'changed on the line');
+    commitAll(root, 'line work');
     git(root, 'merge', '-q', '--no-ff', 'side', '-m', 'merge side');
-    const line = firstParentLine(join(root, 'kb'), '2000-01-01T00:00:00Z');
-    // The side branch's own commit is not on the line: the merge stands for it.
-    expect(line?.map((commit) => commit.paths)).toEqual([['b.md', 'deep/c.md'], [], ['a.md']]);
-    expect(line?.map((commit) => commit.merge)).toEqual([true, false, false]);
-    expect(line?.[0]?.commit).toBe(git(root, 'rev-parse', 'HEAD').stdout.trim());
-    expect(line?.every((commit) => /^\d{4}-\d{2}-\d{2}T/.test(commit.date))).toBe(true);
+    const [merge, line, side] = git(root, 'rev-parse', 'HEAD', 'HEAD^1', 'HEAD^2').stdout.trim().split('\n');
+    return { root, merge: merge!, line: line!, side: side! };
+  }
+
+  test('lastCommit names the merge on the first-parent line, with its parents', () => {
+    const { root, merge, line, side } = merged();
+    expect(lastCommit(join(root, 'src/s.ts'), '2000-01-01T00:00:00Z')).toMatchObject({ commit: merge, parents: [line, side] });
+    expect(lastCommit(join(root, 'other.txt'), '2000-01-01T00:00:00Z')).toMatchObject({ commit: line, parents: [expect.any(String)] });
+    expect(lastCommit(join(root, 'kb'), '2000-01-01T00:00:00Z')?.commit).toBe(merge); // a folder
   });
 
-  test('null outside a repository; a shallow clone\'s oldest commit is left out — it seems to add every file', () => {
-    expect(firstParentLine(tempDir(), '2000-01-01T00:00:00Z')).toBeNull();
-    expect(firstParentLine(join(tempDir(), 'nope'), '2000-01-01T00:00:00Z')).toBeNull();
-    const upstream = tempDir();
-    write(upstream, 'kb/a.md', 'a');
-    commitAll(upstream, 'first');
-    write(upstream, 'kb/a.md', 'a, changed');
-    commitAll(upstream, 'second');
-    const shallow = join(tempDir(), 'shallow');
-    git(upstream, 'clone', '-q', '--depth', '1', `file://${upstream}`, shallow);
-    expect(firstParentLine(join(shallow, 'kb'), '2000-01-01T00:00:00Z')).toEqual([]);
-    expect(firstParentLine(join(upstream, 'kb'), '2000-01-01T00:00:00Z')?.map((commit) => commit.paths)).toEqual([['a.md'], ['a.md']]);
+  test('lastCommitBetween: what one side of a merge changed that the other has not', () => {
+    const { root, merge, line, side } = merged();
+    expect(lastCommitBetween(join(root, 'src/s.ts'), [side], [line])).toEqual({ found: { commit: side, date: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/), parents: [expect.any(String)] } });
+    expect(lastCommitBetween(join(root, 'src/s.ts'), [line], [side])).toEqual({ found: null });
+    expect(lastCommitBetween(join(root, 'other.txt'), [line], [side])?.found?.commit).toBe(line);
+    expect(lastCommitBetween(join(root, 'src'), [merge], [line])?.found?.commit).toBe(side); // a folder; the merge took it from the side
+    // A commit git does not have, a name that is not a hash, nothing to start from: git cannot tell.
+    expect(lastCommitBetween(join(root, 'src/s.ts'), ['0'.repeat(40)], [line])).toBeNull();
+    expect(lastCommitBetween(join(root, 'src/s.ts'), ['HEAD'], [line])).toBeNull();
+    expect(lastCommitBetween(join(root, 'src/s.ts'), [], [line])).toBeNull();
+    expect(lastCommitBetween(join(root, 'nope.ts'), [side], [line])).toBeNull();
+  });
+
+  test('filesAtCommits: each file\'s text in each commit — one call, any characters, null where it was not', () => {
+    const { root, merge, line, side } = merged();
+    expect(
+      filesAtCommits(join(root, 'kb'), [
+        { commit: line, path: 'a.md' },
+        { commit: merge, path: 'a.md' },
+        { commit: merge, path: 'b.md' },
+        { commit: '0'.repeat(40), path: 'a.md' },
+        { commit: merge, path: '../src/s.ts' }, // only a path inside the folder
+        { commit: merge, path: '.' }, // a folder is no file
+        { commit: merge, path: 'a\nb.md' },
+        { commit: side, path: 'a.md' },
+      ]),
+    ).toEqual(['a', 'a — on the side ✓', null, null, null, null, null, 'a — on the side ✓']);
+    expect(filesAtCommits(join(root, 'kb'), [])).toEqual([]);
+    expect(filesAtCommits(tempDir(), [{ commit: merge, path: 'a.md' }])).toBeNull();
+    expect(filesAtCommits(join(root, 'nope'), [{ commit: merge, path: 'a.md' }])).toBeNull();
+  });
+
+  test('renamedFrom: the path a file had before a change moved it, as git\'s rename detection sees it', () => {
+    const root = tempDir();
+    write(root, 'kb/old.md', 'a page long enough for rename detection to recognise it\n'.repeat(4));
+    write(root, 'kb/stays.md', 'stays');
+    commitAll(root, 'base');
+    git(root, 'mv', 'kb/old.md', 'kb/new.md');
+    write(root, 'kb/added.md', 'new');
+    commitAll(root, 'moved');
+    const [after, before] = git(root, 'rev-parse', 'HEAD', 'HEAD^').stdout.trim().split('\n');
+    expect(renamedFrom(join(root, 'kb'), before!, after!, 'new.md')).toBe('old.md');
+    expect(renamedFrom(join(root, 'kb'), before!, after!, 'added.md')).toBeNull();
+    expect(renamedFrom(join(root, 'kb'), before!, after!, 'stays.md')).toBeNull();
+    expect(renamedFrom(join(root, 'kb'), 'HEAD^', 'HEAD', 'new.md')).toBeNull(); // only hashes are asked
+    expect(renamedFrom(tempDir(), before!, after!, 'new.md')).toBeNull();
   });
 });

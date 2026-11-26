@@ -1340,13 +1340,20 @@ Commit dates decide, so know what they say:
   change shows up on the day it was merged. A fast-forward pull keeps the dates the commits
   were made on: what someone else committed before your last check, and you pulled after it,
   does not count.
-- A merge that also changes the concept's own file is a check of that concept on the merge's
-  day. A re-check made in a branch and merged a day later is therefore not listed again: not
-  for the code the merge brought in, and not for any earlier change on the same line. Only a
-  merge counts, and only for code in the repository that holds the knowledge. A plain commit's
-  check is its stamps, and a commit that brings in a whole bundle at once (an import) checked
-  nothing. A squash merge or a rebase leaves no merge. A nested repository's code is never
-  merged with the knowledge.
+- A re-check made in a branch together with the code it re-checked still counts when the
+  branch is merged on a later day. A source is not listed when its newest commit is that merge
+  and the merge did three things. It brought new stamps for the concept: a `generated` or
+  `verified` its file did not have before the merge (a page the merge moved keeps the stamps
+  it had, and a page it adds brings all of its own). It brought only changes of that source
+  made no later than the newest of those stamps. And the line it was made on had not changed
+  the source since the branch left it, or since it last merged the line in. Anything else is
+  listed until the next stamp: a merge that changes the page without a stamp, code that reached
+  the line in another merge (even on the same day, even before the re-check was merged), what
+  a merge of the line into a branch brings, code a branch changed after its re-check, a squash
+  merge or a rebase (no merge is left), a plain commit (its stamps are its check, and an import
+  checked nothing), and a nested repository's code (it is never merged with the knowledge).
+  When a merge counted for one source and another source is listed, the action gives both
+  days: "after the concept was last checked (2026-10-04, merged on 2026-10-06)".
 - A concept that cites code not committed yet is checked again once that code is committed
   on a later day: it shows as drifted then, and a `verify` settles it.
 - A folder source drifts with any file in it, so a concept should cite the files it really

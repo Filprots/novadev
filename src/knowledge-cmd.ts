@@ -28,6 +28,7 @@ import {
   MEMORY_TYPES,
   WIKI_PAGE_TYPE,
   authoredConcepts,
+  checkedText,
   conceptLine,
   listConcepts,
   readLog,
@@ -101,7 +102,7 @@ export function knowledge(args: string[]): void {
     print(c, now);
     const drift = drifts?.get(c.path);
     for (const source of drift?.sources ?? []) {
-      console.log(`      source ${source.resource} changed on ${source.day}, after its last check on ${drift!.checked}`);
+      console.log(`      source ${source.resource} changed on ${source.day}, after its last check on ${checkedText(drift!)}`);
     }
   }
 }

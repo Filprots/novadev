@@ -1179,12 +1179,13 @@ written or verified, sync lists it: "its source … changed on …". Read what c
 (`git log` on that path, in the repository that holds it), and compare it with the
 concept. Then record a `verify` if the concept still holds, or fix it and record an
 `update`. Days are compared, so the code you commit on the day you record a concept never
-counts against it. A merge that changes the concept's file counts as a check of it on the
-merge's day, for code of the same repository: a re-check made in a branch is not listed again
-when the branch is merged a day later. A squash merge or a rebase leaves no merge, so a
-re-check that lands that way on a later day shows as drifted once more. Code you leave
-uncommitted is different: once it is committed on a later day, the concept shows as drifted
-once — re-check it then. A folder source drifts with any
+counts against it. A re-check you make in a branch, together with the code it re-checked,
+still holds when the branch is merged on a later day, if you made it after your branch's last
+change of that code, and after merging the line into your branch when that brought changes
+of it. A merge that changes the page without a stamp is no check, and neither is a squash
+merge or a rebase: the concept shows as drifted once more. Code you leave uncommitted is
+different: once it is committed on a later day, the concept shows as drifted once — re-check
+it then. A folder source drifts with any
 file in it, so cite the files a concept really describes, and never a file of `.novadev/`
 (cite a todo as `todo:<batch>/<todo>`). `novadev knowledge --drifted` lists them all.
 

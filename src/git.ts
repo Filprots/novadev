@@ -2,8 +2,9 @@
 // not a repository, no commit yet, or the file is not in the last commit — and callers then fall
 // back to what the working tree alone says. Nothing here ever changes the repository.
 //
-// All but one ask the project's own repository. `lastCommitDate` asks the repository that holds the
-// path it is given, which may be another one nested inside the project.
+// Most ask the project's own repository. `lastCommitDate` and the drift check's other questions
+// (`lastCommit`, `lastCommitBetween`, `filesAtCommits`, `renamedFrom`) ask the repository that holds
+// the path they are given, which may be another one nested inside the project.
 import { spawnSync } from 'node:child_process';
 import { realpathSync, statSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
@@ -61,55 +62,79 @@ export function lastCommitDate(path: string, since: string): string | null {
   return lastCommit(path, since)?.date ?? null;
 }
 
-/** A commit as the drift check knows it: its full hash and its committer date (`%cI`). */
-export type CommitStamp = { commit: string; date: string };
+/** A commit as the drift check knows it: its full hash, its committer date (`%cI`) and its parents' hashes — two or more: a merge. */
+export type CommitStamp = { commit: string; date: string; parents: string[] };
 
-/**
- * The newest commit that changed `path`, as `lastCommitDate` finds it — with its hash too, so the
- * caller can tell which commit of a first-parent line it is (`firstParentLine`).
- */
-export function lastCommit(path: string, since: string): CommitStamp | null {
-  let real: string;
-  let folder: boolean;
+/** Where git is asked about `path` (absolute; a file or a folder): the folder that holds it, and the pathspec there. */
+function askedIn(path: string): { cwd: string; spec: string } | null {
   try {
-    real = realpathSync(path);
-    folder = statSync(real).isDirectory();
+    const real = realpathSync(path);
+    return statSync(real).isDirectory() ? { cwd: real, spec: '.' } : { cwd: dirname(real), spec: basename(real) };
   } catch {
     return null;
   }
-  const cwd = folder ? real : dirname(real);
+}
+
+/** The commits git printed in `%x01%H%x02%cI%x02%P` form, in its order. */
+function commitStamps(out: string): CommitStamp[] {
+  const found: CommitStamp[] = [];
+  for (const m of out.matchAll(/\x01([0-9a-f]{40,64})\x02(\d{4}-\d{2}-\d{2}T[^\x02\s]+)\x02([0-9a-f ]*)/g)) {
+    found.push({ commit: m[1]!, date: m[2]!, parents: m[3]!.trim().split(/\s+/).filter(Boolean) });
+  }
+  return found;
+}
+
+/**
+ * The newest commit that changed `path`, as `lastCommitDate` finds it — with its hash and its
+ * parents too, so the drift check can tell a merge and ask what it brought (`lastCommitBetween`).
+ */
+export function lastCommit(path: string, since: string): CommitStamp | null {
+  const at = askedIn(path);
+  if (at === null) return null;
   const env = discoveringEnv();
   // `since` is a whole instant: a day alone would take today's time of day, and miss that day's
   // earlier commits.
   const out = git(
-    cwd,
-    [
-      '--literal-pathspecs', 'log', '-1', '--first-parent', `--since=${since}`, '--format=%x01%H%x02%cI%x02%P',
-      '--', folder ? '.' : basename(real),
-    ],
+    at.cwd,
+    ['--literal-pathspecs', 'log', '-1', '--first-parent', `--since=${since}`, '--format=%x01%H%x02%cI%x02%P', '--', at.spec],
     undefined,
     env,
   );
-  const found = out === null ? null : /\x01([0-9a-f]{40,64})\x02(\d{4}-\d{2}-\d{2}T[^\x02\s]+)\x02([0-9a-f ]*)/.exec(out);
-  if (!found) return null;
+  const found = out === null ? undefined : commitStamps(out)[0];
+  if (found === undefined) return null;
   // No parent: the repository's first commit, or a shallow clone's oldest — which says nothing.
-  if (found[3]!.trim() === '' && git(cwd, ['rev-parse', '--is-shallow-repository'], undefined, env)?.trim() === 'true') return null;
-  return { commit: found[1]!, date: found[2]! };
+  if (found.parents.length === 0 && git(at.cwd, ['rev-parse', '--is-shallow-repository'], undefined, env)?.trim() === 'true') return null;
+  return found;
 }
 
-/** One commit of a first-parent line: is it a merge (more than one parent), and the files it changed against its first parent. */
-export type LineCommit = CommitStamp & { merge: boolean; paths: string[] };
+/**
+ * The newest commit that changed `path` among the commits reachable from one of `from` and from none
+ * of `not` — what one side of a merge holds that the other does not (git's default history
+ * simplification: a merge that took the path from one parent unchanged stands aside for that
+ * parent's commits). Asked like `lastCommit`, in the folder of the path. `{ found: null }` when no
+ * such commit changed it; null when git cannot tell (no git, a commit it does not have — another
+ * repository's, or one a shallow clone did not fetch).
+ */
+export function lastCommitBetween(path: string, from: readonly string[], not: readonly string[]): { found: CommitStamp | null } | null {
+  const at = askedIn(path);
+  const hashes = [...from, ...not];
+  if (at === null || from.length === 0 || !hashes.every((hash) => /^[0-9a-f]{40,64}$/.test(hash))) return null;
+  const out = git(
+    at.cwd,
+    ['--literal-pathspecs', 'log', '-1', '--format=%x01%H%x02%cI%x02%P', ...from, ...not.map((hash) => `^${hash}`), '--', at.spec],
+    undefined,
+    discoveringEnv(),
+  );
+  return out === null ? null : { found: commitStamps(out)[0] ?? null };
+}
 
 /**
- * The first-parent line of the repository that holds the folder `dir`, newest first, back to `since`
- * (an ISO 8601 instant, as in `lastCommitDate`): every commit of the line — also one that changed
- * nothing in `dir` — with the files in `dir` it changed against its first parent (a merge: what it
- * brought in), as paths relative to `dir`. One call to git, however long the line. Asked like
- * `lastCommitDate`: in the folder (a symbolic link followed), without the variables a hook exports,
- * so the repository that HOLDS the folder answers. A shallow clone's oldest commit is left out: its
- * parent was not fetched, so it seems to add every file. Null when git cannot tell.
+ * The text of files as commits hold them, in the repository that holds the folder `dir`: for each
+ * `{ commit, path }` (the path relative to `dir`), the file's text in that commit, or null when the
+ * commit has no such file. One call to git for all of them. Null when git cannot tell (no git, not
+ * in a repository). Asked like `lastCommit`, without the variables a hook exports.
  */
-export function firstParentLine(dir: string, since: string): LineCommit[] | null {
+export function filesAtCommits(dir: string, wanted: ReadonlyArray<{ commit: string; path: string }>): Array<string | null> | null {
   let real: string;
   try {
     real = realpathSync(dir);
@@ -118,35 +143,73 @@ export function firstParentLine(dir: string, since: string): LineCommit[] | null
     return null;
   }
   const env = discoveringEnv();
+  // The folder's path from the top of its repository: cat-file names a file from there.
+  const prefix = git(real, ['rev-parse', '--show-prefix'], undefined, env);
+  if (prefix === null) return null;
+  if (wanted.length === 0) return [];
+  const names = wanted.map(({ commit, path }) => `${commit}:${prefix.trim()}${path.replace(/\\/g, '/')}`);
+  // A name with a line break cannot be asked on cat-file's input; it is "not there".
+  const asked = names.map((name) => (/[\r\n]/.test(name) ? 'novadev-not-a-name' : name));
+  let out: Buffer;
+  try {
+    const run = spawnSync('git', ['cat-file', '--batch'], {
+      cwd: real,
+      input: `${asked.join('\n')}\n`,
+      env,
+      stdio: ['pipe', 'pipe', 'ignore'],
+      timeout: 30_000,
+      maxBuffer: 256 * 1024 * 1024,
+      windowsHide: true,
+    });
+    if (run.status !== 0 || !Buffer.isBuffer(run.stdout)) return null;
+    out = run.stdout;
+  } catch {
+    return null;
+  }
+  // Each answer: "<object> <type> <size>\n<size bytes>\n", or "<name> missing\n" (or "ambiguous").
+  const texts: Array<string | null> = [];
+  let at = 0;
+  for (let i = 0; i < asked.length; i++) {
+    const end = out.indexOf(0x0a, at);
+    if (end < 0) return null;
+    const head = /^[0-9a-f]{40,64} (\w+) (\d+)$/.exec(out.toString('utf8', at, end));
+    at = end + 1;
+    if (head === null) {
+      texts.push(null);
+      continue;
+    }
+    const size = Number(head[2]);
+    texts.push(head[1] === 'blob' ? out.toString('utf8', at, at + size) : null);
+    at += size + 1;
+  }
+  return texts;
+}
+
+/**
+ * The path, relative to the folder `dir`, that the file `path` (relative to it too) had in the commit
+ * `from`, when the change from `from` to `to` moved it there — as git's rename detection (`diff -M`)
+ * sees it, within `dir`. Null when it was not moved, and when git cannot tell.
+ */
+export function renamedFrom(dir: string, from: string, to: string, path: string): string | null {
+  let real: string;
+  try {
+    real = realpathSync(dir);
+  } catch {
+    return null;
+  }
+  if (![from, to].every((hash) => /^[0-9a-f]{40,64}$/.test(hash))) return null;
   const out = git(
     real,
-    [
-      '-c', 'core.quotePath=false',
-      'log', '--first-parent', '-m', `--since=${since}`, '-z', '--format=%x01%H%x02%cI%x02%P',
-      '--name-only', '--relative', '--no-renames',
-    ],
+    ['-c', 'core.quotePath=false', 'diff', '-z', '--name-status', '-M', '--diff-filter=R', '--relative', from, to, '--', '.'],
     undefined,
-    env,
+    discoveringEnv(),
   );
   if (out === null) return null;
-  let shallow: boolean | null = null;
-  const line: LineCommit[] = [];
-  for (const chunk of out.split('\x01').slice(1)) {
-    const [head = '', ...names] = chunk.split('\0');
-    const [commit = '', date = '', parents = ''] = head.split('\x02');
-    if (!/^[0-9a-f]{40,64}$/.test(commit) || !/^\d{4}-\d{2}-\d{2}T/.test(date)) continue;
-    if (parents.trim() === '') {
-      shallow ??= git(real, ['rev-parse', '--is-shallow-repository'], undefined, env)?.trim() === 'true';
-      if (shallow) continue;
-    }
-    line.push({
-      commit,
-      date: date.trim(),
-      merge: parents.trim().split(/\s+/).length > 1,
-      paths: names.map((name) => name.replace(/^\n/, '')).filter((name) => name !== ''),
-    });
+  const fields = out.split('\0');
+  for (let i = 0; i + 2 < fields.length; i += 3) {
+    if (/^R\d*$/.test(fields[i]!) && fields[i + 2] === path.replace(/\\/g, '/')) return fields[i + 1]!;
   }
-  return line;
+  return null;
 }
 
 /** True when `root` is inside a git work tree (and git runs at all). */

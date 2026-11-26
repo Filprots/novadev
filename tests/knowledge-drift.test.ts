@@ -5,10 +5,10 @@
 import { describe, expect, test } from 'bun:test';
 import { symlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { type LineCommit, lastCommitDate } from '../src/git.ts';
+import { lastCommitDate } from '../src/git.ts';
 import { type SourceChange, auditKnowledge, listConcepts, sourceDrift } from '../src/knowledge.ts';
 import { parseEvents, recordEvents } from '../src/knowledge-log.ts';
-import { CLI, KNOWLEDGE, STAMP, cleanEnv, git, project, run, tempDir, write } from './helpers.ts';
+import { CLI, KNOWLEDGE, STAMP, cleanEnv, git, project, read, run, tempDir, write } from './helpers.ts';
 
 const AGENT = 'claude-code/claude-opus-5-5';
 const APP = 'repos/app';
@@ -176,7 +176,7 @@ describe('source drift', () => {
     // a.ts changed on the 5th; b.ts has no commit since the search's start, the day before the concepts' check.
     expect(answers).toEqual(
       new Map([
-        [`${APP}/src/a.ts\x002026-10-01`, { day: '2026-10-05', commit: git(join(root, APP), 'rev-parse', 'HEAD').stdout.trim() }],
+        [`${APP}/src/a.ts\x002026-10-01`, { day: '2026-10-05', commit: git(join(root, APP), 'rev-parse', 'HEAD').stdout.trim(), parents: [git(join(root, APP), 'rev-parse', 'HEAD^').stdout.trim()] }],
         [`${APP}/src/b.ts\x002026-10-01`, null],
       ]),
     );
@@ -271,10 +271,10 @@ describe('the review of 0.13.0: drift', () => {
 
 describe('a re-check that reaches the line with the code it re-checked', () => {
   /** Record a "verify" of planner/<name>.md as `novadev knowledge log` does, at the moment `at`. */
-  function verifyOn(root: string, name: string, at: string): void {
+  function verifyOn(root: string, name: string, at: string, folder = 'planner'): void {
     const nd = join(root, '.novadev');
     const events = parseEvents(root, nd, {
-      events: [{ path: `planner/${name}.md`, event: 'verify', by: AGENT, note: `The ${name} text still holds after the change to its code.` }],
+      events: [{ path: `${folder}/${name}.md`, event: 'verify', by: AGENT, note: `The ${name} text still holds after the change to its code.` }],
     });
     recordEvents(root, nd, events, new Date(at));
   }
@@ -291,6 +291,24 @@ describe('a re-check that reaches the line with the code it re-checked', () => {
     gitOn(root, '2026-10-04T15:30:00+02:00', 'checkout', '-q', '-');
   }
 
+  /** The branch checked out in `root`. */
+  const branchOf = (root: string) => git(root, 'rev-parse', '--abbrev-ref', 'HEAD').stdout.trim();
+
+  /** src/own.ts as ten lines, line `n` of them changed to `text`: two branches change two lines and merge cleanly. */
+  function ownLines(root: string, changes: Record<number, string> = {}): void {
+    const lines = Array.from({ length: 10 }, (_, i) => changes[i + 1] ?? `export const line${i + 1} = ${i + 1};`);
+    write(root, 'src/own.ts', `${lines.join('\n')}\n`);
+  }
+
+  /** The fixture with src/own.ts as ten lines and planner/drawing.md citing it, committed on 2026-10-01. */
+  function tenLines(): string {
+    const root = nested();
+    ownLines(root);
+    cites(root, 'drawing', ['repo:src/own.ts']);
+    commitOn(root, '2026-10-01T10:00:00+02:00', 'the concept');
+    return root;
+  }
+
   test('a branch re-checks a concept along with the code it changed, merged a day later: the merge is that check, no drift', () => {
     const root = nested();
     cites(root, 'drawing', ['repo:src/own.ts']);
@@ -302,7 +320,7 @@ describe('a re-check that reaches the line with the code it re-checked', () => {
     expect(run(root, 'knowledge').stdout).toContain('  drifted: 0 whose code changed after their last check\n');
   });
 
-  test('a merge is a check on its own day: code that reached the line before it counts as checked; a commit that is not a merge never counts — an import checked nothing', () => {
+  test('a merge is no check of code that reached the line before it: the re-check it brought never saw that code; a plain commit never counts — an import checked nothing', () => {
     const root = nested();
     cites(root, 'drawing', ['repo:src/own.ts']);
     commitOn(root, '2026-10-01T10:00:00+02:00', 'the concept');
@@ -314,7 +332,10 @@ describe('a re-check that reaches the line with the code it re-checked', () => {
     commitOn(root, '2026-10-03T12:00:00+02:00', 'the code, on the line');
     expect(drifting(root)).toHaveLength(1); // the line's concept is still the one checked on the 1st
     gitOn(root, '2026-10-05T12:00:00+02:00', 'merge', '-q', '--no-ff', 'side', '-m', 'merge side');
-    expect(drifting(root)).toEqual([]); // the merge of the 5th changed the concept file, after the code of the 3rd
+    // The merge of the 5th brought the re-check of the 2nd, which never saw the code of the 3rd.
+    const merged = drifting(root);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toStartWith('knowledge/planner/drawing.md: its source repo:src/own.ts changed on 2026-10-03, after the concept was last checked (2026-10-02) — ');
 
     // One plain commit brings a concept and its code in together: a squash, a rebase — or an import.
     const imported = nested();
@@ -324,6 +345,246 @@ describe('a re-check that reaches the line with the code it re-checked', () => {
     const listed = drifting(imported);
     expect(listed).toHaveLength(1);
     expect(listed[0]).toStartWith('knowledge/planner/drawing.md: its source repo:src/own.ts changed on 2026-10-05, after the concept was last checked (2026-10-01)');
+  });
+
+  test('a merge that changes the concept\'s file without a stamp is no check: an unrecorded edit, a block sync writes', () => {
+    const root = nested();
+    cites(root, 'drawing', ['repo:src/own.ts']);
+    commitOn(root, '2026-10-01T10:00:00+02:00', 'the concept');
+    gitOn(root, '2026-10-04T09:00:00+02:00', 'checkout', '-q', '-b', 'side');
+    write(root, 'src/own.ts', 'export const changed = true;\n');
+    const page = `${KNOWLEDGE}/planner/drawing.md`;
+    write(root, page, `${read(root, page)}\n<!-- novadev:budgets:begin -->\nnumbers\n<!-- novadev:budgets:end -->\n`);
+    commitOn(root, '2026-10-04T15:30:00+02:00', 'the code, and the page changed with no stamp');
+    gitOn(root, '2026-10-04T15:30:00+02:00', 'checkout', '-q', '-');
+    gitOn(root, '2026-10-05T12:00:00+02:00', 'merge', '-q', '--no-ff', 'side', '-m', 'merge side');
+    const listed = drifting(root);
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toStartWith('knowledge/planner/drawing.md: its source repo:src/own.ts changed on 2026-10-05, after the concept was last checked (2026-10-01) — ');
+  });
+
+  test('a page moved by a branch keeps the stamps it had: the move is no check — git\'s rename detection finds its old path', () => {
+    // The code changed on the line; a branch only moves the page.
+    const root = nested();
+    cites(root, 'drawing', ['repo:src/own.ts']);
+    commitOn(root, '2026-10-01T10:00:00+02:00', 'the concept');
+    write(root, 'src/own.ts', 'export const changed = true;\n');
+    commitOn(root, '2026-10-03T10:00:00+02:00', 'code on the line');
+    gitOn(root, '2026-10-04T09:00:00+02:00', 'checkout', '-q', '-b', 'side');
+    gitOn(root, '2026-10-04T09:00:00+02:00', 'mv', `${KNOWLEDGE}/planner/drawing.md`, `${KNOWLEDGE}/planner/drawing-moved.md`);
+    commitOn(root, '2026-10-04T10:00:00+02:00', 'reorganise');
+    gitOn(root, '2026-10-04T10:00:00+02:00', 'checkout', '-q', '-');
+    gitOn(root, '2026-10-05T12:00:00+02:00', 'merge', '-q', '--no-ff', 'side', '-m', 'merge side');
+    expect(drifting(root)).toHaveLength(1);
+
+    // The branch changes the code and moves the page; the line re-checked the page after the branch
+    // left, without its code: the merge brings the line's stamps to the new path — none of its own.
+    const moved = nested();
+    cites(moved, 'drawing', ['repo:src/own.ts']);
+    commitOn(moved, '2026-10-01T10:00:00+02:00', 'the concept');
+    gitOn(moved, '2026-10-02T09:00:00+02:00', 'checkout', '-q', '-b', 'side');
+    write(moved, 'src/own.ts', 'export const changed = true;\n');
+    gitOn(moved, '2026-10-02T09:00:00+02:00', 'mv', `${KNOWLEDGE}/planner/drawing.md`, `${KNOWLEDGE}/planner/drawing-moved.md`);
+    commitOn(moved, '2026-10-02T10:00:00+02:00', 'the code, and the page moved');
+    gitOn(moved, '2026-10-02T10:00:00+02:00', 'checkout', '-q', '-');
+    verifyOn(moved, 'drawing', '2026-10-03T15:00:00+02:00');
+    commitOn(moved, '2026-10-03T15:30:00+02:00', 'a re-check on the line, without the branch\'s code');
+    gitOn(moved, '2026-10-05T12:00:00+02:00', 'merge', '-q', '--no-ff', 'side', '-m', 'merge side');
+    expect(read(moved, `${KNOWLEDGE}/planner/drawing-moved.md`)).toMatch(/verified:\n  - \{ by: [^,]+, at: 2026-10-03T/); // the line's stamp, moved along
+    const listed = drifting(moved);
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toStartWith('knowledge/planner/drawing-moved.md: its source repo:src/own.ts changed on 2026-10-05, after the concept was last checked (2026-10-03) — ');
+
+    // A branch that moves the page AND re-checks it with its code: that merge is the check.
+    const both = nested();
+    cites(both, 'drawing', ['repo:src/own.ts']);
+    commitOn(both, '2026-10-01T10:00:00+02:00', 'the concept');
+    gitOn(both, '2026-10-04T09:00:00+02:00', 'checkout', '-q', '-b', 'side');
+    gitOn(both, '2026-10-04T09:00:00+02:00', 'mv', `${KNOWLEDGE}/planner/drawing.md`, `${KNOWLEDGE}/planner/drawing-moved.md`);
+    write(both, 'src/own.ts', 'export const changed = true;\n');
+    verifyOn(both, 'drawing-moved', '2026-10-04T15:00:00+02:00');
+    commitOn(both, '2026-10-04T15:30:00+02:00', 'moved, the code, the re-check');
+    gitOn(both, '2026-10-04T15:30:00+02:00', 'checkout', '-q', '-');
+    gitOn(both, '2026-10-05T12:00:00+02:00', 'merge', '-q', '--no-ff', 'side', '-m', 'merge side');
+    expect(drifting(both)).toEqual([]);
+  });
+
+  test('a page a branch writes new along with the code it describes: the merge brings all its stamps — that is its check', () => {
+    const root = nested();
+    commitOn(root, '2026-10-01T10:00:00+02:00', 'the project');
+    gitOn(root, '2026-10-04T09:00:00+02:00', 'checkout', '-q', '-b', 'side');
+    write(root, 'src/own.ts', 'export const changed = true;\n');
+    write(
+      root,
+      `${KNOWLEDGE}/planner/fresh.md`,
+      `---\ntype: Guide\ntitle: fresh\ndescription: What fresh explains.\ngenerated: { by: ${AGENT}, at: 2026-10-04T15:00:00+02:00 }\nsources:\n  - resource: repo:src/own.ts\n---\nThe text.\n`,
+    );
+    commitOn(root, '2026-10-04T15:30:00+02:00', 'the code and its new page');
+    gitOn(root, '2026-10-04T15:30:00+02:00', 'checkout', '-q', '-');
+    gitOn(root, '2026-10-05T12:00:00+02:00', 'merge', '-q', '--no-ff', 'side', '-m', 'merge side');
+    expect(drifting(root)).toEqual([]);
+  });
+
+  test('a re-check made in a branch before more code on the same branch did not see that code', () => {
+    const root = nested();
+    cites(root, 'drawing', ['repo:src/own.ts']);
+    commitOn(root, '2026-10-01T10:00:00+02:00', 'the concept');
+    gitOn(root, '2026-10-02T09:00:00+02:00', 'checkout', '-q', '-b', 'side');
+    verifyOn(root, 'drawing', '2026-10-02T15:00:00+02:00');
+    commitOn(root, '2026-10-02T15:30:00+02:00', 'a re-check');
+    write(root, 'src/own.ts', 'export const changed = true;\n');
+    commitOn(root, '2026-10-03T10:00:00+02:00', 'more code, no re-check');
+    gitOn(root, '2026-10-03T10:00:00+02:00', 'checkout', '-q', '-');
+    gitOn(root, '2026-10-05T12:00:00+02:00', 'merge', '-q', '--no-ff', 'side', '-m', 'merge side');
+    const listed = drifting(root);
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toStartWith('knowledge/planner/drawing.md: its source repo:src/own.ts changed on 2026-10-05, after the concept was last checked (2026-10-02) — ');
+  });
+
+  test('code the line changed while the branch was away: the re-check the merge brings never saw it', () => {
+    const root = tenLines();
+    gitOn(root, '2026-10-02T09:00:00+02:00', 'checkout', '-q', '-b', 'side');
+    ownLines(root, { 1: 'export const side = true;' });
+    verifyOn(root, 'drawing', '2026-10-02T15:00:00+02:00');
+    commitOn(root, '2026-10-02T15:30:00+02:00', 'the code and its re-check');
+    gitOn(root, '2026-10-02T15:30:00+02:00', 'checkout', '-q', '-');
+    ownLines(root, { 10: 'export const line = true;' });
+    commitOn(root, '2026-10-03T10:00:00+02:00', 'other code on the line');
+    gitOn(root, '2026-10-05T12:00:00+02:00', 'merge', '-q', '--no-ff', 'side', '-m', 'merge side');
+    expect(read(root, 'src/own.ts')).toContain('side = true');
+    expect(read(root, 'src/own.ts')).toContain('line = true');
+    const listed = drifting(root);
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toStartWith('knowledge/planner/drawing.md: its source repo:src/own.ts changed on 2026-10-05, after the concept was last checked (2026-10-02) — ');
+  });
+
+  test('the worktree flow: the line is merged into the branch, then the branch into the line — a re-check counts only if it saw what that brought', () => {
+    // Another builder's code reaches the line (by its own merge) after this branch re-checked; this
+    // branch never changed the code. The lead merges the line into the branch, then the branch.
+    const root = nested();
+    cites(root, 'drawing', ['repo:src/own.ts']);
+    commitOn(root, '2026-10-01T10:00:00+02:00', 'the concept');
+    const main = branchOf(root);
+    gitOn(root, '2026-10-02T09:00:00+02:00', 'checkout', '-q', '-b', 'side');
+    verifyOn(root, 'drawing', '2026-10-02T15:00:00+02:00');
+    commitOn(root, '2026-10-02T15:30:00+02:00', 're-check');
+    gitOn(root, '2026-10-03T09:00:00+02:00', 'checkout', '-q', '-b', 'other', main);
+    write(root, 'src/own.ts', 'export const other = true;\n');
+    commitOn(root, '2026-10-03T10:00:00+02:00', 'other code');
+    gitOn(root, '2026-10-03T10:00:00+02:00', 'checkout', '-q', main);
+    gitOn(root, '2026-10-03T12:00:00+02:00', 'merge', '-q', '--no-ff', 'other', '-m', 'merge other');
+    expect(drifting(root)).toHaveLength(1);
+    gitOn(root, '2026-10-05T09:00:00+02:00', 'checkout', '-q', 'side');
+    gitOn(root, '2026-10-05T09:00:00+02:00', 'merge', '-q', '--no-ff', main, '-m', "Merge branch 'main' into side");
+    gitOn(root, '2026-10-05T09:00:00+02:00', 'checkout', '-q', main);
+    gitOn(root, '2026-10-05T12:00:00+02:00', 'merge', '-q', '--no-ff', 'side', '-m', 'Merge side (worktree side)');
+    const listed = drifting(root);
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toStartWith('knowledge/planner/drawing.md: its source repo:src/own.ts changed on 2026-10-03, after the concept was last checked (2026-10-02) — ');
+
+    // Both change the code: the line's merge into the branch changes it too. A re-check made before
+    // it never saw the line's part; one made after it (or on its day) did.
+    for (const again of [false, true]) {
+      const flow = tenLines();
+      const line = branchOf(flow);
+      gitOn(flow, '2026-10-02T09:00:00+02:00', 'checkout', '-q', '-b', 'side');
+      ownLines(flow, { 1: 'export const side = true;' });
+      verifyOn(flow, 'drawing', '2026-10-02T15:00:00+02:00');
+      commitOn(flow, '2026-10-02T15:30:00+02:00', 'the code and its re-check');
+      gitOn(flow, '2026-10-02T15:30:00+02:00', 'checkout', '-q', line);
+      ownLines(flow, { 10: 'export const line = true;' });
+      commitOn(flow, '2026-10-03T10:00:00+02:00', 'other code on the line');
+      gitOn(flow, '2026-10-04T09:00:00+02:00', 'checkout', '-q', 'side');
+      gitOn(flow, '2026-10-04T09:00:00+02:00', 'merge', '-q', '--no-ff', line, '-m', "Merge branch 'main' into side");
+      if (again) {
+        verifyOn(flow, 'drawing', '2026-10-04T10:00:00+02:00');
+        commitOn(flow, '2026-10-04T10:30:00+02:00', 're-checked with the line\'s code');
+      }
+      gitOn(flow, '2026-10-04T10:30:00+02:00', 'checkout', '-q', line);
+      gitOn(flow, '2026-10-05T12:00:00+02:00', 'merge', '-q', '--no-ff', 'side', '-m', 'Merge side (worktree side)');
+      const found = drifting(flow);
+      if (again) expect(found).toEqual([]);
+      else {
+        expect(found).toHaveLength(1);
+        expect(found[0]).toStartWith('knowledge/planner/drawing.md: its source repo:src/own.ts changed on 2026-10-05, after the concept was last checked (2026-10-02) — ');
+      }
+    }
+  });
+
+  test('in a branch, merging the line in — whose re-check of its own code came along — does not excuse the branch\'s own unchecked code', () => {
+    // The line re-checks the page in a plain commit; the branch changed the code without a re-check.
+    const root = nested();
+    cites(root, 'drawing', ['repo:src/own.ts']);
+    commitOn(root, '2026-10-01T10:00:00+02:00', 'the concept');
+    const main = branchOf(root);
+    gitOn(root, '2026-10-02T09:00:00+02:00', 'checkout', '-q', '-b', 'side');
+    gitOn(root, '2026-10-02T09:00:00+02:00', 'checkout', '-q', main);
+    verifyOn(root, 'drawing', '2026-10-03T15:00:00+02:00');
+    commitOn(root, '2026-10-03T15:30:00+02:00', 'a re-check on the line');
+    gitOn(root, '2026-10-04T09:00:00+02:00', 'checkout', '-q', 'side');
+    write(root, 'src/own.ts', 'export const branch = true;\n');
+    commitOn(root, '2026-10-04T10:00:00+02:00', 'branch code, page not re-checked');
+    expect(drifting(root)).toHaveLength(1);
+    gitOn(root, '2026-10-06T09:00:00+02:00', 'merge', '-q', '--no-ff', main, '-m', "Merge branch 'main' into side");
+    const listed = drifting(root);
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toStartWith('knowledge/planner/drawing.md: its source repo:src/own.ts changed on 2026-10-04, after the concept was last checked (2026-10-03) — ');
+
+    // The line changes the code too and re-checks it, so the merge into the branch changes the code
+    // and brings a re-check: of the line's code only — the branch's own change still drifts.
+    const flow = tenLines();
+    const line = branchOf(flow);
+    gitOn(flow, '2026-10-02T09:00:00+02:00', 'checkout', '-q', '-b', 'side');
+    ownLines(flow, { 1: 'export const side = true;' });
+    commitOn(flow, '2026-10-02T10:00:00+02:00', 'branch code, page not re-checked');
+    gitOn(flow, '2026-10-02T10:00:00+02:00', 'checkout', '-q', line);
+    ownLines(flow, { 10: 'export const line = true;' });
+    verifyOn(flow, 'drawing', '2026-10-03T15:00:00+02:00');
+    commitOn(flow, '2026-10-03T15:30:00+02:00', 'line code and its re-check');
+    gitOn(flow, '2026-10-04T09:00:00+02:00', 'checkout', '-q', 'side');
+    gitOn(flow, '2026-10-04T09:00:00+02:00', 'merge', '-q', '--no-ff', line, '-m', "Merge branch 'main' into side");
+    const found = drifting(flow);
+    expect(found).toHaveLength(1);
+    expect(found[0]).toStartWith('knowledge/planner/drawing.md: its source repo:src/own.ts changed on 2026-10-04, after the concept was last checked (2026-10-03) — ');
+  });
+
+  test('a later merge the same day that changes the code without a re-check: drifted, though the re-check was merged that morning', () => {
+    const root = nested();
+    cites(root, 'drawing', ['repo:src/own.ts']);
+    commitOn(root, '2026-10-01T10:00:00+02:00', 'the concept');
+    recheckOnSide(root, ['drawing']);
+    const main = branchOf(root);
+    gitOn(root, '2026-10-05T09:00:00+02:00', 'merge', '-q', '--no-ff', 'side', '-m', 'merge side');
+    expect(drifting(root)).toEqual([]);
+    gitOn(root, '2026-10-05T10:00:00+02:00', 'checkout', '-q', '-b', 'other');
+    write(root, 'src/own.ts', 'export const other = true;\n');
+    commitOn(root, '2026-10-05T11:00:00+02:00', 'other code, page not re-checked');
+    gitOn(root, '2026-10-05T11:00:00+02:00', 'checkout', '-q', main);
+    gitOn(root, '2026-10-05T17:00:00+02:00', 'merge', '-q', '--no-ff', 'other', '-m', 'merge other');
+    const listed = drifting(root);
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toStartWith('knowledge/planner/drawing.md: its source repo:src/own.ts changed on 2026-10-05, after the concept was last checked (2026-10-04) — ');
+  });
+
+  test('a merge counts for the source it brought: another source changed on the line meanwhile drifts, and the message names both days', () => {
+    const root = nested();
+    write(root, 'src/other.ts', 'export {};\n');
+    cites(root, 'drawing', ['repo:src/own.ts', 'repo:src/other.ts']);
+    commitOn(root, '2026-10-01T10:00:00+02:00', 'the concept');
+    recheckOnSide(root, ['drawing']);
+    write(root, 'src/other.ts', 'export const changed = true;\n');
+    commitOn(root, '2026-10-05T10:00:00+02:00', 'other code on the line, after the re-check was made');
+    gitOn(root, '2026-10-06T12:00:00+02:00', 'merge', '-q', '--no-ff', 'side', '-m', 'merge side');
+    const drifts = sourceDrift(root, listConcepts(join(root, '.novadev')));
+    expect(drifts.map(({ checked, stamped, sources }) => ({ checked, stamped, sources }))).toEqual([
+      { checked: '2026-10-06', stamped: '2026-10-04', sources: [{ resource: 'repo:src/other.ts', day: '2026-10-05' }] },
+    ]);
+    expect(drifting(root)[0]).toStartWith(
+      'knowledge/planner/drawing.md: its source repo:src/other.ts changed on 2026-10-05, after the concept was last checked (2026-10-04, merged on 2026-10-06) — ',
+    );
+    expect(run(root, 'knowledge', '--drifted').stdout).toContain(
+      '      source repo:src/other.ts changed on 2026-10-05, after its last check on 2026-10-04, merged on 2026-10-06\n',
+    );
   });
 
   test('only that concept, on that line, up to that day: a concept the merge left alone, a nested repository\'s source and later code still drift', () => {
@@ -348,28 +609,28 @@ describe('a re-check that reaches the line with the code it re-checked', () => {
     expect(later[1]).toStartWith('knowledge/planner/untouched.md: its source repo:src/own.ts changed on 2026-10-08,');
   });
 
-  test('git is asked for the line once per run, and only when the stamps leave a concept drifted', () => {
+  test('git is asked about a merge only for a source the stamps leave drifted, once per run', () => {
     const root = nested();
     const nd = join(root, '.novadev');
     cites(root, 'drawing', ['repo:src/own.ts']);
     commitOn(root, '2026-10-01T10:00:00+02:00', 'the concept');
     const days = new Map<string, SourceChange | null>();
-    const lines = new Map<string, LineCommit[] | null>();
-    expect(sourceDrift(root, listConcepts(nd), days, lines)).toEqual([]);
-    expect(lines.size).toBe(0); // nothing drifted by its stamps: the line was never asked for
+    const checks = new Map<string, boolean>();
+    expect(sourceDrift(root, listConcepts(nd), days, checks)).toEqual([]);
+    expect(checks.size).toBe(0); // nothing drifted by its stamps: no merge was asked about
 
     recheckOnSide(root, ['drawing']);
     gitOn(root, '2026-10-05T12:00:00+02:00', 'merge', '-q', '--no-ff', 'side', '-m', 'merge side');
     days.clear();
-    expect(sourceDrift(root, listConcepts(nd), days, lines)).toEqual([]);
-    expect([...lines.keys()]).toEqual(['2026-10-04']);
-    const merge = lines.get('2026-10-04')![0]!;
-    expect(merge).toEqual({ commit: git(root, 'rev-parse', 'HEAD').stdout.trim(), date: '2026-10-05T12:00:00+02:00', merge: true, paths: ['log.md', 'planner/drawing.md'] });
+    expect(sourceDrift(root, listConcepts(nd), days, checks)).toEqual([]);
+    const head = git(root, 'rev-parse', 'HEAD').stdout.trim();
+    expect(days.get('src/own.ts\x002026-10-04')).toEqual({ day: '2026-10-05', commit: head, parents: git(root, 'rev-parse', 'HEAD^1', 'HEAD^2').stdout.trim().split('\n') });
+    expect(checks).toEqual(new Map([[`${head}\x00planner/drawing.md\x00src/own.ts`, true]]));
 
-    write(root, 'src/own.ts', 'export const changed = 2;\n');
-    commitOn(root, '2026-10-07T12:00:00+02:00', 'a later change'); // a run commits nothing; the answers stand
-    expect(sourceDrift(root, listConcepts(nd), days, lines)).toEqual([]);
-    expect(lines.size).toBe(1);
-    expect(sourceDrift(root, listConcepts(nd)).map((drift) => drift.sources)).toEqual([[{ resource: 'repo:src/own.ts', day: '2026-10-07' }]]);
+    // A run commits nothing: the answers stand, and git is not asked again.
+    checks.set(`${head}\x00planner/drawing.md\x00src/own.ts`, false);
+    expect(sourceDrift(root, listConcepts(nd), days, checks).map((drift) => drift.sources)).toEqual([[{ resource: 'repo:src/own.ts', day: '2026-10-05' }]]);
+    expect(checks.size).toBe(1);
+    expect(sourceDrift(root, listConcepts(nd))).toEqual([]);
   });
 });

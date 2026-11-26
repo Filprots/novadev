@@ -28,7 +28,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { type LineCommit, firstParentLine, lastCommit } from './git.ts';
+import { filesAtCommits, lastCommit, lastCommitBetween, renamedFrom } from './git.ts';
 import {
   FEATURE_DIR_RE,
   FEATURE_STATUS_KEY,
@@ -698,12 +698,12 @@ const DRIFT_SHOWN = 5;
 /**
  * Judge the bundle. `now` decides what is stale; git (when the project is a repository) says which
  * concepts changed since the last commit, and which `repo:` sources changed since their concept was
- * last checked. `sourceDays` and `sourceLines` keep git's answers about those sources: the audits of one run may share them.
+ * last checked. `sourceDays` and `mergeChecks` keep git's answers about those sources: the audits of one run may share them.
  */
 export function auditKnowledge(
   root: string,
   nd: string,
-  opts: { now?: Date; sourceDays?: Map<string, SourceChange | null>; sourceLines?: Map<string, LineCommit[] | null> } = {},
+  opts: { now?: Date; sourceDays?: Map<string, SourceChange | null>; mergeChecks?: Map<string, boolean> } = {},
 ): KnowledgeAudit {
   const now = opts.now ?? new Date();
   const problems: string[] = [];
@@ -953,11 +953,11 @@ export function auditKnowledge(
   if (stale.length > STALE_SHOWN) {
     actions.push(`… and ${stale.length - STALE_SHOWN} more stale concept(s) — \`novadev knowledge --stale\` lists them all`);
   }
-  const drifted = sourceDrift(root, authored, opts.sourceDays, opts.sourceLines);
+  const drifted = sourceDrift(root, authored, opts.sourceDays, opts.mergeChecks);
   for (const drift of drifted.slice(0, DRIFT_SHOWN)) {
     const [newest, ...more] = drift.sources;
     actions.push(
-      `${where(drift.concept.path)}: its source ${newest!.resource} changed on ${newest!.day}${more.length > 0 ? ` (and ${plural(more.length, 'other source', 'other sources')} too)` : ''}, after the concept was last checked (${drift.checked}) — re-check it against the code, then record a "verify" if it still holds, or an "update" if it moved (\`novadev knowledge log\`)`,
+      `${where(drift.concept.path)}: its source ${newest!.resource} changed on ${newest!.day}${more.length > 0 ? ` (and ${plural(more.length, 'other source', 'other sources')} too)` : ''}, after the concept was last checked (${checkedText(drift)}) — re-check it against the code, then record a "verify" if it still holds, or an "update" if it moved (\`novadev knowledge log\`)`,
     );
   }
   if (drifted.length > DRIFT_SHOWN) {
@@ -977,11 +977,25 @@ export function auditKnowledge(
 /** A concept one of whose `repo:` sources has a commit dated after the concept was last checked. */
 export type Drift = {
   concept: Concept;
-  /** The day the concept was last written or verified (`lastChangeDay`): what its stamps say. */
+  /**
+   * The day the concept was last checked: what its stamps say (`stamped`) — or, when a merge that
+   * brought a re-check of the concept counted as the check of one of its sources, that merge's day.
+   */
   checked: string;
+  /** The day its stamps say it was last written or verified (`lastChangeDay`). */
+  stamped: string;
   /** Each source that changed since, with the day of its newest commit — the newest first. */
   sources: Array<{ resource: string; day: string }>;
 };
+
+/**
+ * When a drifted concept was last checked, in words: its stamps' day — and, when a merge that brought
+ * that check counted for another of its sources, the merge's day too (a source can have changed
+ * between the two: after the check was made, before it was merged).
+ */
+export function checkedText(drift: Drift): string {
+  return drift.checked === drift.stamped ? drift.stamped : `${drift.stamped}, merged on ${drift.checked}`;
+}
 
 /** A `repo:` source as a path from the project root, or null when it names none (empty, or leaving the project with ".."). */
 function repoPath(resource: string): string | null {
@@ -994,8 +1008,11 @@ function novadevOwn(rel: string): boolean {
   return rel.split('/')[0] === ROOT_DIR_NAME;
 }
 
-/** The newest commit of a `repo:` source: the day it was made on (in the committer's offset) and its hash. */
-export type SourceChange = { day: string; commit: string };
+/**
+ * The newest commit of a `repo:` source on its repository's first-parent line: the day it was made on
+ * (in the committer's offset), its hash, and its parents' hashes (two or more: a merge).
+ */
+export type SourceChange = { day: string; commit: string; parents: string[] };
 
 /**
  * The concepts whose code moved on: a `repo:` source with a commit on a day after the concept was
@@ -1006,24 +1023,28 @@ export type SourceChange = { day: string; commit: string };
  * `.novadev/` (the audit notes it: every round commits there, so it would never settle) and a
  * deprecated concept: it is kept for history, never re-checked. The newest change first.
  *
- * The last check is the later of two days. One is the concept's own stamps (`lastChangeDay`). The
- * other is the day of the newest MERGE on the first-parent line that changed the concept's file.
- * A re-check is often made in a branch and merged on a later day: the stamps keep the branch's day,
- * while the code it re-checked counts from the merge's day. The merge brings the re-check in
- * together with that code, so the merge is the check, on its own day. It counts as a check only for
- * a source whose newest commit is on that same first-parent line, in the repository that holds the
- * bundle. A source in a nested repository has no such merge, so only the stamps count for it. A
- * commit that is not a merge never counts: its stamps are the check it carries. A commit that brings
- * in a whole bundle at once — an import, a project's first commit — checked nothing. A squash merge
- * or a rebase loses the branch's merge, so a re-check that lands that way still drifts until its
- * next stamp. `sourceLines` keeps that first-parent line for the run (one call to git), as
- * `sourceDays` keeps the sources'.
+ * The check is the concept's stamps (`lastChangeDay`). One merge more counts as a check, for one
+ * source: a re-check made in a branch together with the code it re-checked, merged on a later day.
+ * The stamps keep the branch's day, while the code counts from the merge's day. The source is not
+ * drifted when its newest commit IS that merge, and the merge
+ *  - brought new stamps for the concept: a `generated` or `verified` event its file did not have
+ *    in the merge's first parent (at its old path, when git's rename detection says the merge
+ *    moved it) — a change of its text, a move or a derived block alone checked nothing;
+ *  - brought only changes of the source made no later than the newest of those stamps — a re-check
+ *    made before more code on the same branch did not see that code;
+ *  - left nothing of the line's own: the line did not change the source since the branch left it
+ *    (or last merged it) — the re-check never saw what the line did meanwhile.
+ * Anything else stays drifted until the next stamp: a merge of the line into the branch, code that
+ * reached the line in another merge (even on the same day), a squash merge or a rebase (no merge is
+ * left), a plain commit (its stamps are the check it carries), a source of a nested repository (the
+ * merge is not on the bundle's line). Git is asked about such a merge only for the sources the stamps
+ * leave drifted; `mergeChecks` keeps its answers for the run, as `sourceDays` keeps the sources'.
  */
 export function sourceDrift(
   root: string,
   concepts: readonly Concept[],
   sourceDays: Map<string, SourceChange | null> = new Map(),
-  sourceLines: Map<string, LineCommit[] | null> = new Map(),
+  mergeChecks: Map<string, boolean> = new Map(),
 ): Drift[] {
   const cited = authoredConcepts(concepts).flatMap((concept) => {
     const checked = lastChangeDay(concept);
@@ -1050,7 +1071,7 @@ export function sourceDrift(
     const key = `${rel}\0${day}`;
     if (!sourceDays.has(key)) {
       const found = lastCommit(join(root, rel), `${addDays(day, -1)}T00:00:00Z`);
-      sourceDays.set(key, found === null ? null : { day: timestampDay(found.date), commit: found.commit });
+      sourceDays.set(key, found === null ? null : { day: timestampDay(found.date), commit: found.commit, parents: found.parents });
     }
     newest.set(rel, sourceDays.get(key) ?? null);
   }
@@ -1059,52 +1080,112 @@ export function sourceDrift(
   const byStamps = cited.flatMap(({ concept, checked, paths }) => {
     const changed = paths.flatMap(({ resource, rel }) => {
       const change = newest.get(rel) ?? null;
-      return change !== null && change.day > checked ? [{ resource, change }] : [];
+      return change !== null && change.day > checked ? [{ resource, rel, change }] : [];
     });
     return changed.length > 0 ? [{ concept, checked, changed }] : [];
   });
 
-  // The bundle repository's first-parent line, asked only when the stamps leave something drifted.
-  // It reaches back as far as the searches above, so it holds every newest commit they found on it.
-  const mergedOn = new Map<string, string>();
-  const onLine = new Set<string>();
-  if (byStamps.length > 0) {
-    const from = byStamps.reduce((day, { checked }) => (checked < day ? checked : day), byStamps[0]!.checked);
-    const first = byStamps[0]!.concept;
-    // The bundle's folder on disk: the concept's file without its path inside the bundle.
-    const bundle = join(first.file, ...first.path.split('/').map(() => '..'));
-    if (!sourceLines.has(from)) sourceLines.set(from, firstParentLine(bundle, `${addDays(from, -1)}T00:00:00Z`));
-    for (const { commit, date, merge, paths } of sourceLines.get(from) ?? []) {
-      onLine.add(commit);
-      if (!merge) continue;
-      const day = timestampDay(date);
-      for (const path of paths) {
-        const seen = mergedOn.get(path);
-        if (seen === undefined || day > seen) mergedOn.set(path, day);
-      }
+  // A source whose newest commit is a merge: did that merge bring a re-check of the concept with it?
+  const checkKey = (concept: Concept, rel: string, change: SourceChange) => `${change.commit}\0${concept.path}\0${rel}`;
+  const asked = byStamps.flatMap(({ concept, changed }) =>
+    changed
+      .filter(({ rel, change }) => change.parents.length > 1 && !mergeChecks.has(checkKey(concept, rel, change)))
+      .map(({ rel, change }) => ({ concept, rel, change })),
+  );
+  if (asked.length > 0) {
+    const brought = recheckDays(asked);
+    for (const { concept, rel, change } of asked) {
+      const day = brought.get(`${change.commit}\0${concept.path}`) ?? null;
+      mergeChecks.set(checkKey(concept, rel, change), day !== null && mergeSawSource(join(root, rel), change, day));
     }
   }
 
   const out: Drift[] = [];
   for (const { concept, checked, changed } of byStamps) {
-    // The day a merge last brought a change of the concept's file: a check, for the sources on that line.
-    const merged = mergedOn.get(concept.path);
-    const lineChecked = merged !== undefined && merged > checked ? merged : checked;
+    // The day of the newest merge that counted as the check of one of the concept's sources.
+    let mergeDay: string | null = null;
     const sources = new Map<string, string>();
-    for (const { resource, change } of changed) {
-      if (onLine.has(change.commit) && change.day <= lineChecked) continue;
+    for (const { resource, rel, change } of changed) {
+      if (change.parents.length > 1 && mergeChecks.get(checkKey(concept, rel, change)) === true) {
+        if (mergeDay === null || change.day > mergeDay) mergeDay = change.day;
+        continue;
+      }
       if (!sources.has(resource)) sources.set(resource, change.day);
     }
     if (sources.size === 0) continue;
     out.push({
       concept,
-      checked,
+      checked: mergeDay ?? checked,
+      stamped: checked,
       sources: [...sources]
         .map(([resource, day]) => ({ resource, day }))
         .sort((a, b) => byCodePoint(b.day, a.day) || byCodePoint(a.resource, b.resource)),
     });
   }
   return out.sort((a, b) => byCodePoint(b.sources[0]!.day, a.sources[0]!.day) || byCodePoint(a.concept.path, b.concept.path));
+}
+
+/**
+ * For each merge and concept: the day of the newest stamp the merge brought for the concept — a
+ * `generated` or `verified` event in its file at the merge that its file in the merge's first parent
+ * did not have — or null when it brought none (or git cannot tell). A file the merge moved is
+ * compared with its old path; a file the merge added brought all its stamps. Every file is read in
+ * one call to git; a move costs one more.
+ */
+function recheckDays(asked: ReadonlyArray<{ concept: Concept; change: SourceChange }>): Map<string, string | null> {
+  const pairs = [...new Map(asked.map((pair) => [`${pair.change.commit}\0${pair.concept.path}`, pair])).values()];
+  const days = new Map<string, string | null>();
+  // Every concept is of the same bundle: its folder on disk is a concept's file without its path in it.
+  const first = pairs[0]!.concept;
+  const bundle = join(first.file, ...first.path.split('/').map(() => '..'));
+  const texts = filesAtCommits(
+    bundle,
+    pairs.flatMap(({ concept, change }) => [
+      { commit: change.parents[0]!, path: concept.path },
+      { commit: change.commit, path: concept.path },
+    ]),
+  );
+  for (const [i, { concept, change }] of pairs.entries()) {
+    const key = `${change.commit}\0${concept.path}`;
+    const after = texts?.[2 * i + 1] ?? null;
+    let before = texts?.[2 * i] ?? null;
+    days.set(key, null);
+    if (after === null) continue;
+    if (before === null) {
+      const old = renamedFrom(bundle, change.parents[0]!, change.commit, concept.path);
+      if (old !== null) {
+        before = filesAtCommits(bundle, [{ commit: change.parents[0]!, path: old }])?.[0] ?? null;
+        // Moved, but its old text cannot be read: git cannot tell what the merge brought.
+        if (before === null) continue;
+      }
+    }
+    const events = (text: string | null): StampEvent[] => {
+      if (text === null) return [];
+      const read = readConceptText(bundle, concept.path, text);
+      return [read.generated, ...read.verified].flatMap((event) => (event?.at ? [{ by: event.by, at: event.at }] : []));
+    };
+    const had = new Set(events(before).map((event) => `${event.by}\0${event.at}`));
+    const newDays = events(after)
+      .filter((event) => !had.has(`${event.by}\0${event.at}`))
+      .map((event) => timestampDay(event.at));
+    if (newDays.length > 0) days.set(key, newDays.sort().at(-1)!);
+  }
+  return days;
+}
+
+/**
+ * Did the re-check a merge brought (its newest stamp of the day `recheck`) see every change of the
+ * source `path` that is in the merge? It did when the merged side changed the source only on or
+ * before that day, and the merge's own line did not change it since that side left it (or last
+ * merged it). The merge itself changed the source, so one side or the merge's own text did. Null
+ * answers of git count as no.
+ */
+function mergeSawSource(path: string, change: SourceChange, recheck: string): boolean {
+  const [line, ...merged] = change.parents;
+  const own = lastCommitBetween(path, [line!], merged);
+  if (own === null || own.found !== null) return false;
+  const theirs = lastCommitBetween(path, merged, [line!]);
+  return theirs !== null && theirs.found !== null && timestampDay(theirs.found.date) <= recheck;
 }
 
 // ---------------------------------------------------------------------------
